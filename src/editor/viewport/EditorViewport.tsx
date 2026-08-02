@@ -48,7 +48,16 @@ interface UniformScaleDragState {
   startScale: THREE.Vector3;
 }
 
-type ScaleDragState = AxisScaleDragState | UniformScaleDragState;
+interface CenterScaleDragState {
+  kind: 'center';
+  pointerId: number;
+  startPointer: THREE.Vector2;
+  startPosition: THREE.Vector3;
+  startScale: THREE.Vector3;
+  pixelsPerFactor: number;
+}
+
+type ScaleDragState = AxisScaleDragState | UniformScaleDragState | CenterScaleDragState;
 
 interface GroupDragState {
   proxyMatrix: THREE.Matrix4;
@@ -309,6 +318,33 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
   );
 }
 
+function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
+  mesh: THREE.Mesh;
+  bounds: THREE.Box3;
+  onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
+}) {
+  const handleRef = useRef<THREE.Mesh>(null);
+  const camera = useThree((state) => state.camera);
+
+  useFrame(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    mesh.updateMatrixWorld();
+    const localCenter = bounds.getCenter(new THREE.Vector3());
+    const distance = camera.position.distanceTo(mesh.position);
+    handle.position.copy(mesh.localToWorld(localCenter));
+    handle.quaternion.copy(camera.quaternion);
+    handle.scale.setScalar(Math.max(0.12, Math.min(0.3, distance * 0.02)) * SCALE_HANDLE_VISUAL_FACTOR);
+  });
+
+  return (
+    <mesh ref={handleRef} renderOrder={1003} onPointerDown={onPointerDown}>
+      <boxGeometry args={[0.82, 0.82, 0.82]} />
+      <meshBasicMaterial color="#ffffff" transparent opacity={0.98} depthTest={false} depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
 function CornerScaleHandle({ mesh, bounds, sides, onPointerDown }: {
   mesh: THREE.Mesh;
   bounds: THREE.Box3;
@@ -374,6 +410,11 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
   };
 
   const applySurfaceScaleSnap = (drag: ScaleDragState) => {
+    if (drag.kind === 'center') {
+      onSnapTargetChange(null);
+      return;
+    }
+
     if (!snap.surface || !isFormType(object.type)) {
       onSnapTargetChange(null);
       return;
@@ -449,6 +490,21 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
     if (!drag || event.pointerId !== drag.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
+
+    if (drag.kind === 'center') {
+      const upwardPixels = drag.startPointer.y - event.clientY;
+      let factor = Math.max(0.02, 1 + upwardPixels / drag.pixelsPerFactor);
+      if (snap.enabled && snap.scale > 0) {
+        factor = Math.max(0.02, Math.round(factor / snap.scale) * snap.scale);
+      }
+      mesh.scale.copy(drag.startScale).multiplyScalar(factor);
+      mesh.position.copy(drag.startPosition);
+      mesh.updateMatrixWorld();
+      onSnapTargetChange(null);
+      syncTransform();
+      return;
+    }
+
     const pointerDelta = new THREE.Vector2(event.clientX - drag.startPointer.x, event.clientY - drag.startPointer.y);
     const worldDelta = pointerDelta.dot(drag.screenAxis) / drag.pixelsPerWorldUnit;
 
@@ -533,6 +589,21 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
     beginDrag();
   };
 
+  const startCenterDrag = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    event.nativeEvent.preventDefault();
+    event.nativeEvent.stopImmediatePropagation();
+    dragRef.current = {
+      kind: 'center',
+      pointerId: event.pointerId,
+      startPointer: new THREE.Vector2(event.clientX, event.clientY),
+      startPosition: mesh.position.clone(),
+      startScale: mesh.scale.clone(),
+      pixelsPerFactor: 140
+    };
+    beginDrag();
+  };
+
   const startUniformDrag = (sides: CornerSides, event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     event.nativeEvent.preventDefault();
@@ -571,6 +642,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
 
   return (
     <>
+      <CenterScaleHandle mesh={mesh} bounds={bounds} onPointerDown={startCenterDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3653" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3653" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#8adb00" onPointerDown={startAxisDrag} />
