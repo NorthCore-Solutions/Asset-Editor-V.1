@@ -125,7 +125,16 @@ function EditorScene() {
         <shadowMaterial opacity={0.14} transparent />
       </mesh>
       {objects.map((object) => <SceneMesh key={object.id} object={object} />)}
-      <OrbitControls makeDefault enableDamping dampingFactor={0.08} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} />
+      <OrbitControls
+        makeDefault
+        enableDamping
+        dampingFactor={0.08}
+        mouseButtons={{
+          LEFT: THREE.MOUSE.PAN,
+          MIDDLE: THREE.MOUSE.PAN,
+          RIGHT: THREE.MOUSE.ROTATE
+        }}
+      />
       <CameraController />
     </>
   );
@@ -143,7 +152,7 @@ export function EditorViewport() {
       >
         <EditorScene />
       </Canvas>
-      <div className="viewport-hint">Linksklick: drehen · Rechts/Mitte: verschieben · Mausrad: zoomen</div>
+      <div className="viewport-hint">Linksklick: verschieben · Rechtsklick: drehen · Mittlere Maustaste: verschieben · Mausrad: zoomen</div>
     </div>
   );
 }
