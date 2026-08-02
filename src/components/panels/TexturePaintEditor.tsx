@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { PaintTextureData } from '../../types/editor';
 import {
   DEFAULT_PAINT_SIZE,
@@ -19,16 +19,15 @@ interface TexturePaintEditorProps {
   onCommit: (texture: PaintTextureData | undefined) => void;
 }
 
-const TOOL_LABELS: Array<{ tool: PaintTool; label: string }> = [
+const TOOLS: Array<{ tool: PaintTool; label: string }> = [
   { tool: 'brush', label: 'Pinsel' },
   { tool: 'eraser', label: 'Radierer' },
   { tool: 'fill', label: 'Füllen' },
   { tool: 'eyedropper', label: 'Pipette' }
 ];
 
-function cloneImage(image: ImageData): ImageData {
-  return new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
-}
+const cloneImage = (image: ImageData): ImageData =>
+  new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
 
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): [number, number] {
   const bounds = canvas.getBoundingClientRect();
@@ -51,7 +50,7 @@ function linePoints(from: [number, number], to: [number, number]): Array<[number
   for (;;) {
     points.push([x0, y0]);
     if (x0 === x1 && y0 === y1) break;
-    const doubled = 2 * error;
+    const doubled = error * 2;
     if (doubled >= dy) { error += dy; x0 += sx; }
     if (doubled <= dx) { error += dx; y0 += sy; }
   }
@@ -69,9 +68,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
   const [tool, setTool] = useState<PaintTool>('brush');
   const [paintColor, setPaintColor] = useState(baseColor);
   const [brushSize, setBrushSize] = useState(1);
-  const [historyVersion, setHistoryVersion] = useState(0);
-
-  const refreshHistoryControls = () => setHistoryVersion((value) => value + 1);
+  const [, refreshControls] = useState(0);
 
   const readCanvas = (): ImageData | null => {
     const canvas = canvasRef.current;
@@ -93,12 +90,9 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
   const commitCanvas = (): void => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    onCommit({
-      dataUrl: canvas.toDataURL('image/png'),
-      width: canvas.width,
-      height: canvas.height,
-      pixelated: true
-    });
+    const dataUrl = canvas.toDataURL('image/png');
+    loadedKeyRef.current = `${objectId}:${dataUrl}`;
+    onCommit({ dataUrl, width: canvas.width, height: canvas.height, pixelated: true });
   };
 
   useEffect(() => {
@@ -111,7 +105,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     loadedKeyRef.current = key;
     historyRef.current = [];
     futureRef.current = [];
-    refreshHistoryControls();
+    refreshControls((value) => value + 1);
 
     if (!texture) {
       canvas.width = DEFAULT_PAINT_SIZE;
@@ -130,14 +124,14 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
     };
     image.src = texture.dataUrl;
-  }, [baseColor, objectId, texture]);
+  }, [baseColor, objectId, texture?.dataUrl, texture?.height, texture?.width]);
 
   const pushHistory = (): void => {
     const current = readCanvas();
     if (!current) return;
     historyRef.current = [...historyRef.current.slice(-29), cloneImage(current)];
     futureRef.current = [];
-    refreshHistoryControls();
+    refreshControls((value) => value + 1);
   };
 
   const applyAt = (point: [number, number], previous?: [number, number]): void => {
@@ -156,16 +150,15 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
       floodFill(image, point[0], point[1], hexToRgba(paintColor));
     } else {
       const color = tool === 'eraser' ? hexToRgba('#000000', 0) : hexToRgba(paintColor);
-      for (const [x, y] of linePoints(previous ?? point, point)) paintBrush(image, x, y, brushSize, color);
+      linePoints(previous ?? point, point).forEach(([x, y]) => paintBrush(image, x, y, brushSize, color));
     }
 
     context.putImageData(image, 0, 0);
   };
 
-  const startPaint = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+  const startPaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     event.preventDefault();
-    const canvas = event.currentTarget;
-    const point = canvasPoint(canvas, event.clientX, event.clientY);
+    const point = canvasPoint(event.currentTarget, event.clientX, event.clientY);
 
     if (tool === 'eyedropper') {
       applyAt(point);
@@ -173,26 +166,26 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     }
 
     pushHistory();
-    drawingRef.current = true;
-    lastPointRef.current = point;
-    canvas.setPointerCapture(event.pointerId);
     applyAt(point);
 
     if (tool === 'fill') {
-      drawingRef.current = false;
-      lastPointRef.current = null;
       commitCanvas();
+      return;
     }
+
+    drawingRef.current = true;
+    lastPointRef.current = point;
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const continuePaint = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+  const continuePaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drawingRef.current || (tool !== 'brush' && tool !== 'eraser')) return;
     const point = canvasPoint(event.currentTarget, event.clientX, event.clientY);
     applyAt(point, lastPointRef.current ?? point);
     lastPointRef.current = point;
   };
 
-  const finishPaint = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+  const finishPaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
     lastPointRef.current = null;
@@ -208,7 +201,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     futureRef.current = [cloneImage(current), ...futureRef.current].slice(0, 30);
     writeCanvas(previous);
     commitCanvas();
-    refreshHistoryControls();
+    refreshControls((value) => value + 1);
   };
 
   const redo = (): void => {
@@ -219,7 +212,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     futureRef.current = futureRef.current.slice(1);
     writeCanvas(next);
     commitCanvas();
-    refreshHistoryControls();
+    refreshControls((value) => value + 1);
   };
 
   const clearTexture = (): void => {
@@ -227,13 +220,13 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     futureRef.current = [];
     loadedKeyRef.current = '';
     onCommit(undefined);
-    refreshHistoryControls();
+    refreshControls((value) => value + 1);
   };
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
-        {TOOL_LABELS.map((entry) => (
+        {TOOLS.map((entry) => (
           <button
             key={entry.tool}
             type="button"
@@ -276,18 +269,12 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
         ))}
       </div>
 
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 280,
-          justifySelf: 'center',
-          padding: 6,
-          border: '1px solid #425159',
-          borderRadius: 4,
-          backgroundImage: 'conic-gradient(#c7c7c7 25%, #eeeeee 0 50%, #c7c7c7 0 75%, #eeeeee 0)',
-          backgroundSize: '16px 16px'
-        }}
-      >
+      <div style={{
+        width: '100%', maxWidth: 280, justifySelf: 'center', padding: 6,
+        border: '1px solid #425159', borderRadius: 4,
+        backgroundImage: 'conic-gradient(#c7c7c7 25%, #eeeeee 0 50%, #c7c7c7 0 75%, #eeeeee 0)',
+        backgroundSize: '16px 16px'
+      }}>
         <canvas
           ref={canvasRef}
           onPointerDown={startPaint}
@@ -303,7 +290,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
         <button type="button" disabled={futureRef.current.length === 0} onClick={redo}>Wiederholen</button>
         <button type="button" className="danger" disabled={!texture} onClick={clearTexture}>Bemalung entfernen</button>
       </div>
-      <small key={historyVersion}>32×32-Pixeltextur · Pinsel, Radierer, Füllen und Pipette</small>
+      <small>32×32-Pixeltextur · Pinsel, Radierer, Füllen und Pipette</small>
     </div>
   );
 }
