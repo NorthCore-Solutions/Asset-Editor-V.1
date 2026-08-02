@@ -7,7 +7,14 @@ export interface RgbaColor {
   a: number;
 }
 
-export const DEFAULT_PAINT_SIZE = 32;
+export interface PixelRegion {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+export const DEFAULT_PAINT_SIZE = 128;
 
 export function hexToRgba(hex: string, alpha = 255): RgbaColor {
   const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.slice(1) : '000000';
@@ -83,17 +90,22 @@ export function paintBrush(
   }
 }
 
-// Scanline-Füllung nach dem von LibreSprite verwendeten Segmentprinzip:
-// Eine horizontale Strecke wird vollständig gefüllt, anschließend werden nur
-// die angrenzenden Strecken ober- und unterhalb weiterverfolgt.
+// Scanline-Füllung nach dem von LibreSprite verwendeten Segmentprinzip.
+// Optional kann die Füllung auf den Pixelbereich einer einzelnen UV-Insel begrenzt werden.
 export function floodFill(
   image: ImageData,
   startX: number,
   startY: number,
   replacement: RgbaColor,
-  tolerance = 0
+  tolerance = 0,
+  region?: PixelRegion
 ): void {
-  if (startX < 0 || startY < 0 || startX >= image.width || startY >= image.height) return;
+  const minX = Math.max(0, Math.min(image.width - 1, region?.minX ?? 0));
+  const maxX = Math.max(minX, Math.min(image.width - 1, region?.maxX ?? image.width - 1));
+  const minY = Math.max(0, Math.min(image.height - 1, region?.minY ?? 0));
+  const maxY = Math.max(minY, Math.min(image.height - 1, region?.maxY ?? image.height - 1));
+
+  if (startX < minX || startY < minY || startX > maxX || startY > maxY) return;
 
   const source = readPixel(image, startX, startY);
   if (colorsEqual(source, replacement, 0)) return;
@@ -103,16 +115,16 @@ export function floodFill(
 
   while (stack.length > 0) {
     const [seedX, y] = stack.pop() as [number, number];
-    if (y < 0 || y >= image.height) continue;
+    if (y < minY || y > maxY) continue;
 
     let left = seedX;
-    while (left >= 0 && colorsEqual(readPixel(image, left, y), source, tolerance)) left -= 1;
+    while (left >= minX && colorsEqual(readPixel(image, left, y), source, tolerance)) left -= 1;
     left += 1;
 
     let spanAbove = false;
     let spanBelow = false;
 
-    for (let x = left; x < image.width; x += 1) {
+    for (let x = left; x <= maxX; x += 1) {
       if (!colorsEqual(readPixel(image, x, y), source, tolerance)) break;
 
       const index = y * image.width + x;
@@ -121,7 +133,7 @@ export function floodFill(
         writePixel(image, x, y, replacement);
       }
 
-      if (y > 0) {
+      if (y > minY) {
         const matchesAbove = colorsEqual(readPixel(image, x, y - 1), source, tolerance);
         if (matchesAbove && !spanAbove) {
           stack.push([x, y - 1]);
@@ -131,7 +143,7 @@ export function floodFill(
         }
       }
 
-      if (y + 1 < image.height) {
+      if (y < maxY) {
         const matchesBelow = colorsEqual(readPixel(image, x, y + 1), source, tolerance);
         if (matchesBelow && !spanBelow) {
           stack.push([x, y + 1]);
