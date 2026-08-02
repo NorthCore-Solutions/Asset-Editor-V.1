@@ -93,6 +93,13 @@ Die Build-Ausgabe liegt anschließend unter `dist/`.
 
 Tastenkürzel werden in Eingabefeldern nicht ausgelöst.
 
+### Maussteuerung
+
+- Linke Maustaste: Kamera verschieben
+- Rechte Maustaste: Kamera drehen
+- Mittlere Maustaste: Kamera verschieben
+- Mausrad: zoomen
+
 ## Projektformat
 
 Das Format ist reines JSON und führt keinen Code aus.
