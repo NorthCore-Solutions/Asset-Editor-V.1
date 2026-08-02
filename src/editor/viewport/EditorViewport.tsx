@@ -318,30 +318,64 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
   );
 }
 
-function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
+function CenterScaleHandle({ mesh, onPointerDown }: {
   mesh: THREE.Mesh;
-  bounds: THREE.Box3;
   onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
 }) {
-  const handleRef = useRef<THREE.Mesh>(null);
+  const handleRef = useRef<THREE.Group>(null);
   const camera = useThree((state) => state.camera);
 
   useFrame(() => {
     const handle = handleRef.current;
     if (!handle) return;
-    mesh.updateMatrixWorld();
-    const localCenter = bounds.getCenter(new THREE.Vector3());
-    const distance = camera.position.distanceTo(mesh.position);
-    handle.position.copy(mesh.localToWorld(localCenter));
-    handle.quaternion.copy(camera.quaternion);
-    handle.scale.setScalar(Math.max(0.12, Math.min(0.3, distance * 0.02)) * SCALE_HANDLE_VISUAL_FACTOR);
+
+    mesh.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    const worldPosition = mesh.getWorldPosition(new THREE.Vector3());
+    const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
+    let factor = 1;
+
+    if ((camera as THREE.OrthographicCamera).isOrthographicCamera) {
+      const orthographic = camera as THREE.OrthographicCamera;
+      factor = (orthographic.top - orthographic.bottom) / orthographic.zoom;
+    } else if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      const perspective = camera as THREE.PerspectiveCamera;
+      factor = worldPosition.distanceTo(cameraPosition)
+        * Math.min(1.9 * Math.tan(Math.PI * perspective.fov / 360) / perspective.zoom, 7);
+    }
+
+    handle.position.copy(worldPosition);
+    handle.quaternion.identity();
+    handle.scale.setScalar(factor * 1.15 / 4);
   });
 
   return (
-    <mesh ref={handleRef} renderOrder={1003} onPointerDown={onPointerDown}>
-      <boxGeometry args={[0.82, 0.82, 0.82]} />
-      <meshBasicMaterial color="#ffffff" transparent opacity={0.98} depthTest={false} depthWrite={false} toneMapped={false} />
-    </mesh>
+    <group ref={handleRef} renderOrder={Infinity}>
+      <mesh renderOrder={Infinity}>
+        <octahedronGeometry args={[0.1, 0]} />
+        <meshBasicMaterial
+          color="#ffffff"
+          transparent
+          opacity={0.25}
+          depthTest={false}
+          depthWrite={false}
+          fog={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh renderOrder={Infinity} onPointerDown={onPointerDown}>
+        <octahedronGeometry args={[0.2, 0]} />
+        <meshBasicMaterial
+          color="#ffffff"
+          transparent
+          opacity={0}
+          depthTest={false}
+          depthWrite={false}
+          fog={false}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -642,7 +676,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
 
   return (
     <>
-      <CenterScaleHandle mesh={mesh} bounds={bounds} onPointerDown={startCenterDrag} />
+      <CenterScaleHandle mesh={mesh} onPointerDown={startCenterDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3653" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3653" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#8adb00" onPointerDown={startAxisDrag} />
