@@ -25,7 +25,7 @@ const fragmentShader = `
   float gridLine(float value) {
     float fraction = fract(value);
     float distanceToLine = min(fraction, 1.0 - fraction);
-    return 1.0 - smoothstep(0.025, 0.075, distanceToLine);
+    return 1.0 - smoothstep(0.006, 0.022, distanceToLine);
   }
 
   void main() {
@@ -39,7 +39,7 @@ const fragmentShader = `
     float pattern = dot(vec3(onXFace, onYFace, onZFace), normalWeight);
     float alpha = pattern * uOpacity;
 
-    if (alpha < 0.02) discard;
+    if (alpha < 0.012) discard;
     gl_FragColor = vec4(uColor, alpha);
   }
 `;
@@ -55,7 +55,7 @@ export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }
   const uniforms = useMemo(() => ({
     uColor: { value: new THREE.Color('#EFFF00') },
     uCellSize: { value: Math.max(0.05, Math.abs(cellSize)) },
-    uOpacity: { value: highlighted ? 0.98 : 0.52 }
+    uOpacity: { value: highlighted ? 0.76 : 0.32 }
   }), [cellSize, highlighted]);
 
   return (
