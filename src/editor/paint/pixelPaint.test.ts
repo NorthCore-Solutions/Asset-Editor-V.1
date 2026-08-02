@@ -41,6 +41,21 @@ describe('Pixelbemalung', () => {
     expect(samplePixel(target, 4, 4)).toEqual(border);
   });
 
+  it('begrenzt die Füllung auf die ausgewählte UV-Insel', () => {
+    const target = image(8, 4);
+    floodFill(target, 1, 1, hexToRgba('#FF0000'), 0, {
+      minX: 0,
+      minY: 0,
+      maxX: 3,
+      maxY: 3
+    });
+
+    expect(samplePixel(target, 1, 1)).toEqual(hexToRgba('#FF0000'));
+    expect(samplePixel(target, 3, 3)).toEqual(hexToRgba('#FF0000'));
+    expect(samplePixel(target, 4, 1)).toEqual(hexToRgba('#FFFFFF'));
+    expect(samplePixel(target, 7, 3)).toEqual(hexToRgba('#FFFFFF'));
+  });
+
   it('kann Pixel vollständig transparent radieren', () => {
     const target = image(2, 2, hexToRgba('#336699'));
     paintBrush(target, 1, 1, 1, hexToRgba('#000000', 0));
