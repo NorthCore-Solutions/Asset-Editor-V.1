@@ -132,7 +132,6 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
 
   useEffect(() => subscribeSurfacePaint((settings) => {
     setPaintColor(settings.color);
-    if (settings.enabled) setColorTarget('paint');
   }), []);
 
   const paintAtlas = useMemo(() => {
@@ -166,6 +165,7 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const changeBaseColor = (normalized: string): void => {
     const previousColor = object.material.color;
     const paintTexture = object.material.paintTexture;
+    const sourceDataUrl = paintTexture?.dataUrl;
     const requestId = ++recolorRequestRef.current;
 
     setMaterial({ color: normalized });
@@ -173,8 +173,10 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
 
     void recolorTextureBackground(paintTexture, previousColor, normalized)
       .then((updatedTexture) => {
-        if (recolorRequestRef.current !== requestId) return;
-        setMaterial({ paintTexture: updatedTexture }, false);
+        const currentObject = useEditorStore.getState().objects.find((item) => item.id === object.id);
+        const currentDataUrl = currentObject?.material.paintTexture?.dataUrl;
+        if (recolorRequestRef.current !== requestId || currentDataUrl !== sourceDataUrl) return;
+        updateMaterial(object.id, { paintTexture: updatedTexture }, false);
       })
       .catch(() => undefined);
   };
@@ -183,6 +185,11 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
     const normalized = color.toUpperCase();
     if (colorTarget === 'base') changeBaseColor(normalized);
     else setSurfacePaintSettings({ color: normalized });
+  };
+
+  const commitPaintTexture = (paintTexture: PaintTextureData | undefined): void => {
+    recolorRequestRef.current += 1;
+    setMaterial({ paintTexture });
   };
 
   return (
@@ -241,7 +248,10 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
             baseColor={object.material.color}
             texture={object.material.paintTexture}
             atlas={paintAtlas}
-            onCommit={(paintTexture) => setMaterial({ paintTexture })}
+            onCommit={commitPaintTexture}
+            onPaintModeChange={(enabled) => {
+              if (enabled) setColorTarget('paint');
+            }}
           />
         </section>
       </div>
