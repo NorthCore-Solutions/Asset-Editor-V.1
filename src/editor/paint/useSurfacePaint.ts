@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEditorStore } from '../../store/editorStore';
@@ -133,20 +133,26 @@ export function useSurfacePaint(
   const updateMaterial = useEditorStore((state) => state.updateMaterial);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
-  const surface = useMemo(() => createSurface(object.material.color), [object.id]);
+  const [surface] = useState<PaintSurface>(() => createSurface(object.material.color));
   const loadedDataUrlRef = useRef<string | null>(null);
   const requestedDataUrlRef = useRef<string | null>(null);
   const activePointerRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const changedRef = useRef(false);
+  const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
-  const textureVisible = active || Boolean(object.material.paintTexture);
+  const textureVisible = active || Boolean(paintTexture);
 
-  useEffect(() => () => surface.texture.dispose(), [surface]);
+  useEffect(() => () => {
+    if (activePointerRef.current !== null) {
+      activePointerRef.current = null;
+      endTransaction();
+    }
+    surface.texture.dispose();
+  }, [endTransaction, surface]);
 
   useEffect(() => {
-    const paint = object.material.paintTexture;
-    if (!paint) {
+    if (!paintTexture) {
       requestedDataUrlRef.current = null;
       loadedDataUrlRef.current = null;
       resizeSurface(surface, DEFAULT_PAINT_SIZE, DEFAULT_PAINT_SIZE);
@@ -154,27 +160,27 @@ export function useSurfacePaint(
       return;
     }
 
-    if (loadedDataUrlRef.current === paint.dataUrl || requestedDataUrlRef.current === paint.dataUrl) return;
-    requestedDataUrlRef.current = paint.dataUrl;
+    if (loadedDataUrlRef.current === paintTexture.dataUrl || requestedDataUrlRef.current === paintTexture.dataUrl) return;
+    requestedDataUrlRef.current = paintTexture.dataUrl;
     const image = new Image();
 
     image.onload = () => {
-      if (requestedDataUrlRef.current !== paint.dataUrl) return;
-      resizeSurface(surface, paint.width, paint.height);
+      if (requestedDataUrlRef.current !== paintTexture.dataUrl) return;
+      resizeSurface(surface, paintTexture.width, paintTexture.height);
       surface.context.clearRect(0, 0, surface.canvas.width, surface.canvas.height);
       surface.context.imageSmoothingEnabled = false;
       surface.context.drawImage(image, 0, 0, surface.canvas.width, surface.canvas.height);
-      loadedDataUrlRef.current = paint.dataUrl;
+      loadedDataUrlRef.current = paintTexture.dataUrl;
       requestedDataUrlRef.current = null;
       surface.texture.needsUpdate = true;
     };
 
     image.onerror = () => {
-      if (requestedDataUrlRef.current === paint.dataUrl) requestedDataUrlRef.current = null;
+      if (requestedDataUrlRef.current === paintTexture.dataUrl) requestedDataUrlRef.current = null;
     };
 
-    image.src = paint.dataUrl;
-  }, [object.material.color, object.material.paintTexture, surface]);
+    image.src = paintTexture.dataUrl;
+  }, [object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
 
   const persist = (): void => {
     const dataUrl = surface.canvas.toDataURL('image/png');
@@ -220,7 +226,7 @@ export function useSurfacePaint(
   };
 
   const finishStroke = (event: ThreeEvent<PointerEvent>): void => {
-    if (!active || activePointerRef.current !== event.pointerId) return;
+    if (activePointerRef.current !== event.pointerId) return;
     blockEvent(event);
     activePointerRef.current = null;
     lastPointRef.current = null;
@@ -260,7 +266,7 @@ export function useSurfacePaint(
       target.setPointerCapture?.(event.pointerId);
     },
     onPointerMove: (event) => {
-      if (!active || activePointerRef.current !== event.pointerId) return;
+      if (activePointerRef.current !== event.pointerId) return;
       blockEvent(event);
       const point = pointFromUv(surface, event.uv);
       if (!point) {
@@ -273,7 +279,7 @@ export function useSurfacePaint(
         ? Math.abs(previous[0] - point[0]) > surface.canvas.width / 2
           || Math.abs(previous[1] - point[1]) > surface.canvas.height / 2
         : false;
-      changedRef.current = paintAt(surface ? point : point, crossesUvSeam ? null : previous) || changedRef.current;
+      changedRef.current = paintAt(point, crossesUvSeam ? null : previous) || changedRef.current;
       lastPointRef.current = point;
     },
     onPointerUp: finishStroke,
