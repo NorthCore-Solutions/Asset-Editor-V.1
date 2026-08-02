@@ -984,13 +984,16 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
       {groupMovable && <GroupTransformControls selectedIds={selectedIds} registry={registry} tool={tool} snap={snap} onTransformDraggingChange={setTransformDragging} />}
       <OrbitControls
         makeDefault
-        enabled={!paintSettings.enabled && !transformDragging && !selectionActive}
+        enabled={!transformDragging && !selectionActive}
+        enablePan={!paintSettings.enabled}
+        enableRotate={!paintSettings.enabled}
+        enableZoom
         enableDamping
         dampingFactor={0.08}
         mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }}
       />
       <KeyboardCameraControls active={!paintSettings.enabled && keyboardActive && !transformDragging && !selectionActive} />
-      <CameraController active={!paintSettings.enabled} />
+      <CameraController active />
       <SelectionBridge registry={registry} onReady={onSelectionApi} />
     </>
   );
@@ -1143,7 +1146,7 @@ export function EditorViewport() {
       )}
       <div className="viewport-hint">
         {paintSettings.enabled
-          ? 'Malmodus: Kamera und Transformation gesperrt'
+          ? 'Malmodus: Mausrad-Zoom und Perspektivwechsel verfügbar · Transformation gesperrt'
           : 'Strg + Linksklick-Ziehen: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren'}
       </div>
     </div>
