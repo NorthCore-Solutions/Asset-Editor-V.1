@@ -60,7 +60,7 @@
   height: 8px;
   pointer-events: none;
   background: var(--panel);
-  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .workspace > .hierarchy {
