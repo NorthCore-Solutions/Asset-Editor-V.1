@@ -58,6 +58,7 @@ export interface Snapshot {
 
 export interface SnapSettings {
   enabled: boolean;
+  surface: boolean;
   position: number;
   rotation: number;
   scale: number;
