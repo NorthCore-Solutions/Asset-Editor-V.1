@@ -1,14 +1,103 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData } from '../../types/editor';
 
+interface OrbitControlApi {
+  target: THREE.Vector3;
+  update: () => void;
+}
+
+const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
+
+function KeyboardCameraControls({ active }: { active: boolean }) {
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
+  const pressedKeys = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!active) {
+      pressedKeys.current.clear();
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (!CAMERA_KEYS.has(key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      pressedKeys.current.add(key);
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (!CAMERA_KEYS.has(key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      pressedKeys.current.delete(key);
+    };
+
+    const clearKeys = () => pressedKeys.current.clear();
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('blur', clearKeys);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('blur', clearKeys);
+      pressedKeys.current.clear();
+    };
+  }, [active]);
+
+  useFrame((_, delta) => {
+    if (!active || !controls || pressedKeys.current.size === 0) return;
+
+    const forward = new THREE.Vector3().subVectors(controls.target, camera.position);
+    forward.y = 0;
+    if (forward.lengthSq() < 0.000001) {
+      camera.getWorldDirection(forward);
+      forward.y = 0;
+    }
+    forward.normalize();
+
+    const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+    const translation = new THREE.Vector3();
+
+    if (pressedKeys.current.has('w')) translation.add(forward);
+    if (pressedKeys.current.has('s')) translation.sub(forward);
+    if (pressedKeys.current.has('a')) translation.sub(right);
+    if (pressedKeys.current.has('d')) translation.add(right);
+
+    if (translation.lengthSq() > 0) {
+      translation.normalize().multiplyScalar(4.5 * delta);
+      camera.position.add(translation);
+      controls.target.add(translation);
+    }
+
+    const rotationDirection = Number(pressedKeys.current.has('q')) - Number(pressedKeys.current.has('e'));
+    if (rotationDirection !== 0) {
+      const offset = camera.position.clone().sub(controls.target);
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationDirection * 1.6 * delta);
+      camera.position.copy(controls.target).add(offset);
+    }
+
+    camera.updateMatrixWorld();
+    controls.update();
+  });
+
+  return null;
+}
+
 function CameraController() {
   const camera = useThree((state) => state.camera);
-  const controls = useThree((state) => state.controls) as unknown as { target: THREE.Vector3; update: () => void } | undefined;
+  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const cameraView = useEditorStore((state) => state.cameraView);
   const cameraRequestId = useEditorStore((state) => state.cameraRequestId);
 
@@ -108,7 +197,7 @@ function SceneMesh({ object }: { object: SceneObjectData }) {
   );
 }
 
-function EditorScene() {
+function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
   const objects = useEditorStore((state) => state.objects);
   const scene = useEditorStore((state) => state.scene);
   const select = useEditorStore((state) => state.select);
@@ -135,6 +224,7 @@ function EditorScene() {
           RIGHT: THREE.MOUSE.ROTATE
         }}
       />
+      <KeyboardCameraControls active={keyboardActive} />
       <CameraController />
     </>
   );
@@ -142,17 +232,27 @@ function EditorScene() {
 
 export function EditorViewport() {
   const select = useEditorStore((state) => state.select);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [keyboardActive, setKeyboardActive] = useState(false);
+
   return (
-    <div className="viewport">
+    <div
+      ref={viewportRef}
+      className="viewport"
+      tabIndex={0}
+      onPointerDownCapture={() => viewportRef.current?.focus()}
+      onFocus={() => setKeyboardActive(true)}
+      onBlur={() => setKeyboardActive(false)}
+    >
       <Canvas
         shadows
         camera={{ position: [6, 5, 7], fov: 45, near: 0.05, far: 500 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
         onPointerMissed={() => select(null)}
       >
-        <EditorScene />
+        <EditorScene keyboardActive={keyboardActive} />
       </Canvas>
-      <div className="viewport-hint">Linksklick: verschieben · Rechtsklick: drehen · Mittlere Maustaste: verschieben · Mausrad: zoomen</div>
+      <div className="viewport-hint">Links: verschieben · Rechts: drehen · WASD: bewegen · Q/E: drehen · Mausrad: zoomen</div>
     </div>
   );
 }
