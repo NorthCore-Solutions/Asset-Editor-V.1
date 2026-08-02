@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
+import type { TransformControls as TransformControlsImpl } from 'three/addons/controls/TransformControls.js';
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
 import { useEditorStore } from '../../store/editorStore';
@@ -11,8 +12,33 @@ interface OrbitControlApi {
   update: () => void;
 }
 
+type ScaleAxis = 'X' | 'Y' | 'Z';
+
+interface ScaleDragState {
+  axis: ScaleAxis;
+  anchorCoordinate: number;
+  startPosition: THREE.Vector3;
+  startQuaternion: THREE.Quaternion;
+  startScale: THREE.Vector3;
+}
+
 const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const GRID_EXTENT = 400;
+
+const isScaleAxis = (axis: string | null | undefined): axis is ScaleAxis =>
+  axis === 'X' || axis === 'Y' || axis === 'Z';
+
+const axisValue = (vector: THREE.Vector3, axis: ScaleAxis): number => {
+  if (axis === 'X') return vector.x;
+  if (axis === 'Y') return vector.y;
+  return vector.z;
+};
+
+const axisVector = (axis: ScaleAxis, value: number): THREE.Vector3 => {
+  if (axis === 'X') return new THREE.Vector3(value, 0, 0);
+  if (axis === 'Y') return new THREE.Vector3(0, value, 0);
+  return new THREE.Vector3(0, 0, value);
+};
 
 function KeyboardCameraControls({ active }: { active: boolean }) {
   const camera = useThree((state) => state.camera);
@@ -147,6 +173,8 @@ function SceneMesh({
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const [mesh, setMesh] = useState<THREE.Mesh | null>(null);
+  const transformControlsRef = useRef<TransformControlsImpl>(null);
+  const scaleDragRef = useRef<ScaleDragState | null>(null);
   const geometry = useMemo(
     () => createGeometry({ type: object.type, geometry: object.geometry }),
     [object.geometry, object.type]
@@ -156,22 +184,66 @@ function SceneMesh({
   useEffect(() => () => geometry.dispose(), [geometry]);
 
   const startTransform = () => {
+    scaleDragRef.current = null;
+
+    if (tool === 'scale' && mesh) {
+      const axis = transformControlsRef.current?.axis;
+      geometry.computeBoundingBox();
+      const bounds = geometry.boundingBox;
+
+      if (bounds && isScaleAxis(axis)) {
+        const anchorCoordinate = axis === 'X'
+          ? bounds.min.x
+          : axis === 'Y'
+            ? bounds.min.y
+            : bounds.min.z;
+
+        scaleDragRef.current = {
+          axis,
+          anchorCoordinate,
+          startPosition: mesh.position.clone(),
+          startQuaternion: mesh.quaternion.clone(),
+          startScale: mesh.scale.clone()
+        };
+      }
+    }
+
     beginTransaction();
     onTransformDraggingChange(true);
   };
 
+  const applyOneSidedScale = () => {
+    const scaleDrag = scaleDragRef.current;
+    if (!mesh || !scaleDrag || tool !== 'scale') return;
+
+    const startScale = axisValue(scaleDrag.startScale, scaleDrag.axis);
+    const currentScale = axisValue(mesh.scale, scaleDrag.axis);
+    const localOffset = axisVector(
+      scaleDrag.axis,
+      scaleDrag.anchorCoordinate * (startScale - currentScale)
+    );
+
+    localOffset.applyQuaternion(scaleDrag.startQuaternion);
+    mesh.position.copy(scaleDrag.startPosition).add(localOffset);
+    mesh.updateMatrixWorld();
+  };
+
   const stopTransform = () => {
     if (!mesh) {
+      scaleDragRef.current = null;
       onTransformDraggingChange(false);
       endTransaction();
       return;
     }
+
+    applyOneSidedScale();
 
     const position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
     const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
     const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
 
     updateObject(object.id, { position, rotation, scale }, false);
+    scaleDragRef.current = null;
     endTransaction();
     onTransformDraggingChange(false);
   };
@@ -207,6 +279,7 @@ function SceneMesh({
 
       {selected && !object.locked && object.visible && mesh && (
         <TransformControls
+          ref={transformControlsRef}
           object={mesh}
           mode={tool}
           space="world"
@@ -215,6 +288,7 @@ function SceneMesh({
           rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
           scaleSnap={snap.enabled ? snap.scale : undefined}
           onMouseDown={startTransform}
+          onObjectChange={applyOneSidedScale}
           onMouseUp={stopTransform}
         />
       )}
