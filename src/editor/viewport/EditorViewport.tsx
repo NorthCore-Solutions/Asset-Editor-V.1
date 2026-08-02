@@ -8,7 +8,6 @@ import type { SceneObjectData } from '../../types/editor';
 
 interface OrbitControlApi {
   target: THREE.Vector3;
-  enabled: boolean;
   update: () => void;
 }
 
@@ -129,6 +128,7 @@ function CameraController() {
     controls?.update();
     camera.updateProjectionMatrix();
   }, [camera, cameraRequestId, cameraView, controls]);
+
   return null;
 }
 
@@ -143,12 +143,10 @@ function SceneMesh({
   const select = useEditorStore((state) => state.select);
   const tool = useEditorStore((state) => state.tool);
   const snap = useEditorStore((state) => state.snap);
-  const updateTransform = useEditorStore((state) => state.updateTransform);
+  const updateObject = useEditorStore((state) => state.updateObject);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
-  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
-  const meshRef = useRef<THREE.Mesh>(null);
-  const draggingRef = useRef(false);
+  const [mesh, setMesh] = useState<THREE.Mesh | null>(null);
   const geometry = useMemo(
     () => createGeometry({ type: object.type, geometry: object.geometry }),
     [object.geometry, object.type]
@@ -156,89 +154,71 @@ function SceneMesh({
   const selected = selectedId === object.id;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
-  useEffect(() => () => {
-    if (controls) controls.enabled = true;
-  }, [controls]);
-
-  const removeReleaseListeners = () => {
-    window.removeEventListener('pointerup', stopTransform, true);
-    window.removeEventListener('pointercancel', stopTransform, true);
-    window.removeEventListener('blur', stopTransform, true);
-  };
-
-  const commitMeshTransform = () => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-
-    updateTransform(object.id, 'position', [mesh.position.x, mesh.position.y, mesh.position.z], false);
-    updateTransform(object.id, 'rotation', [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z], false);
-    updateTransform(object.id, 'scale', [mesh.scale.x, mesh.scale.y, mesh.scale.z], false);
-  };
-
-  function stopTransform() {
-    if (!draggingRef.current) return;
-
-    draggingRef.current = false;
-    removeReleaseListeners();
-    commitMeshTransform();
-    endTransaction();
-    onTransformDraggingChange(false);
-    if (controls) controls.enabled = true;
-  }
 
   const startTransform = () => {
-    if (draggingRef.current) return;
-
-    draggingRef.current = true;
-    if (controls) controls.enabled = false;
     beginTransaction();
     onTransformDraggingChange(true);
-
-    window.addEventListener('pointerup', stopTransform, true);
-    window.addEventListener('pointercancel', stopTransform, true);
-    window.addEventListener('blur', stopTransform, true);
   };
 
-  const mesh = (
-    <mesh
-      ref={meshRef}
-      name={object.name}
-      geometry={geometry}
-      position={object.position}
-      rotation={object.rotation}
-      scale={object.scale}
-      visible={object.visible}
-      castShadow
-      receiveShadow
-      onClick={(event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); select(object.id); }}
-    >
-      <meshStandardMaterial
-        color={object.material.color}
-        roughness={object.material.roughness}
-        metalness={object.material.metalness}
-        opacity={object.material.opacity}
-        transparent={object.material.opacity < 1}
-        flatShading={object.material.flatShading}
-        emissive={selected ? '#163b25' : '#000000'}
-        emissiveIntensity={selected ? 0.55 : 0}
-      />
-    </mesh>
-  );
+  const stopTransform = () => {
+    if (!mesh) {
+      onTransformDraggingChange(false);
+      endTransaction();
+      return;
+    }
 
-  if (!selected || object.locked || !object.visible) return mesh;
+    const position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
+    const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
+    const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
+
+    updateObject(object.id, { position, rotation, scale }, false);
+    endTransaction();
+    onTransformDraggingChange(false);
+  };
+
   return (
-    <TransformControls
-      mode={tool}
-      space="world"
-      size={1.05}
-      translationSnap={snap.enabled ? snap.position : undefined}
-      rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
-      scaleSnap={snap.enabled ? snap.scale : undefined}
-      onMouseDown={startTransform}
-      onMouseUp={stopTransform}
-    >
-      {mesh}
-    </TransformControls>
+    <>
+      <mesh
+        ref={setMesh}
+        name={object.name}
+        geometry={geometry}
+        position={object.position}
+        rotation={object.rotation}
+        scale={object.scale}
+        visible={object.visible}
+        castShadow
+        receiveShadow
+        onClick={(event: ThreeEvent<MouseEvent>) => {
+          event.stopPropagation();
+          select(object.id);
+        }}
+      >
+        <meshStandardMaterial
+          color={object.material.color}
+          roughness={object.material.roughness}
+          metalness={object.material.metalness}
+          opacity={object.material.opacity}
+          transparent={object.material.opacity < 1}
+          flatShading={object.material.flatShading}
+          emissive={selected ? '#163b25' : '#000000'}
+          emissiveIntensity={selected ? 0.55 : 0}
+        />
+      </mesh>
+
+      {selected && !object.locked && object.visible && mesh && (
+        <TransformControls
+          object={mesh}
+          mode={tool}
+          space="world"
+          size={1.15}
+          translationSnap={snap.enabled ? snap.position : undefined}
+          rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
+          scaleSnap={snap.enabled ? snap.scale : undefined}
+          onMouseDown={startTransform}
+          onMouseUp={stopTransform}
+        />
+      )}
+    </>
   );
 }
 
@@ -277,11 +257,22 @@ function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
     <>
       <color attach="background" args={[scene.background]} />
       <ambientLight intensity={1.4} />
-      <directionalLight position={[6, 10, 5]} intensity={2.1} castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
+      <directionalLight
+        position={[6, 10, 5]}
+        intensity={2.1}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+      />
       <hemisphereLight args={['#dbe7ee', '#2a312c', 0.8]} />
       {scene.gridVisible && <StableGrid cellSize={scene.gridSize} />}
       {scene.axesVisible && <axesHelper args={[3]} />}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={() => select(null)}>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.01, 0]}
+        receiveShadow
+        onClick={() => select(null)}
+      >
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
@@ -331,7 +322,9 @@ export function EditorViewport() {
       >
         <EditorScene keyboardActive={keyboardActive} />
       </Canvas>
-      <div className="viewport-hint">Links: verschieben · Rechts: drehen · Gizmo mit Links ziehen · WASD: bewegen · Q/E: drehen · Mausrad: zoomen</div>
+      <div className="viewport-hint">
+        Links: verschieben · Rechts: drehen · Gizmo mit Links ziehen · WASD: bewegen · Q/E: drehen · Mausrad: zoomen
+      </div>
     </div>
   );
 }
