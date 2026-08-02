@@ -85,7 +85,7 @@ interface MarqueeState {
 
 const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const GRID_EXTENT = 400;
-const SCALE_HANDLE_VISUAL_FACTOR = 0.5;
+const SCALE_HANDLE_SIZE_RATIO = 0.06;
 const CORNERS: CornerSides[] = [
   [-1, -1, -1], [-1, -1, 1], [-1, 1, -1], [-1, 1, 1],
   [1, -1, -1], [1, -1, 1], [1, 1, -1], [1, 1, 1]
@@ -119,6 +119,16 @@ const cornerPoint = (bounds: THREE.Box3, sides: CornerSides): THREE.Vector3 => n
   sides[1] === 1 ? bounds.max.y : bounds.min.y,
   sides[2] === 1 ? bounds.max.z : bounds.min.z
 );
+
+const scaleHandleWorldSize = (mesh: THREE.Mesh, bounds: THREE.Box3): number => {
+  const localSize = bounds.getSize(new THREE.Vector3());
+  const averageWorldSize = (
+    Math.abs(localSize.x * mesh.scale.x)
+    + Math.abs(localSize.y * mesh.scale.y)
+    + Math.abs(localSize.z * mesh.scale.z)
+  ) / 3;
+  return Math.max(0.0001, averageWorldSize * SCALE_HANDLE_SIZE_RATIO);
+};
 
 function KeyboardCameraControls({ active }: { active: boolean }) {
   const camera = useThree((state) => state.camera);
@@ -295,19 +305,17 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
   onPointerDown: (axis: ScaleAxis, side: ScaleSide, event: ThreeEvent<PointerEvent>) => void;
 }) {
   const handleRef = useRef<THREE.Mesh>(null);
-  const camera = useThree((state) => state.camera);
 
   useFrame(() => {
     const handle = handleRef.current;
     if (!handle) return;
     mesh.updateMatrixWorld();
     const localPoint = bounds.getCenter(new THREE.Vector3());
-    const distance = camera.position.distanceTo(mesh.position);
     const edge = boundingValue(bounds, axis, side === 1 ? 'max' : 'min');
     setAxisValue(localPoint, axis, edge);
     handle.position.copy(mesh.localToWorld(localPoint));
     handle.quaternion.copy(mesh.quaternion);
-    handle.scale.setScalar(Math.max(0.1, Math.min(0.28, distance * 0.018)) * SCALE_HANDLE_VISUAL_FACTOR);
+    handle.scale.setScalar(scaleHandleWorldSize(mesh, bounds) / 0.72);
   });
 
   return (
@@ -318,35 +326,22 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
   );
 }
 
-function CenterScaleHandle({ mesh, onPointerDown }: {
+function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
   mesh: THREE.Mesh;
+  bounds: THREE.Box3;
   onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
 }) {
   const handleRef = useRef<THREE.Group>(null);
-  const camera = useThree((state) => state.camera);
 
   useFrame(() => {
     const handle = handleRef.current;
     if (!handle) return;
 
     mesh.updateMatrixWorld(true);
-    camera.updateMatrixWorld(true);
     const worldPosition = mesh.getWorldPosition(new THREE.Vector3());
-    const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
-    let factor = 1;
-
-    if ((camera as THREE.OrthographicCamera).isOrthographicCamera) {
-      const orthographic = camera as THREE.OrthographicCamera;
-      factor = (orthographic.top - orthographic.bottom) / orthographic.zoom;
-    } else if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
-      const perspective = camera as THREE.PerspectiveCamera;
-      factor = worldPosition.distanceTo(cameraPosition)
-        * Math.min(1.9 * Math.tan(Math.PI * perspective.fov / 360) / perspective.zoom, 7);
-    }
-
     handle.position.copy(worldPosition);
     handle.quaternion.identity();
-    handle.scale.setScalar(factor * 1.15 / 4);
+    handle.scale.setScalar(scaleHandleWorldSize(mesh, bounds) / 0.2);
   });
 
   return (
@@ -392,11 +387,10 @@ function CornerScaleHandle({ mesh, bounds, sides, onPointerDown }: {
     const handle = handleRef.current;
     if (!handle) return;
     mesh.updateMatrixWorld();
-    const distance = camera.position.distanceTo(mesh.position);
     const localPoint = cornerPoint(bounds, sides);
     handle.position.copy(mesh.localToWorld(localPoint));
     handle.quaternion.copy(camera.quaternion);
-    handle.scale.setScalar(Math.max(0.14, Math.min(0.36, distance * 0.024)) * SCALE_HANDLE_VISUAL_FACTOR);
+    handle.scale.setScalar((scaleHandleWorldSize(mesh, bounds) * 1.08) / 1.05);
   });
 
   return (
@@ -676,7 +670,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
 
   return (
     <>
-      <CenterScaleHandle mesh={mesh} onPointerDown={startCenterDrag} />
+      <CenterScaleHandle mesh={mesh} bounds={bounds} onPointerDown={startCenterDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3653" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3653" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#8adb00" onPointerDown={startAxisDrag} />
