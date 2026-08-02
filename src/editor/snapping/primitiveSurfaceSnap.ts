@@ -72,6 +72,13 @@ const snapInsideTargetGrid = (value: number, minimum: number, step: number): num
   return minimum + Math.round((value - minimum) / step) * step;
 };
 
+const isScaleInteraction = (source: SceneObjectData, objects: SceneObjectData[]): boolean => {
+  const storedSource = objects.find((object) => object.id === source.id);
+  if (!storedSource) return false;
+
+  return source.scale.some((value, index) => Math.abs(value - storedSource.scale[index]) > 0.000001);
+};
+
 export const isFormType = (type: PrimitiveType): boolean => FORM_TYPES.has(type);
 
 export function findFormSurfaceSnap(
@@ -91,6 +98,7 @@ export function findFormSurfaceSnap(
   const sourceWorldCorners = boxCorners(sourceBounds).map((corner) => corner.applyMatrix4(sourceMatrix));
   const sourcePosition = new THREE.Vector3(...source.position);
   const worldThreshold = Math.max(0.28, Math.abs(positionStep) * 1.6);
+  const scaling = isScaleInteraction(source, objects);
   let bestPosition: THREE.Vector3 | null = null;
   let bestTargetId: string | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -128,17 +136,19 @@ export function findFormSurfaceSnap(
         const localOffset = new THREE.Vector3();
         setAxisValue(localOffset, axis, faceOffset);
 
-        for (const otherAxis of otherAxes) {
-          const localStep = positionStep > 0 ? positionStep / axisValue(targetScale, otherAxis) : 0;
-          const snappedCenter = snapInsideTargetGrid(
-            axisValue(sourceCenter, otherAxis),
-            axisValue(targetBounds.min, otherAxis),
-            localStep
-          );
-          const gridCorrection = snappedCenter - axisValue(sourceCenter, otherAxis);
-          const maximumGridCorrection = localStep > 0 ? localStep * 0.55 : 0;
-          if (localStep > 0 && Math.abs(gridCorrection) <= maximumGridCorrection) {
-            setAxisValue(localOffset, otherAxis, gridCorrection);
+        if (!scaling) {
+          for (const otherAxis of otherAxes) {
+            const localStep = positionStep > 0 ? positionStep / axisValue(targetScale, otherAxis) : 0;
+            const snappedCenter = snapInsideTargetGrid(
+              axisValue(sourceCenter, otherAxis),
+              axisValue(targetBounds.min, otherAxis),
+              localStep
+            );
+            const gridCorrection = snappedCenter - axisValue(sourceCenter, otherAxis);
+            const maximumGridCorrection = localStep > 0 ? localStep * 0.55 : 0;
+            if (localStep > 0 && Math.abs(gridCorrection) <= maximumGridCorrection) {
+              setAxisValue(localOffset, otherAxis, gridCorrection);
+            }
           }
         }
 
