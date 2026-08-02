@@ -3,6 +3,27 @@ import { buildProjectFile, deserializeProject, downloadTextFile, safeFilename, s
 import { useEditorStore } from '../../store/editorStore';
 import { ExportDialog } from '../dialogs/ExportDialog';
 
+interface WritableFileStreamLike {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+interface FileHandleLike {
+  name: string;
+  createWritable: () => Promise<WritableFileStreamLike>;
+}
+
+interface SaveFilePickerWindow extends Window {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    excludeAcceptAllOption?: boolean;
+    types: Array<{
+      description: string;
+      accept: Record<string, string[]>;
+    }>;
+  }) => Promise<FileHandleLike>;
+}
+
 function downloadScreenshot(projectName: string): Promise<boolean> {
   const canvas = document.querySelector<HTMLCanvasElement>('.viewport canvas');
   if (!canvas) return Promise.resolve(false);
@@ -26,6 +47,7 @@ function closeMenus(): void {
 
 export function TopBar() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileHandleRef = useRef<FileHandleLike | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const project = useEditorStore((state) => state.project);
   const scene = useEditorStore((state) => state.scene);
@@ -45,19 +67,72 @@ export function TopBar() {
   const setScene = useEditorStore((state) => state.setScene);
   const requestCameraView = useEditorStore((state) => state.requestCameraView);
 
-  const save = () => {
+  const serializeCurrentProject = (): string => {
     const file = buildProjectFile(project, scene, objects);
-    downloadTextFile(
-      serializeProject({ project: file.project, scene: file.scene, objects: file.objects }),
-      `${safeFilename(project.name)}.ncae.json`
-    );
-    markSaved();
-    closeMenus();
+    return serializeProject({ project: file.project, scene: file.scene, objects: file.objects });
+  };
+
+  const writeFile = async (handle: FileHandleLike, content: string): Promise<void> => {
+    const writable = await handle.createWritable();
+    await writable.write(content);
+    await writable.close();
+  };
+
+  const saveAs = async (): Promise<void> => {
+    const content = serializeCurrentProject();
+    const filename = `${safeFilename(project.name)}.ncae.json`;
+    const pickerWindow = window as SaveFilePickerWindow;
+
+    try {
+      if (pickerWindow.showSaveFilePicker) {
+        const handle = await pickerWindow.showSaveFilePicker({
+          suggestedName: filename,
+          excludeAcceptAllOption: false,
+          types: [{
+            description: 'NorthCore Asset Editor Projekt',
+            accept: { 'application/json': ['.json'] }
+          }]
+        });
+        await writeFile(handle, content);
+        fileHandleRef.current = handle;
+        markSaved();
+        setMessage(`Gespeichert unter: ${handle.name}`);
+      } else {
+        downloadTextFile(content, filename);
+        fileHandleRef.current = null;
+        markSaved();
+        setMessage(`Heruntergeladen: ${filename}`);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setMessage(error instanceof Error ? `Speichern fehlgeschlagen: ${error.message}` : 'Speichern fehlgeschlagen');
+    } finally {
+      closeMenus();
+    }
+  };
+
+  const save = async (): Promise<void> => {
+    const handle = fileHandleRef.current;
+    if (!handle) {
+      await saveAs();
+      return;
+    }
+
+    try {
+      await writeFile(handle, serializeCurrentProject());
+      markSaved();
+      setMessage(`Gespeichert: ${handle.name}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Speichern fehlgeschlagen: ${error.message}` : 'Speichern fehlgeschlagen');
+    } finally {
+      closeMenus();
+    }
   };
 
   const load = async (file: File) => {
     try {
       loadProject(deserializeProject(await file.text()));
+      fileHandleRef.current = null;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Projektdatei konnte nicht geladen werden.');
     }
@@ -69,9 +144,10 @@ export function TopBar() {
         <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
           <summary>Datei</summary>
           <div className="menu-popover">
-            <button onClick={() => { newProject(); closeMenus(); }}>Neu</button>
+            <button onClick={() => { fileHandleRef.current = null; newProject(); closeMenus(); }}>Neu</button>
             <button onClick={() => { inputRef.current?.click(); closeMenus(); }}>Öffnen…</button>
-            <button onClick={save}>Speichern…</button>
+            <button onClick={() => { void save(); }}>Speichern</button>
+            <button onClick={() => { void saveAs(); }}>Speichern unter…</button>
           </div>
         </details>
         <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
