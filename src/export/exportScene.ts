@@ -225,8 +225,10 @@ function addUnionMeshes(
   }
 
   const evaluator = new Evaluator();
+  evaluator.attributes = ['position', 'normal'];
   evaluator.useGroups = true;
-  evaluator.consolidateMaterials = true;
+  evaluator.consolidateGroups = true;
+  evaluator.removeUnusedMaterials = true;
 
   let result: Brush | null = null;
 
