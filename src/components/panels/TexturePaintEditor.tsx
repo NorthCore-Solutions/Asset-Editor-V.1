@@ -94,6 +94,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
   const [brushSize, setBrushSize] = useState(1);
   const [surfaceEnabled, setSurfaceEnabled] = useState(false);
   const [selectedIsland, setSelectedIsland] = useState(-1);
+  const [copyTargetIsland, setCopyTargetIsland] = useState(-1);
   const [, refreshControls] = useState(0);
 
   const ensureAtlasCanvas = (): HTMLCanvasElement => {
@@ -216,6 +217,10 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     renderSelectedSurface(clamped);
   }, [atlas.signature, selectedIsland]);
 
+  useEffect(() => {
+    setCopyTargetIsland((current) => current >= atlas.islands.length ? -1 : current);
+  }, [atlas.islands.length]);
+
   const changeTool = (nextTool: PaintTool): void => {
     setTool(nextTool);
     setSurfacePaintSettings({ tool: nextTool });
@@ -337,11 +342,16 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     commitAtlas();
   };
 
-  const copySelectedSurfaceToAll = (): void => {
+  const copySelectedSurface = (): void => {
     const atlasCanvas = atlasCanvasRef.current;
     const previewCanvas = previewCanvasRef.current;
     const context = atlasContext();
-    if (!atlasCanvas || !previewCanvas || !context || atlas.islands.length < 2 || selectedIsland < 0) return;
+    if (!atlasCanvas || !previewCanvas || !context || selectedIsland < 0) return;
+
+    const targetIndices = copyTargetIsland < 0
+      ? atlas.islands.map((_, index) => index).filter((index) => index !== selectedIsland)
+      : [copyTargetIsland];
+    if (targetIndices.length === 0 || targetIndices.includes(selectedIsland)) return;
 
     syncPreviewToAtlas();
     pushHistory();
@@ -355,8 +365,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     sourceContext.drawImage(previewCanvas, 0, 0);
 
     context.imageSmoothingEnabled = false;
-    atlas.islands.forEach((_, islandIndex) => {
-      if (islandIndex === selectedIsland) return;
+    targetIndices.forEach((islandIndex) => {
       const target = atlasPixelRegion(atlas, islandIndex, atlasCanvas.width, atlasCanvas.height);
       const width = Math.max(1, target.maxX - target.minX + 1);
       const height = Math.max(1, target.maxY - target.minY + 1);
@@ -364,34 +373,6 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
       context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, target.minX, target.minY, width, height);
     });
 
-    renderSelectedSurface();
-    commitAtlas();
-  };
-
-  const fillAllSurfaces = (): void => {
-    const canvas = atlasCanvasRef.current;
-    const context = atlasContext();
-    if (!canvas || !context) return;
-
-    syncPreviewToAtlas();
-    pushHistory();
-    const image = context.getImageData(0, 0, canvas.width, canvas.height);
-    const color = hexToRgba(paintColor);
-
-    atlas.islands.forEach((_, islandIndex) => {
-      const region = atlasPixelRegion(atlas, islandIndex, image.width, image.height);
-      for (let y = region.minY; y <= region.maxY; y += 1) {
-        for (let x = region.minX; x <= region.maxX; x += 1) {
-          const offset = (y * image.width + x) * 4;
-          image.data[offset] = color.r;
-          image.data[offset + 1] = color.g;
-          image.data[offset + 2] = color.b;
-          image.data[offset + 3] = color.a;
-        }
-      }
-    });
-
-    context.putImageData(image, 0, 0);
     renderSelectedSurface();
     commitAtlas();
   };
@@ -430,6 +411,9 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
   const selectedSurfaceLabel = selectedIsland < 0
     ? 'Fläche X · Gesamtübersicht'
     : surfaceDisplayLabel(selectedIsland, selectedSurface?.label ?? 'Oberfläche');
+  const copyDisabled = atlas.islands.length < 2
+    || selectedIsland < 0
+    || copyTargetIsland === selectedIsland;
 
   return (
     <div className="paint-editor">
@@ -476,16 +460,27 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
             ))}
           </select>
         </div>
-        <div className="paint-bulk-actions">
-          <button
-            type="button"
-            disabled={atlas.islands.length < 2 || selectedIsland < 0}
-            onClick={copySelectedSurfaceToAll}
-          >
-            Auf alle kopieren
-          </button>
-          <button type="button" onClick={fillAllSurfaces}>Alle Flächen füllen</button>
+
+        <div className="field-row">
+          <label>Kopieren nach</label>
+          <select value={copyTargetIsland} onChange={(event) => setCopyTargetIsland(Number(event.target.value))}>
+            <option value={-1}>Alle Flächen</option>
+            {atlas.islands.map((island, islandIndex) => (
+              <option key={`copy:${island.label}:${islandIndex}`} value={islandIndex}>
+                {surfaceDisplayLabel(islandIndex, island.label)}
+              </option>
+            ))}
+          </select>
         </div>
+
+        <button
+          type="button"
+          className="paint-copy-button"
+          disabled={copyDisabled}
+          onClick={copySelectedSurface}
+        >
+          Kopieren
+        </button>
       </div>
 
       <div className="paint-surface-preview-title">{selectedSurfaceLabel}</div>
