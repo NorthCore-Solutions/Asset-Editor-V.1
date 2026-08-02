@@ -24,6 +24,7 @@ interface TexturePaintEditorProps {
   texture?: PaintTextureData;
   atlas: SurfaceUvAtlas;
   onCommit: (texture: PaintTextureData | undefined) => void;
+  onPaintModeChange?: (enabled: boolean) => void;
 }
 
 const TOOLS: Array<{ tool: PaintTool; label: string }> = [
@@ -81,7 +82,14 @@ function linePoints(from: [number, number], to: [number, number]): Array<[number
   return points;
 }
 
-export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onCommit }: TexturePaintEditorProps) {
+export function TexturePaintEditor({
+  objectId,
+  baseColor,
+  texture,
+  atlas,
+  onCommit,
+  onPaintModeChange
+}: TexturePaintEditorProps) {
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const atlasCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
@@ -246,6 +254,12 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
       const view = cameraViewForSurface(atlas.islands[clamped]?.label ?? '');
       if (view) requestSurfaceCameraView(view);
     }
+  };
+
+  const toggleSurfacePaint = (): void => {
+    const nextEnabled = !surfaceEnabled;
+    onPaintModeChange?.(nextEnabled);
+    setSurfacePaintSettings({ enabled: nextEnabled });
   };
 
   useEffect(() => {
@@ -421,7 +435,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
         type="button"
         className={surfaceEnabled ? 'paint-mode-button active' : 'paint-mode-button'}
         aria-pressed={surfaceEnabled}
-        onClick={() => setSurfacePaintSettings({ enabled: !surfaceEnabled })}
+        onClick={toggleSurfacePaint}
       >
         Auf Form malen
       </button>
