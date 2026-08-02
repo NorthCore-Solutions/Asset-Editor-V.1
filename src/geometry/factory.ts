@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PrimitiveType, SceneObjectData } from '../types/editor';
 
 const DEFAULT_MATERIAL = { color: '#AEB8BE', roughness: 0.8, metalness: 0, opacity: 1, flatShading: true } as const;
@@ -80,6 +81,53 @@ function closedFlatGeometry(vertices: number[], indices: number[]): THREE.Buffer
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+function cappedHemisphereGeometry(radius: number, widthSegments: number, heightSegments: number): THREE.BufferGeometry {
+  const radialSegments = Math.max(3, Math.round(widthSegments));
+  const verticalSegments = Math.max(2, Math.round(heightSegments));
+  const shell = new THREE.SphereGeometry(
+    radius,
+    radialSegments,
+    verticalSegments,
+    0,
+    Math.PI * 2,
+    0,
+    Math.PI / 2
+  );
+  const cap = new THREE.CircleGeometry(radius, radialSegments);
+  cap.rotateX(Math.PI / 2);
+
+  const geometry = mergeGeometries([shell, cap], false);
+  shell.dispose();
+  cap.dispose();
+
+  if (!geometry) throw new Error('Halbkugel konnte nicht geschlossen werden.');
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function twoSidedPlaneGeometry(width: number, depth: number): THREE.BufferGeometry {
+  const w = width / 2;
+  const d = depth / 2;
+  const vertices = [
+    -w, 0, -d,
+    w, 0, -d,
+    w, 0, d,
+    -w, 0, d,
+    -w, 0, -d,
+    w, 0, -d,
+    w, 0, d,
+    -w, 0, d
+  ];
+  const indices = [
+    0, 2, 1,
+    0, 3, 2,
+    4, 5, 6,
+    4, 6, 7
+  ];
+  return closedFlatGeometry(vertices, indices);
 }
 
 function wedgeGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
@@ -167,7 +215,7 @@ export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'
   const g = object.geometry;
   switch (object.type) {
     case 'sphere': return new THREE.SphereGeometry(g.radius ?? 0.65, g.widthSegments ?? 24, g.heightSegments ?? 16);
-    case 'hemisphere': return new THREE.SphereGeometry(g.radius ?? 0.75, g.widthSegments ?? 24, g.heightSegments ?? 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    case 'hemisphere': return cappedHemisphereGeometry(g.radius ?? 0.75, g.widthSegments ?? 24, g.heightSegments ?? 12);
     case 'cylinder': return new THREE.CylinderGeometry(g.radiusTop ?? 0.5, g.radiusBottom ?? 0.5, g.height ?? 1.4, g.radialSegments ?? 20);
     case 'cone': return new THREE.ConeGeometry(g.radius ?? 0.65, g.height ?? 1.5, g.radialSegments ?? 20);
     case 'pyramid': {
@@ -175,11 +223,7 @@ export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'
       geometry.rotateY(Math.PI / 4);
       return geometry;
     }
-    case 'plane': {
-      const geometry = new THREE.PlaneGeometry(g.width ?? 2, g.height ?? 2);
-      geometry.rotateX(-Math.PI / 2);
-      return geometry;
-    }
+    case 'plane': return twoSidedPlaneGeometry(g.width ?? 2, g.height ?? 2);
     case 'torus': return new THREE.TorusGeometry(g.radius ?? 0.65, g.tube ?? 0.22, g.radialSegments ?? 12, g.tubularSegments ?? 32);
     case 'wedge': return wedgeGeometry(g.width ?? 1.5, g.height ?? 1, g.depth ?? 1.5);
     case 'prism': return prismGeometry(g.width ?? 1.6, g.height ?? 1.2, g.depth ?? 1.8);
