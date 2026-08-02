@@ -7,18 +7,21 @@ interface PropertiesPanelProps {
   onToggle: () => void;
 }
 
-const round = (value: number) => Number(value.toFixed(4));
+const round = (value: number) => Number(value.toFixed(3));
 
 function VectorEditor({ label, value, unit, onChange }: { label: string; value: Vec3; unit?: 'deg'; onChange: (value: Vec3) => void }) {
-  const shown = unit === 'deg' ? value.map((item) => round(item * 180 / Math.PI)) as Vec3 : value;
+  const shown = value.map((item) => round(unit === 'deg' ? item * 180 / Math.PI : item)) as Vec3;
   return (
     <div className="field-row">
       <label>{label}</label>
       <div className="vector-grid">
         {(['X', 'Y', 'Z'] as const).map((axis, index) => (
-          <label key={axis}>{axis}<input type="number" step={unit === 'deg' ? 1 : 0.1} value={shown[index]} onChange={(event) => {
-            const next = [...shown] as Vec3; next[index] = Number(event.target.value);
-            onChange(unit === 'deg' ? next.map((item) => item * Math.PI / 180) as Vec3 : next);
+          <label key={axis}>{axis}<input type="number" step={0.001} value={shown[index]} onChange={(event) => {
+            const next = [...shown] as Vec3;
+            next[index] = round(Number(event.target.value));
+            onChange(unit === 'deg'
+              ? next.map((item) => item * Math.PI / 180) as Vec3
+              : next.map(round) as Vec3);
           }} /></label>
         ))}
       </div>
