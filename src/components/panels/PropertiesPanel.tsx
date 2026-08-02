@@ -1,6 +1,7 @@
 import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../materials/presets';
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, Vec3 } from '../../types/editor';
+import { TexturePaintEditor } from './TexturePaintEditor';
 
 interface PropertiesPanelProps {
   collapsed: boolean;
@@ -80,6 +81,7 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
 
   const setMaterial = (patch: Partial<MaterialData>, history = true) => updateMaterial(object.id, patch, history);
   const palettes = [{ title: 'Zuletzt', colors: recentColors }, { title: 'NorthCore', colors: NORTHCORE_COLORS }, { title: 'Low-Poly', colors: LOW_POLY_COLORS }];
+  const paintPalette = [...recentColors, ...NORTHCORE_COLORS, ...LOW_POLY_COLORS];
 
   return (
     <aside className="panel right-panel">
@@ -108,6 +110,16 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
           <RangeField label="Metallisch" value={object.material.metalness} min={0} max={1} step={0.01} onChange={(value, history) => setMaterial({ metalness: value }, history)} />
           <RangeField label="Transparenz" value={object.material.opacity} min={0} max={1} step={0.01} onChange={(value, history) => setMaterial({ opacity: value }, history)} />
           <div className="field-row"><label>Flat Shading</label><input type="checkbox" checked={object.material.flatShading} onChange={(event) => setMaterial({ flatShading: event.target.checked })} /></div>
+        </section>
+        <section className="panel-section">
+          <h3>Bemalung</h3>
+          <TexturePaintEditor
+            objectId={object.id}
+            baseColor={object.material.color}
+            texture={object.material.paintTexture}
+            palette={paintPalette}
+            onCommit={(paintTexture) => setMaterial({ paintTexture })}
+          />
         </section>
       </div>
       <div className="panel-end-space" aria-hidden="true" />
