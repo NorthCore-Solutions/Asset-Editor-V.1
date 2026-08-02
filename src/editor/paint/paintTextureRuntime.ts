@@ -17,7 +17,7 @@ import {
 } from './surfacePaintSession';
 
 type PatchedRendererPrototype = THREE.WebGLRenderer & {
-  __northcoreDirectSurfacePaintV1?: boolean;
+  __northcoreDirectSurfacePaintV2?: boolean;
 };
 
 interface PaintSurface {
@@ -44,11 +44,15 @@ interface ActiveStroke {
 
 const OBJECT_ID = 'northcorePaintObjectId';
 const LEGACY_OVERLAY_FLAG = 'northcorePaintOverlay';
+const PAINT_SHIELD_ATTRIBUTE = 'data-northcore-paint-shield';
+const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const surfaces = new Map<string, PaintSurface>();
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let activeContext: ActiveRenderContext | null = null;
 let activeStroke: ActiveStroke | null = null;
+let paintShield: HTMLDivElement | null = null;
+let paintShieldHost: HTMLElement | null = null;
 
 function configureTexture(texture: THREE.CanvasTexture): void {
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -246,15 +250,15 @@ function objectIdFromIntersection(object: THREE.Object3D): string | null {
   return null;
 }
 
-function hitPixel(event: PointerEvent, objectId: string, surface: PaintSurface): [number, number] | null {
+function hitPixel(clientX: number, clientY: number, objectId: string, surface: PaintSurface): [number, number] | null {
   const context = activeContext;
   if (!context) return null;
   const bounds = context.renderer.domElement.getBoundingClientRect();
   if (bounds.width <= 0 || bounds.height <= 0) return null;
 
   pointer.set(
-    ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
-    -((event.clientY - bounds.top) / bounds.height) * 2 + 1
+    ((clientX - bounds.left) / bounds.width) * 2 - 1,
+    -((clientY - bounds.top) / bounds.height) * 2 + 1
   );
   raycaster.setFromCamera(pointer, context.camera);
 
@@ -336,30 +340,27 @@ function persistSurface(objectId: string, surface: PaintSurface): void {
   });
 }
 
-function blockPointerEvent(event: PointerEvent): void {
+function blockPointerEvent(event: Event): void {
   event.preventDefault();
   event.stopPropagation();
-  event.stopImmediatePropagation();
+  if ('stopImmediatePropagation' in event) event.stopImmediatePropagation();
 }
 
-function isActiveCanvas(target: EventTarget | null): target is HTMLCanvasElement {
-  return Boolean(activeContext && target === activeContext.renderer.domElement);
-}
-
-function handlePointerDown(event: PointerEvent): void {
-  const settings = getSurfacePaintSettings();
-  if (!settings.enabled || !isActiveCanvas(event.target) || event.button !== 0) return;
+function handleShieldPointerDown(event: PointerEvent): void {
+  if (!getSurfacePaintSettings().enabled) return;
   blockPointerEvent(event);
+  if (event.button !== 0) return;
 
   const object = selectedPaintObject();
   if (!object) return;
   const surface = ensureSurface(object, true);
   if (!surface) return;
-  const point = hitPixel(event, object.id, surface);
+  const point = hitPixel(event.clientX, event.clientY, object.id, surface);
   if (!point) return;
 
-  try { event.target.setPointerCapture(event.pointerId); } catch { /* Browser ohne Pointer-Capture */ }
+  try { paintShield?.setPointerCapture(event.pointerId); } catch { /* Pointer-Capture optional */ }
 
+  const settings = getSurfacePaintSettings();
   const changed = paintAt(surface, point, null);
   if (settings.tool === 'fill') {
     if (changed) persistSurface(object.id, surface);
@@ -375,9 +376,8 @@ function handlePointerDown(event: PointerEvent): void {
   };
 }
 
-function handlePointerMove(event: PointerEvent): void {
-  const settings = getSurfacePaintSettings();
-  if (!settings.enabled || !isActiveCanvas(event.target)) return;
+function handleShieldPointerMove(event: PointerEvent): void {
+  if (!getSurfacePaintSettings().enabled) return;
   blockPointerEvent(event);
   const stroke = activeStroke;
   if (!stroke || stroke.pointerId !== event.pointerId) return;
@@ -385,7 +385,7 @@ function handlePointerMove(event: PointerEvent): void {
   const object = useEditorStore.getState().objects.find((entry) => entry.id === stroke.objectId);
   const surface = surfaces.get(stroke.objectId);
   if (!object || !surface) return;
-  const point = hitPixel(event, stroke.objectId, surface);
+  const point = hitPixel(event.clientX, event.clientY, stroke.objectId, surface);
   if (!point) {
     stroke.lastPoint = null;
     return;
@@ -400,9 +400,8 @@ function handlePointerMove(event: PointerEvent): void {
   stroke.lastPoint = point;
 }
 
-function finishStroke(event: PointerEvent): void {
-  const settings = getSurfacePaintSettings();
-  if (!settings.enabled || !isActiveCanvas(event.target)) return;
+function finishShieldStroke(event: PointerEvent): void {
+  if (!getSurfacePaintSettings().enabled) return;
   blockPointerEvent(event);
   const stroke = activeStroke;
   if (!stroke || stroke.pointerId !== event.pointerId) return;
@@ -411,31 +410,101 @@ function finishStroke(event: PointerEvent): void {
   const surface = surfaces.get(stroke.objectId);
   if (surface && stroke.changed) persistSurface(stroke.objectId, surface);
   try {
-    if (event.target.hasPointerCapture(event.pointerId)) event.target.releasePointerCapture(event.pointerId);
-  } catch { /* Browser ohne Pointer-Capture */ }
+    if (paintShield?.hasPointerCapture(event.pointerId)) paintShield.releasePointerCapture(event.pointerId);
+  } catch { /* Pointer-Capture optional */ }
 }
 
-function handleWheel(event: WheelEvent): void {
-  if (!getSurfacePaintSettings().enabled || !isActiveCanvas(event.target)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
+function handleShieldWheel(event: WheelEvent): void {
+  if (!getSurfacePaintSettings().enabled) return;
+  blockPointerEvent(event);
 }
 
-window.addEventListener('pointerdown', handlePointerDown, true);
-window.addEventListener('pointermove', handlePointerMove, true);
-window.addEventListener('pointerup', finishStroke, true);
-window.addEventListener('pointercancel', finishStroke, true);
-window.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+function handleShieldContextMenu(event: MouseEvent): void {
+  if (!getSurfacePaintSettings().enabled) return;
+  blockPointerEvent(event);
+}
+
+function removePaintShield(): void {
+  activeStroke = null;
+  if (paintShield) paintShield.remove();
+  paintShield = null;
+  paintShieldHost = null;
+}
+
+function createPaintShield(host: HTMLElement): HTMLDivElement {
+  const shield = document.createElement('div');
+  shield.setAttribute(PAINT_SHIELD_ATTRIBUTE, 'true');
+  shield.tabIndex = -1;
+  Object.assign(shield.style, {
+    position: 'absolute',
+    inset: '0',
+    zIndex: '50',
+    cursor: 'crosshair',
+    touchAction: 'none',
+    userSelect: 'none',
+    background: 'transparent',
+    pointerEvents: 'auto'
+  });
+
+  const badge = document.createElement('div');
+  badge.textContent = 'Malmodus aktiv · Kamera und Transformation gesperrt';
+  Object.assign(badge.style, {
+    position: 'absolute',
+    left: '12px',
+    top: '12px',
+    padding: '6px 9px',
+    border: '1px solid #68a47d',
+    borderRadius: '4px',
+    color: '#dff4e7',
+    background: 'rgba(25, 48, 36, 0.9)',
+    fontSize: '12px',
+    pointerEvents: 'none'
+  });
+  shield.appendChild(badge);
+
+  shield.addEventListener('pointerdown', handleShieldPointerDown, true);
+  shield.addEventListener('pointermove', handleShieldPointerMove, true);
+  shield.addEventListener('pointerup', finishShieldStroke, true);
+  shield.addEventListener('pointercancel', finishShieldStroke, true);
+  shield.addEventListener('lostpointercapture', () => { activeStroke = null; }, true);
+  shield.addEventListener('wheel', handleShieldWheel, { capture: true, passive: false });
+  shield.addEventListener('contextmenu', handleShieldContextMenu, true);
+
+  const position = window.getComputedStyle(host).position;
+  if (position === 'static') host.style.position = 'relative';
+  host.appendChild(shield);
+  return shield;
+}
+
+function ensurePaintShield(): void {
+  const canvas = activeContext?.renderer.domElement;
+  const host = canvas?.closest<HTMLElement>('.viewport') ?? null;
+  if (!host) return;
+
+  if (paintShield && paintShieldHost === host && paintShield.isConnected) return;
+  removePaintShield();
+  paintShieldHost = host;
+  paintShield = createPaintShield(host);
+}
+
+function handleCameraKey(event: KeyboardEvent): void {
+  if (!getSurfacePaintSettings().enabled) return;
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+  if (!CAMERA_KEYS.has(event.key.toLowerCase())) return;
+  blockPointerEvent(event);
+}
+
+window.addEventListener('keydown', handleCameraKey, true);
 
 subscribeSurfacePaint((settings) => {
-  if (activeContext) activeContext.renderer.domElement.style.cursor = settings.enabled ? 'crosshair' : '';
-  if (!settings.enabled) activeStroke = null;
+  if (settings.enabled) ensurePaintShield();
+  else removePaintShield();
 });
 
 const prototype = THREE.WebGLRenderer.prototype as PatchedRendererPrototype;
 
-if (!prototype.__northcoreDirectSurfacePaintV1) {
+if (!prototype.__northcoreDirectSurfacePaintV2) {
   const originalRender = prototype.render;
 
   prototype.render = function renderWithDirectSurfacePaint(
@@ -444,10 +513,13 @@ if (!prototype.__northcoreDirectSurfacePaintV1) {
     camera: THREE.Camera
   ): void {
     activeContext = { renderer: this, scene, camera };
-    this.domElement.style.cursor = getSurfacePaintSettings().enabled ? 'crosshair' : '';
     mapSceneObjects(scene);
+
+    if (getSurfacePaintSettings().enabled) ensurePaintShield();
+    else removePaintShield();
+
     originalRender.call(this, scene, camera);
   };
 
-  prototype.__northcoreDirectSurfacePaintV1 = true;
+  prototype.__northcoreDirectSurfacePaintV2 = true;
 }
