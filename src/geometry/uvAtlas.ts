@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { PrimitiveType } from '../types/editor';
 
 export interface SurfaceUvIsland {
+  label: string;
   uMin: number;
   uMax: number;
   vMin: number;
@@ -29,6 +30,10 @@ const ATLAS_KEY = 'northcoreSurfaceUvAtlas';
 const CELL_PADDING = 0.07;
 const PLANE_QUANTIZATION = 10_000;
 
+const BOX_TYPES = new Set<PrimitiveType>([
+  'box', 'cuboid', 'wall', 'floor', 'flatRoof', 'door', 'window', 'chimney'
+]);
+
 export const FULL_SURFACE_UV_ATLAS: SurfaceUvAtlas = {
   version: 1,
   mode: 'native',
@@ -36,15 +41,53 @@ export const FULL_SURFACE_UV_ATLAS: SurfaceUvAtlas = {
   rows: 1,
   padding: 0,
   signature: 'native:1:1x1',
-  islands: [{ uMin: 0, uMax: 1, vMin: 0, vMax: 1 }]
+  islands: [{ label: 'Oberfläche', uMin: 0, uMax: 1, vMin: 0, vMax: 1 }]
 };
 
-function atlasGrid(count: number, mode: SurfaceUvAtlas['mode']): SurfaceUvAtlas {
+function uniqueLabels(labels: string[]): string[] {
+  const totals = new Map<string, number>();
+  labels.forEach((label) => totals.set(label, (totals.get(label) ?? 0) + 1));
+  const current = new Map<string, number>();
+
+  return labels.map((label) => {
+    if ((totals.get(label) ?? 0) <= 1) return label;
+    const number = (current.get(label) ?? 0) + 1;
+    current.set(label, number);
+    return `${label} ${number}`;
+  });
+}
+
+function defaultLabels(count: number): string[] {
+  return Array.from({ length: Math.max(1, count) }, (_, index) => `Fläche ${index + 1}`);
+}
+
+function groupedLabels(type: PrimitiveType, count: number): string[] {
+  if (BOX_TYPES.has(type) && count === 6) {
+    return ['Rechts', 'Links', 'Oben', 'Unten', 'Vorne', 'Hinten'];
+  }
+
+  if ((type === 'cylinder' || type === 'column') && count === 3) {
+    return ['Mantel', 'Oben', 'Unten'];
+  }
+
+  if (type === 'cone' && count === 2) {
+    return ['Mantel', 'Unten'];
+  }
+
+  if (type === 'hemisphere' && count === 2) {
+    return ['Rundung', 'Unten'];
+  }
+
+  return defaultLabels(count);
+}
+
+function atlasGrid(count: number, mode: SurfaceUvAtlas['mode'], labels = defaultLabels(count)): SurfaceUvAtlas {
   const safeCount = Math.max(1, count);
   const columns = Math.ceil(Math.sqrt(safeCount));
   const rows = Math.ceil(safeCount / columns);
   const cellWidth = 1 / columns;
   const cellHeight = 1 / rows;
+  const resolvedLabels = uniqueLabels(labels.length === safeCount ? labels : defaultLabels(safeCount));
   const islands: SurfaceUvIsland[] = [];
 
   for (let index = 0; index < safeCount; index += 1) {
@@ -53,6 +96,7 @@ function atlasGrid(count: number, mode: SurfaceUvAtlas['mode']): SurfaceUvAtlas 
     const padU = cellWidth * CELL_PADDING;
     const padV = cellHeight * CELL_PADDING;
     islands.push({
+      label: resolvedLabels[index],
       uMin: column * cellWidth + padU,
       uMax: (column + 1) * cellWidth - padU,
       vMin: 1 - (row + 1) * cellHeight + padV,
@@ -66,7 +110,7 @@ function atlasGrid(count: number, mode: SurfaceUvAtlas['mode']): SurfaceUvAtlas 
     columns,
     rows,
     padding: CELL_PADDING,
-    signature: `${mode}:${safeCount}:${columns}x${rows}`,
+    signature: `${mode}:${safeCount}:${columns}x${rows}:${resolvedLabels.join('|')}`,
     islands
   };
 }
@@ -88,7 +132,7 @@ function ensureNonIndexed(geometry: THREE.BufferGeometry): THREE.BufferGeometry 
   return converted;
 }
 
-function groupedAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+function groupedAtlas(geometry: THREE.BufferGeometry, type: PrimitiveType): THREE.BufferGeometry {
   const result = ensureNonIndexed(geometry);
   const position = result.getAttribute('position');
   const sourceUv = result.getAttribute('uv');
@@ -98,7 +142,7 @@ function groupedAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
     return storeAtlas(result, FULL_SURFACE_UV_ATLAS);
   }
 
-  const atlas = atlasGrid(groups.length, 'groups');
+  const atlas = atlasGrid(groups.length, 'groups', groupedLabels(type, groups.length));
   const uv = new Float32Array(position.count * 2);
 
   for (let vertex = 0; vertex < position.count; vertex += 1) {
@@ -163,6 +207,18 @@ function projectPoint(position: THREE.BufferAttribute | THREE.InterleavedBufferA
   return [x, y];
 }
 
+function directionLabel(normal: THREE.Vector3): string {
+  const nx = Math.abs(normal.x);
+  const ny = Math.abs(normal.y);
+  const nz = Math.abs(normal.z);
+  const dominant = Math.max(nx, ny, nz);
+
+  if (dominant < 0.9) return 'Schräge';
+  if (nx === dominant) return normal.x >= 0 ? 'Rechts' : 'Links';
+  if (ny === dominant) return normal.y >= 0 ? 'Oben' : 'Unten';
+  return normal.z >= 0 ? 'Vorne' : 'Hinten';
+}
+
 function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   const result = ensureNonIndexed(geometry);
   const position = result.getAttribute('position');
@@ -179,15 +235,21 @@ function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
     groups.set(key, vertices);
   }
 
-  const islands = [...groups.values()];
-  const atlas = atlasGrid(islands.length, 'planar');
-  const uv = new Float32Array(position.count * 2);
-
-  islands.forEach((vertices, islandIndex) => {
+  const surfaces = [...groups.values()].map((vertices) => {
     const a = vectorAt(position, vertices[0]);
     const b = vectorAt(position, vertices[1]);
     const c = vectorAt(position, vertices[2]);
     const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+    return { vertices, normal };
+  });
+  const atlas = atlasGrid(
+    surfaces.length,
+    'planar',
+    uniqueLabels(surfaces.map((surface) => directionLabel(surface.normal)))
+  );
+  const uv = new Float32Array(position.count * 2);
+
+  surfaces.forEach(({ vertices, normal }, islandIndex) => {
     const projected = vertices.map((vertex) => ({ vertex, point: projectPoint(position, vertex, normal) }));
     const minU = Math.min(...projected.map((entry) => entry.point[0]));
     const maxU = Math.max(...projected.map((entry) => entry.point[0]));
@@ -213,20 +275,13 @@ export function applySurfaceUvAtlas(geometry: THREE.BufferGeometry, type: Primit
   }
 
   if (
-    type === 'box'
-    || type === 'cuboid'
-    || type === 'wall'
-    || type === 'floor'
-    || type === 'flatRoof'
-    || type === 'door'
-    || type === 'window'
-    || type === 'chimney'
+    BOX_TYPES.has(type)
     || type === 'cylinder'
     || type === 'cone'
     || type === 'column'
     || type === 'hemisphere'
   ) {
-    return groupedAtlas(geometry);
+    return groupedAtlas(geometry, type);
   }
 
   return planarAtlas(geometry);
