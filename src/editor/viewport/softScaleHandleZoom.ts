@@ -88,7 +88,7 @@ if (!prototype.__northcoreSoftScaleHandleZoom) {
       }
 
       if (isCenterScaleHandle(object)) {
-        object.scale.setScalar(THREE.MathUtils.clamp(zoom * 0.19, 0.32, 1.2));
+        object.scale.setScalar(THREE.MathUtils.clamp(zoom * 0.094, 0.16, 0.65));
       }
     });
 
