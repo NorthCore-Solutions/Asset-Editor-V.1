@@ -17,7 +17,6 @@
 }
 
 .paint-tool-grid,
-.paint-bulk-actions,
 .color-target-toggle {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -25,7 +24,6 @@
 }
 
 .paint-tool-grid button,
-.paint-bulk-actions button,
 .color-target-toggle button {
   min-height: 30px;
 }
@@ -41,6 +39,11 @@
   background: #151c20;
   border: 1px solid var(--border);
   border-radius: 4px;
+}
+
+.paint-copy-button {
+  width: 100%;
+  min-height: 30px;
 }
 
 .paint-surface-preview-title {
