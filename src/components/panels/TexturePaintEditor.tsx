@@ -35,6 +35,11 @@ const TOOLS: Array<{ tool: PaintTool; label: string }> = [
 const cloneImage = (image: ImageData): ImageData =>
   new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
 
+function surfaceDisplayLabel(index: number, label: string): string {
+  const numberedLabel = `Fläche ${index + 1}`;
+  return /^Fläche\s+\d+$/i.test(label) ? numberedLabel : `${numberedLabel} · ${label}`;
+}
+
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): [number, number] {
   const bounds = canvas.getBoundingClientRect();
   return [
@@ -378,6 +383,9 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     refreshControls((value) => value + 1);
   };
 
+  const selectedSurface = atlas.islands[selectedIsland] ?? atlas.islands[0];
+  const selectedSurfaceLabel = surfaceDisplayLabel(selectedIsland, selectedSurface?.label ?? 'Oberfläche');
+
   return (
     <div className="paint-editor">
       <button
@@ -416,7 +424,9 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
           <label>Fläche</label>
           <select value={selectedIsland} onChange={(event) => changeIsland(Number(event.target.value))}>
             {atlas.islands.map((island, islandIndex) => (
-              <option key={`${island.label}:${islandIndex}`} value={islandIndex}>{island.label}</option>
+              <option key={`${island.label}:${islandIndex}`} value={islandIndex}>
+                {surfaceDisplayLabel(islandIndex, island.label)}
+              </option>
             ))}
           </select>
         </div>
@@ -426,6 +436,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
         </div>
       </div>
 
+      <div className="paint-surface-preview-title">{selectedSurfaceLabel}</div>
       <div className="paint-canvas-shell">
         <canvas
           ref={previewCanvasRef}
