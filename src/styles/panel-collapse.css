@@ -37,6 +37,7 @@
   left: 0;
   width: var(--inventory-panel-width);
   border-right-width: 1px;
+  border-bottom: 1px solid var(--border-strong);
   box-shadow: 8px 0 18px rgba(0, 0, 0, 0.16);
 }
 
@@ -46,7 +47,23 @@
   bottom: var(--hierarchy-panel-height);
   width: var(--properties-panel-width);
   border-left-width: 1px;
+  border-bottom: 1px solid var(--border-strong);
   box-shadow: -8px 0 18px rgba(0, 0, 0, 0.16);
+}
+
+.workspace > .left-panel::after,
+.workspace > .right-panel::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  height: 9px;
+  pointer-events: none;
+  background: #171e22;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -3px 8px rgba(0, 0, 0, 0.16);
 }
 
 .workspace > .hierarchy {
@@ -57,6 +74,7 @@
   width: auto;
   height: var(--hierarchy-panel-height);
   border-top-width: 1px;
+  border-bottom: 1px solid var(--border-strong);
   box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.16);
 }
 
@@ -73,6 +91,11 @@
 .workspace.hierarchy-collapsed > .hierarchy {
   transform: translateY(calc(100% - 32px));
   box-shadow: none;
+}
+
+.workspace.inventory-collapsed > .left-panel::after,
+.workspace.properties-collapsed > .right-panel::after {
+  display: none;
 }
 
 .panel-collapse-button {
