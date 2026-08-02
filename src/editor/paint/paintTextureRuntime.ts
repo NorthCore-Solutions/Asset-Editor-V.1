@@ -3,7 +3,7 @@ import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData } from '../../types/editor';
 
 type PatchedRendererPrototype = THREE.WebGLRenderer & {
-  __northcorePaintTextureRuntime?: boolean;
+  __northcorePaintTextureRuntimeV2?: boolean;
 };
 
 const textureCache = new Map<string, THREE.Texture>();
@@ -86,7 +86,7 @@ function sceneObjectsByName(): Map<string, SceneObjectData[]> {
 
 const prototype = THREE.WebGLRenderer.prototype as PatchedRendererPrototype;
 
-if (!prototype.__northcorePaintTextureRuntime) {
+if (!prototype.__northcorePaintTextureRuntimeV2) {
   const originalRender = prototype.render;
 
   prototype.render = function renderWithPaintTextures(
@@ -116,5 +116,5 @@ if (!prototype.__northcorePaintTextureRuntime) {
     originalRender.call(this, scene, camera);
   };
 
-  prototype.__northcorePaintTextureRuntime = true;
+  prototype.__northcorePaintTextureRuntimeV2 = true;
 }
