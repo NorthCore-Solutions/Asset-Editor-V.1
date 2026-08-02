@@ -347,7 +347,7 @@ function ScaleHandles({
     window.removeEventListener('blur', finishDrag, true);
   };
 
-  const commitTransform = () => {
+  const syncTransform = () => {
     const position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
     const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
     const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
@@ -384,6 +384,7 @@ function ScaleHandles({
       const anchorOffset = drag.anchorCoordinate * (startScale - nextScale);
       mesh.position.copy(drag.startPosition).addScaledVector(drag.worldAxis, anchorOffset);
       mesh.updateMatrixWorld();
+      syncTransform();
       return;
     }
 
@@ -403,6 +404,7 @@ function ScaleHandles({
 
     mesh.position.copy(drag.startPosition).add(localOffset);
     mesh.updateMatrixWorld();
+    syncTransform();
   }
 
   function finishDrag(event?: Event) {
@@ -414,7 +416,7 @@ function ScaleHandles({
     event?.stopPropagation();
     dragRef.current = null;
     removeWindowListeners();
-    commitTransform();
+    syncTransform();
     endTransaction();
     onTransformDraggingChange(false);
     if (controls) controls.enabled = true;
@@ -564,23 +566,23 @@ function SceneMesh({
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
-  const startTransform = () => {
-    beginTransaction();
-    onTransformDraggingChange(true);
-  };
-
-  const stopTransform = () => {
-    if (!mesh) {
-      onTransformDraggingChange(false);
-      endTransaction();
-      return;
-    }
+  const syncTransform = () => {
+    if (!mesh) return;
 
     const position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
     const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
     const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
 
     updateObject(object.id, { position, rotation, scale }, false);
+  };
+
+  const startTransform = () => {
+    beginTransaction();
+    onTransformDraggingChange(true);
+  };
+
+  const stopTransform = () => {
+    syncTransform();
     endTransaction();
     onTransformDraggingChange(false);
   };
@@ -632,6 +634,7 @@ function SceneMesh({
             translationSnap={snap.enabled ? snap.position : undefined}
             rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
             onMouseDown={startTransform}
+            onObjectChange={syncTransform}
             onMouseUp={stopTransform}
           />
         )
