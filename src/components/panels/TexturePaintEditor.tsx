@@ -141,7 +141,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     const canvas = atlasCanvasRef.current;
     if (!canvas || canvas.width <= 0 || canvas.height <= 0) return;
     const dataUrl = canvas.toDataURL('image/png');
-    loadedKeyRef.current = `${objectId}:${dataUrl}`;
+    loadedKeyRef.current = `${objectId}:${dataUrl}:${atlas.signature}`;
     onCommit({ dataUrl, width: canvas.width, height: canvas.height, pixelated: true });
   };
 
