@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../materials/presets';
 import { createGeometry } from '../../geometry/factory';
 import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
 import { setSurfacePaintSettings, subscribeSurfacePaint } from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
-import type { MaterialData, Vec3 } from '../../types/editor';
+import type { MaterialData, PaintTextureData, Vec3 } from '../../types/editor';
 import { TexturePaintEditor } from './TexturePaintEditor';
 
 interface PropertiesPanelProps {
@@ -15,6 +15,64 @@ interface PropertiesPanelProps {
 type ColorTarget = 'base' | 'paint';
 
 const round = (value: number) => Number(value.toFixed(3));
+
+function hexRgb(color: string): [number, number, number] {
+  const normalized = color.replace('#', '');
+  return [
+    Number.parseInt(normalized.slice(0, 2), 16),
+    Number.parseInt(normalized.slice(2, 4), 16),
+    Number.parseInt(normalized.slice(4, 6), 16)
+  ];
+}
+
+function recolorTextureBackground(
+  texture: PaintTextureData,
+  previousColor: string,
+  nextColor: string
+): Promise<PaintTextureData> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = texture.width;
+      canvas.height = texture.height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) {
+        reject(new Error('2D-Kontext für Grundfarbenänderung nicht verfügbar.'));
+        return;
+      }
+
+      context.imageSmoothingEnabled = false;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+      const previous = hexRgb(previousColor);
+      const next = hexRgb(nextColor);
+      const tolerance = 3;
+
+      for (let offset = 0; offset < pixels.data.length; offset += 4) {
+        const matchesBackground = pixels.data[offset + 3] > 0
+          && Math.abs(pixels.data[offset] - previous[0]) <= tolerance
+          && Math.abs(pixels.data[offset + 1] - previous[1]) <= tolerance
+          && Math.abs(pixels.data[offset + 2] - previous[2]) <= tolerance;
+        if (!matchesBackground) continue;
+
+        pixels.data[offset] = next[0];
+        pixels.data[offset + 1] = next[1];
+        pixels.data[offset + 2] = next[2];
+      }
+
+      context.putImageData(pixels, 0, 0);
+      resolve({
+        ...texture,
+        dataUrl: canvas.toDataURL('image/png')
+      });
+    };
+
+    image.onerror = () => reject(new Error('Bemalung konnte für die Grundfarbenänderung nicht geladen werden.'));
+    image.src = texture.dataUrl;
+  });
+}
 
 function VectorEditor({ label, value, unit, onChange }: { label: string; value: Vec3; unit?: 'deg'; onChange: (value: Vec3) => void }) {
   const shown = value.map((item) => round(unit === 'deg' ? item * 180 / Math.PI : item)) as Vec3;
@@ -70,8 +128,12 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const recentColors = useEditorStore((state) => state.recentColors);
   const [colorTarget, setColorTarget] = useState<ColorTarget>('base');
   const [paintColor, setPaintColor] = useState('#AEB8BE');
+  const recolorRequestRef = useRef(0);
 
-  useEffect(() => subscribeSurfacePaint((settings) => setPaintColor(settings.color)), []);
+  useEffect(() => subscribeSurfacePaint((settings) => {
+    setPaintColor(settings.color);
+    if (settings.enabled) setColorTarget('paint');
+  }), []);
 
   const paintAtlas = useMemo(() => {
     if (!object) return FULL_SURFACE_UV_ATLAS;
@@ -101,9 +163,25 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const mergedColors = [...new Set([...recentColors, ...NORTHCORE_COLORS, ...LOW_POLY_COLORS])];
   const shownColor = colorTarget === 'base' ? object.material.color : paintColor;
 
+  const changeBaseColor = (normalized: string): void => {
+    const previousColor = object.material.color;
+    const paintTexture = object.material.paintTexture;
+    const requestId = ++recolorRequestRef.current;
+
+    setMaterial({ color: normalized });
+    if (!paintTexture || previousColor.toUpperCase() === normalized) return;
+
+    void recolorTextureBackground(paintTexture, previousColor, normalized)
+      .then((updatedTexture) => {
+        if (recolorRequestRef.current !== requestId) return;
+        setMaterial({ paintTexture: updatedTexture }, false);
+      })
+      .catch(() => undefined);
+  };
+
   const changeSelectedColor = (color: string): void => {
     const normalized = color.toUpperCase();
-    if (colorTarget === 'base') setMaterial({ color: normalized });
+    if (colorTarget === 'base') changeBaseColor(normalized);
     else setSurfacePaintSettings({ color: normalized });
   };
 
