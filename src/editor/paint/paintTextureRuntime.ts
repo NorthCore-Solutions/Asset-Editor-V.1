@@ -46,7 +46,11 @@ function applyTexture(material: THREE.MeshStandardMaterial, object: SceneObjectD
   const paint = object.material.paintTexture;
   const activeUrl = material.userData.northcorePaintDataUrl as string | undefined;
 
+  material.opacity = object.material.opacity;
+
   if (!paint) {
+    material.transparent = object.material.opacity < 1;
+    material.alphaTest = 0;
     if (!activeUrl && !material.map) return;
     material.userData.northcorePaintDataUrl = undefined;
     material.map = null;
@@ -55,6 +59,8 @@ function applyTexture(material: THREE.MeshStandardMaterial, object: SceneObjectD
     return;
   }
 
+  material.transparent = true;
+  material.alphaTest = 0.001;
   material.color.set('#FFFFFF');
   if (activeUrl === paint.dataUrl && material.map) return;
   material.userData.northcorePaintDataUrl = paint.dataUrl;
