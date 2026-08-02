@@ -76,7 +76,7 @@ function resetBaseMaterial(material: THREE.MeshStandardMaterial, object: SceneOb
 }
 
 function paintOverlay(mesh: THREE.Mesh): THREE.Mesh | null {
-  return mesh.children.find((child) => child.userData[OVERLAY_FLAG] === true) as THREE.Mesh | undefined ?? null;
+  return (mesh.children.find((child) => child.userData[OVERLAY_FLAG] === true) as THREE.Mesh | undefined) ?? null;
 }
 
 function removePaintOverlay(mesh: THREE.Mesh): void {
