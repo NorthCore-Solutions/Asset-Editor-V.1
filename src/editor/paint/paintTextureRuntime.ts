@@ -46,6 +46,8 @@ function applyTexture(material: THREE.MeshStandardMaterial, object: SceneObjectD
   const paint = object.material.paintTexture;
   const activeUrl = material.userData.northcorePaintDataUrl as string | undefined;
 
+  material.emissive.set('#000000');
+  material.emissiveIntensity = 0;
   material.opacity = object.material.opacity;
 
   if (!paint) {
