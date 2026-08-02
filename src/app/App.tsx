@@ -7,6 +7,7 @@ import { HierarchyPanel } from '../components/panels/HierarchyPanel';
 import { EditorToolbar } from '../components/toolbar/EditorToolbar';
 import { RestoreDialog } from '../components/dialogs/RestoreDialog';
 import { EditorViewport } from '../editor/viewport/EditorViewport';
+import { ViewportHelp } from '../editor/viewport/ViewportHelp';
 import { useEditorShortcuts } from '../editor/shortcuts/useEditorShortcuts';
 import { AUTOSAVE_KEY, buildProjectFile, deserializeProject, serializeProject } from '../persistence/projectFile';
 import { useEditorStore } from '../store/editorStore';
@@ -45,6 +46,7 @@ export function App() {
       <main className="workspace">
         <ShapesPanel />
         <EditorViewport />
+        <ViewportHelp />
         <PropertiesPanel />
         <HierarchyPanel />
       </main>
