@@ -44,24 +44,45 @@
   top: 0;
   right: 0;
   bottom: var(--hierarchy-panel-height);
+  display: flex;
+  flex-direction: column;
   width: var(--properties-panel-width);
+  overflow: hidden;
+  border-left-width: 1px;
+  box-shadow: -8px 0 18px rgba(0, 0, 0, 0.16);
+}
+
+.workspace > .right-panel > .panel-header {
+  position: relative;
+  top: auto;
+  flex: 0 0 32px;
+}
+
+.properties-scroll-content {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  border-left-width: 1px;
-  box-shadow: -8px 0 18px rgba(0, 0, 0, 0.16);
 }
 
-.workspace > .right-panel::-webkit-scrollbar {
+.properties-scroll-content::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
 }
 
-.workspace > .left-panel::after,
-.workspace > .right-panel::after {
+.panel-end-space {
+  flex: 0 0 10px;
+  min-height: 10px;
+  pointer-events: none;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace > .left-panel::after {
   content: '';
   position: absolute;
   right: 0;
@@ -100,8 +121,7 @@
   box-shadow: none;
 }
 
-.workspace.inventory-collapsed > .left-panel::after,
-.workspace.properties-collapsed > .right-panel::after {
+.workspace.inventory-collapsed > .left-panel::after {
   display: none;
 }
 
