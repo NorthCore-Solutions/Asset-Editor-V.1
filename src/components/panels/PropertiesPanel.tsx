@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../materials/presets';
 import { createGeometry } from '../../geometry/factory';
 import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
+import { setSurfacePaintSettings, subscribeSurfacePaint } from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, Vec3 } from '../../types/editor';
 import { TexturePaintEditor } from './TexturePaintEditor';
@@ -10,6 +11,8 @@ interface PropertiesPanelProps {
   collapsed: boolean;
   onToggle: () => void;
 }
+
+type ColorTarget = 'base' | 'paint';
 
 const round = (value: number) => Number(value.toFixed(3));
 
@@ -65,6 +68,11 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const duplicateObject = useEditorStore((state) => state.duplicateObject);
   const deleteObject = useEditorStore((state) => state.deleteObject);
   const recentColors = useEditorStore((state) => state.recentColors);
+  const [colorTarget, setColorTarget] = useState<ColorTarget>('base');
+  const [paintColor, setPaintColor] = useState('#AEB8BE');
+
+  useEffect(() => subscribeSurfacePaint((settings) => setPaintColor(settings.color)), []);
+
   const paintAtlas = useMemo(() => {
     if (!object) return FULL_SURFACE_UV_ATLAS;
     const geometry = createGeometry({ type: object.type, geometry: object.geometry });
@@ -90,8 +98,14 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   }
 
   const setMaterial = (patch: Partial<MaterialData>, history = true) => updateMaterial(object.id, patch, history);
-  const palettes = [{ title: 'Zuletzt', colors: recentColors }, { title: 'NorthCore', colors: NORTHCORE_COLORS }, { title: 'Low-Poly', colors: LOW_POLY_COLORS }];
-  const paintPalette = [...recentColors, ...NORTHCORE_COLORS, ...LOW_POLY_COLORS];
+  const mergedColors = [...new Set([...recentColors, ...NORTHCORE_COLORS, ...LOW_POLY_COLORS])];
+  const shownColor = colorTarget === 'base' ? object.material.color : paintColor;
+
+  const changeSelectedColor = (color: string): void => {
+    const normalized = color.toUpperCase();
+    if (colorTarget === 'base') setMaterial({ color: normalized });
+    else setSurfacePaintSettings({ color: normalized });
+  };
 
   return (
     <aside className="panel right-panel">
@@ -105,29 +119,49 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
           <div className="field-row"><label>Gesperrt</label><input type="checkbox" checked={object.locked} onChange={(event) => updateObject(object.id, { locked: event.target.checked })} /></div>
           <div className="inline-actions"><button onClick={() => duplicateObject(object.id)}>Duplizieren</button><button className="danger" onClick={() => deleteObject(object.id)}>Löschen</button></div>
         </section>
+
         <section className="panel-section">
           <h3>Transformation</h3>
           <VectorEditor label="Position" value={object.position} onChange={(value) => updateTransform(object.id, 'position', value)} />
           <VectorEditor label="Rotation" value={object.rotation} unit="deg" onChange={(value) => updateTransform(object.id, 'rotation', value)} />
           <VectorEditor label="Skalierung" value={object.scale} onChange={(value) => updateTransform(object.id, 'scale', value)} />
         </section>
+
         <section className="panel-section">
-          <h3>Material</h3>
+          <h3>Material & Farben</h3>
           <div className="field-row"><label>Vorlage</label><select defaultValue="" onChange={(event) => { const preset = MATERIAL_PRESETS[event.target.value]; if (preset) setMaterial(preset); }}><option value="">– auswählen –</option>{Object.keys(MATERIAL_PRESETS).map((name) => <option key={name}>{name}</option>)}</select></div>
-          <div className="field-row"><label>Grundfarbe</label><div className="color-row"><input type="color" value={object.material.color} onChange={(event) => setMaterial({ color: event.target.value })} /><input value={object.material.color} onChange={(event) => /^#[0-9a-fA-F]{6}$/.test(event.target.value) && setMaterial({ color: event.target.value })} /></div></div>
-          {palettes.map((palette) => palette.colors.length > 0 && <div key={palette.title}><h3>{palette.title}</h3><div className="palette">{palette.colors.map((color) => <button key={color} className="swatch" title={color} aria-label={color} style={{ background: color }} onClick={() => setMaterial({ color })} />)}</div></div>)}
+
+          <div className="merged-color-block">
+            <div className="color-target-toggle">
+              <button type="button" className={colorTarget === 'base' ? 'color-target-button active' : 'color-target-button'} onClick={() => setColorTarget('base')}>Grundfarbe</button>
+              <button type="button" className={colorTarget === 'paint' ? 'color-target-button active' : 'color-target-button'} onClick={() => setColorTarget('paint')}>Malfarbe</button>
+            </div>
+            <div className="field-row">
+              <label>Farbe</label>
+              <div className="color-row">
+                <input type="color" value={shownColor} onChange={(event) => changeSelectedColor(event.target.value)} />
+                <input value={shownColor} onChange={(event) => /^#[0-9a-fA-F]{6}$/.test(event.target.value) && changeSelectedColor(event.target.value)} />
+              </div>
+            </div>
+            <div className="palette">
+              {mergedColors.map((color) => (
+                <button key={color} className="swatch" title={color} aria-label={color} style={{ background: color }} onClick={() => changeSelectedColor(color)} />
+              ))}
+            </div>
+          </div>
+
           <RangeField label="Rauheit" value={object.material.roughness} min={0} max={1} step={0.01} onChange={(value, history) => setMaterial({ roughness: value }, history)} />
           <RangeField label="Metallisch" value={object.material.metalness} min={0} max={1} step={0.01} onChange={(value, history) => setMaterial({ metalness: value }, history)} />
           <RangeField label="Transparenz" value={object.material.opacity} min={0} max={1} step={0.01} onChange={(value, history) => setMaterial({ opacity: value }, history)} />
           <div className="field-row"><label>Flat Shading</label><input type="checkbox" checked={object.material.flatShading} onChange={(event) => setMaterial({ flatShading: event.target.checked })} /></div>
         </section>
+
         <section className="panel-section">
           <h3>Bemalung</h3>
           <TexturePaintEditor
             objectId={object.id}
             baseColor={object.material.color}
             texture={object.material.paintTexture}
-            palette={paintPalette}
             atlas={paintAtlas}
             onCommit={(paintTexture) => setMaterial({ paintTexture })}
           />
