@@ -19,12 +19,12 @@ import {
   setSurfacePaintSettings,
   subscribeSurfacePaint
 } from '../../editor/paint/surfacePaintSession';
+import './texture-paint-editor.css';
 
 interface TexturePaintEditorProps {
   objectId: string;
   baseColor: string;
   texture?: PaintTextureData;
-  palette: string[];
   atlas: SurfaceUvAtlas;
   onCommit: (texture: PaintTextureData | undefined) => void;
 }
@@ -68,7 +68,7 @@ function linePoints(from: [number, number], to: [number, number]): Array<[number
   return points;
 }
 
-export function TexturePaintEditor({ objectId, baseColor, texture, palette, atlas, onCommit }: TexturePaintEditorProps) {
+export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onCommit }: TexturePaintEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<[number, number] | null>(null);
@@ -79,6 +79,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
   const [paintColor, setPaintColor] = useState(baseColor);
   const [brushSize, setBrushSize] = useState(1);
   const [surfaceEnabled, setSurfaceEnabled] = useState(false);
+  const [selectedIsland, setSelectedIsland] = useState(0);
   const [, refreshControls] = useState(0);
 
   useEffect(() => subscribeSurfacePaint((settings) => {
@@ -86,9 +87,18 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
     setTool(settings.tool);
     setPaintColor(settings.color);
     setBrushSize(settings.brushSize);
-  }), []);
+    setSelectedIsland(Math.min(settings.islandIndex, Math.max(0, atlas.islands.length - 1)));
+  }), [atlas.islands.length]);
 
   useEffect(() => () => setSurfacePaintSettings({ enabled: false }), []);
+
+  useEffect(() => {
+    const clamped = Math.min(selectedIsland, Math.max(0, atlas.islands.length - 1));
+    if (clamped !== selectedIsland) {
+      setSelectedIsland(clamped);
+      setSurfacePaintSettings({ islandIndex: clamped });
+    }
+  }, [atlas.islands.length, selectedIsland]);
 
   const changeTool = (nextTool: PaintTool): void => {
     setTool(nextTool);
@@ -104,6 +114,12 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
   const changeBrushSize = (nextSize: number): void => {
     setBrushSize(nextSize);
     setSurfacePaintSettings({ brushSize: nextSize });
+  };
+
+  const changeIsland = (nextIsland: number): void => {
+    const clamped = Math.max(0, Math.min(atlas.islands.length - 1, nextIsland));
+    setSelectedIsland(clamped);
+    setSurfacePaintSettings({ islandIndex: clamped });
   };
 
   const readCanvas = (): ImageData | null => {
@@ -203,6 +219,8 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
   const startPaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     event.preventDefault();
     const point = canvasPoint(event.currentTarget, event.clientX, event.clientY);
+    const islandIndex = atlasIslandAtPixel(atlas, event.currentTarget.width, event.currentTarget.height, point[0], point[1]);
+    changeIsland(islandIndex);
 
     if (tool === 'eyedropper') {
       applyAt(point);
@@ -230,6 +248,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
     const previousIsland = previous
       ? atlasIslandAtPixel(atlas, event.currentTarget.width, event.currentTarget.height, previous[0], previous[1])
       : currentIsland;
+    if (currentIsland !== selectedIsland) changeIsland(currentIsland);
     applyAt(point, currentIsland === previousIsland ? (previous ?? point) : point);
     lastPointRef.current = point;
   };
@@ -239,6 +258,63 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
     drawingRef.current = false;
     lastPointRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    commitCanvas();
+  };
+
+  const copySelectedSurfaceToAll = (): void => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d', { willReadFrequently: true });
+    if (!canvas || !context || atlas.islands.length < 2) return;
+
+    const source = atlasPixelRegion(atlas, selectedIsland, canvas.width, canvas.height);
+    const sourceWidth = source.maxX - source.minX + 1;
+    const sourceHeight = source.maxY - source.minY + 1;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return;
+
+    pushHistory();
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = sourceWidth;
+    sourceCanvas.height = sourceHeight;
+    const sourceContext = sourceCanvas.getContext('2d');
+    if (!sourceContext) return;
+    sourceContext.putImageData(context.getImageData(source.minX, source.minY, sourceWidth, sourceHeight), 0, 0);
+
+    context.imageSmoothingEnabled = false;
+    atlas.islands.forEach((_, islandIndex) => {
+      if (islandIndex === selectedIsland) return;
+      const target = atlasPixelRegion(atlas, islandIndex, canvas.width, canvas.height);
+      const targetWidth = target.maxX - target.minX + 1;
+      const targetHeight = target.maxY - target.minY + 1;
+      context.clearRect(target.minX, target.minY, targetWidth, targetHeight);
+      context.drawImage(sourceCanvas, 0, 0, sourceWidth, sourceHeight, target.minX, target.minY, targetWidth, targetHeight);
+    });
+
+    commitCanvas();
+  };
+
+  const fillAllSurfaces = (): void => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d', { willReadFrequently: true });
+    if (!canvas || !context) return;
+
+    pushHistory();
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const color = hexToRgba(paintColor);
+
+    atlas.islands.forEach((_, islandIndex) => {
+      const region = atlasPixelRegion(atlas, islandIndex, image.width, image.height);
+      for (let y = region.minY; y <= region.maxY; y += 1) {
+        for (let x = region.minX; x <= region.maxX; x += 1) {
+          const offset = (y * image.width + x) * 4;
+          image.data[offset] = color.r;
+          image.data[offset + 1] = color.g;
+          image.data[offset + 2] = color.b;
+          image.data[offset + 3] = color.a;
+        }
+      }
+    });
+
+    context.putImageData(image, 0, 0);
     commitCanvas();
   };
 
@@ -272,87 +348,69 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, atla
     refreshControls((value) => value + 1);
   };
 
-  const shownWidth = texture?.width ?? DEFAULT_PAINT_SIZE;
-  const shownHeight = texture?.height ?? DEFAULT_PAINT_SIZE;
-
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div className="paint-editor">
       <button
         type="button"
+        className={surfaceEnabled ? 'paint-mode-button active' : 'paint-mode-button'}
         aria-pressed={surfaceEnabled}
         onClick={() => setSurfacePaintSettings({ enabled: !surfaceEnabled })}
-        style={surfaceEnabled ? { outline: '1px solid #7ed99a', background: '#24513a' } : undefined}
       >
-        {surfaceEnabled ? 'Auf Form malen: aktiv' : 'Auf Form malen'}
+        Auf Form malen
       </button>
-      {surfaceEnabled && <small>Kamera gesperrt · direkt auf die sichtbare Fläche im Hauptfenster malen</small>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+      <div className="paint-tool-grid">
         {TOOLS.map((entry) => (
           <button
             key={entry.tool}
             type="button"
+            className={tool === entry.tool ? 'paint-tool-button active' : 'paint-tool-button'}
             aria-pressed={tool === entry.tool}
             onClick={() => changeTool(entry.tool)}
-            style={tool === entry.tool ? { outline: '1px solid #68a47d', background: '#22382d' } : undefined}
           >
             {entry.label}
           </button>
         ))}
       </div>
 
-      <div className="field-row">
-        <label>Mal-Farbe</label>
-        <div className="color-row">
-          <input type="color" value={paintColor} onChange={(event) => changeColor(event.target.value)} />
-          <input value={paintColor} onChange={(event) => /^#[0-9a-fA-F]{6}$/.test(event.target.value) && changeColor(event.target.value)} />
-        </div>
-      </div>
-
       {(tool === 'brush' || tool === 'eraser') && (
-        <div className="range-row">
+        <div className="range-row paint-brush-size">
           <label>Pinselgröße</label>
           <input type="range" min={1} max={8} step={1} value={brushSize} onChange={(event) => changeBrushSize(Number(event.target.value))} />
           <span>{brushSize}px</span>
         </div>
       )}
 
-      <div className="palette">
-        {[...new Set(palette)].slice(0, 24).map((color) => (
-          <button
-            key={color}
-            type="button"
-            className="swatch"
-            title={color}
-            aria-label={color}
-            style={{ background: color }}
-            onClick={() => changeColor(color)}
-          />
-        ))}
+      <div className="paint-surface-block">
+        <div className="field-row">
+          <label>Fläche</label>
+          <select value={selectedIsland} onChange={(event) => changeIsland(Number(event.target.value))}>
+            {atlas.islands.map((_, islandIndex) => (
+              <option key={islandIndex} value={islandIndex}>Fläche {islandIndex + 1}</option>
+            ))}
+          </select>
+        </div>
+        <div className="paint-bulk-actions">
+          <button type="button" disabled={atlas.islands.length < 2} onClick={copySelectedSurfaceToAll}>Auf alle kopieren</button>
+          <button type="button" onClick={fillAllSurfaces}>Alle Flächen füllen</button>
+        </div>
       </div>
 
-      <div style={{
-        width: '100%', maxWidth: 280, justifySelf: 'center', padding: 6,
-        border: '1px solid #425159', borderRadius: 4,
-        backgroundImage: 'conic-gradient(#c7c7c7 25%, #eeeeee 0 50%, #c7c7c7 0 75%, #eeeeee 0)',
-        backgroundSize: '16px 16px'
-      }}>
+      <div className="paint-canvas-shell">
         <canvas
           ref={canvasRef}
           onPointerDown={startPaint}
           onPointerMove={continuePaint}
           onPointerUp={finishPaint}
           onPointerCancel={finishPaint}
-          style={{ width: '100%', aspectRatio: '1', display: 'block', imageRendering: 'pixelated', touchAction: 'none', cursor: 'crosshair' }}
         />
       </div>
 
-      <div className="inline-actions">
+      <div className="paint-history-actions">
         <button type="button" disabled={historyRef.current.length === 0} onClick={undo}>Rückgängig</button>
         <button type="button" disabled={futureRef.current.length === 0} onClick={redo}>Wiederholen</button>
-        <button type="button" className="danger" disabled={!texture} onClick={clearTexture}>Bemalung entfernen</button>
+        <button type="button" className="danger" disabled={!texture} onClick={clearTexture}>Entfernen</button>
       </div>
-      <small>{shownWidth}×{shownHeight}-Pixeltextur · {atlas.islands.length} getrennte Fläche{atlas.islands.length === 1 ? '' : 'n'}</small>
     </div>
   );
 }
