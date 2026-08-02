@@ -6,6 +6,8 @@ import { createGeometry } from '../../geometry/factory';
 import { findFormSurfaceSnap, isFormType } from '../snapping/primitiveSurfaceSnap';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData, SnapSettings, TransformMode } from '../../types/editor';
+import { useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePaint';
+import type { SurfacePaintSettings } from '../paint/surfacePaintSession';
 import { PrimitiveSnapPattern } from './PrimitiveSnapPattern';
 
 interface OrbitControlApi {
@@ -210,13 +212,14 @@ function KeyboardCameraControls({ active }: { active: boolean }) {
   return null;
 }
 
-function CameraController() {
+function CameraController({ active }: { active: boolean }) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const cameraView = useEditorStore((state) => state.cameraView);
   const cameraRequestId = useEditorStore((state) => state.cameraRequestId);
 
   useEffect(() => {
+    if (!active) return;
     const { objects, selectedIds } = useEditorStore.getState();
     const selectedObjects = objects.filter((object) => selectedIds.includes(object.id));
     const target = selectedObjects.length > 0
@@ -245,7 +248,7 @@ function CameraController() {
     controls?.target.copy(target);
     controls?.update();
     camera.updateProjectionMatrix();
-  }, [camera, cameraRequestId, cameraView, controls]);
+  }, [active, camera, cameraRequestId, cameraView, controls]);
 
   return null;
 }
@@ -770,12 +773,13 @@ function GroupTransformControls({ selectedIds, registry, tool, snap, onTransform
   );
 }
 
-function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTransformDraggingChange }: {
+function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTransformDraggingChange, paintSettings }: {
   object: SceneObjectData;
   registry: MeshRegistry;
   snapTargetId: string | null;
   onSnapTargetChange: (targetId: string | null) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
+  paintSettings: SurfacePaintSettings;
 }) {
   const objects = useEditorStore((state) => state.objects);
   const selectedIds = useEditorStore((state) => state.selectedIds);
@@ -789,8 +793,9 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
   const geometry = useMemo(() => createGeometry({ type: object.type, geometry: object.geometry }), [object.geometry, object.type]);
   const selected = selectedIds.includes(object.id);
   const singleSelection = selected && selectedIds.length === 1;
+  const paint = useSurfacePaint(object, singleSelection, paintSettings);
   const snapToolActive = tool === 'translate' || tool === 'scale';
-  const showSnapPattern = snap.surface && snapToolActive && isFormType(object.type) && !singleSelection && object.visible;
+  const showSnapPattern = !paintSettings.enabled && snap.surface && snapToolActive && isFormType(object.type) && !singleSelection && object.visible;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => {
@@ -846,22 +851,33 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
         castShadow
         receiveShadow
         onPointerDown={(event) => {
+          if (paintSettings.enabled) {
+            paint.onPointerDown(event);
+            event.stopPropagation();
+            return;
+          }
           if (event.button === 2) event.stopPropagation();
         }}
+        onPointerMove={paint.onPointerMove}
+        onPointerUp={paint.onPointerUp}
+        onPointerCancel={paint.onPointerCancel}
         onClick={(event: ThreeEvent<MouseEvent>) => {
           event.stopPropagation();
+          if (paintSettings.enabled) return;
           select(object.id, event.shiftKey);
         }}
       >
         <meshStandardMaterial
-          color={object.material.color}
+          map={paint.texture}
+          color={paint.texture ? '#FFFFFF' : object.material.color}
           roughness={object.material.roughness}
           metalness={object.material.metalness}
           opacity={object.material.opacity}
-          transparent={object.material.opacity < 1}
+          transparent={object.material.opacity < 1 || Boolean(paint.texture)}
+          alphaTest={paint.texture ? 0.001 : 0}
           flatShading={object.material.flatShading}
-          emissive={selected ? '#24603d' : '#000000'}
-          emissiveIntensity={selected ? 0.72 : 0}
+          emissive="#000000"
+          emissiveIntensity={0}
         />
       </mesh>
 
@@ -874,7 +890,7 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
         />
       )}
 
-      {singleSelection && !object.locked && object.visible && mesh && (
+      {!paintSettings.enabled && singleSelection && !object.locked && object.visible && mesh && (
         tool === 'scale' ? (
           <ScaleHandles
             mesh={mesh}
@@ -911,11 +927,12 @@ function StableGrid({ cellSize }: { cellSize: number }) {
   return <group><Grid {...gridProps} position={[0, 0.003, 0]} /><Grid {...gridProps} position={[0, -0.003, 0]} rotation={[Math.PI, 0, 0]} /></group>;
 }
 
-function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi }: {
+function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi, paintSettings }: {
   keyboardActive: boolean;
   selectionActive: boolean;
   registry: MeshRegistry;
   onSelectionApi: (api: SelectionApi) => void;
+  paintSettings: SurfacePaintSettings;
 }) {
   const objects = useEditorStore((state) => state.objects);
   const selectedIds = useEditorStore((state) => state.selectedIds);
@@ -926,11 +943,13 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
   const [transformDragging, setTransformDragging] = useState(false);
   const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
   const selectedObjects = objects.filter((object) => selectedIds.includes(object.id));
-  const groupMovable = selectedObjects.length > 1 && selectedObjects.every((object) => object.visible && !object.locked);
+  const groupMovable = !paintSettings.enabled
+    && selectedObjects.length > 1
+    && selectedObjects.every((object) => object.visible && !object.locked);
 
   useEffect(() => {
-    if (!snap.surface || (tool !== 'translate' && tool !== 'scale')) setSnapTargetId(null);
-  }, [snap.surface, tool]);
+    if (!snap.surface || (tool !== 'translate' && tool !== 'scale') || paintSettings.enabled) setSnapTargetId(null);
+  }, [paintSettings.enabled, snap.surface, tool]);
 
   return (
     <>
@@ -940,7 +959,14 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
       <hemisphereLight args={['#dbe7ee', '#2a312c', 0.8]} />
       {scene.gridVisible && <StableGrid cellSize={scene.gridSize} />}
       {scene.axesVisible && <axesHelper args={[3]} />}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={(event) => { if (event.button === 0 && !event.ctrlKey) select(null); }}>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.01, 0]}
+        receiveShadow
+        onClick={(event) => {
+          if (!paintSettings.enabled && event.button === 0 && !event.ctrlKey) select(null);
+        }}
+      >
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
@@ -952,18 +978,19 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
           snapTargetId={snapTargetId}
           onSnapTargetChange={setSnapTargetId}
           onTransformDraggingChange={setTransformDragging}
+          paintSettings={paintSettings}
         />
       ))}
       {groupMovable && <GroupTransformControls selectedIds={selectedIds} registry={registry} tool={tool} snap={snap} onTransformDraggingChange={setTransformDragging} />}
       <OrbitControls
         makeDefault
-        enabled={!transformDragging && !selectionActive}
+        enabled={!paintSettings.enabled && !transformDragging && !selectionActive}
         enableDamping
         dampingFactor={0.08}
         mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }}
       />
-      <KeyboardCameraControls active={keyboardActive && !transformDragging && !selectionActive} />
-      <CameraController />
+      <KeyboardCameraControls active={!paintSettings.enabled && keyboardActive && !transformDragging && !selectionActive} />
+      <CameraController active={!paintSettings.enabled} />
       <SelectionBridge registry={registry} onReady={onSelectionApi} />
     </>
   );
@@ -972,6 +999,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
 export function EditorViewport() {
   const select = useEditorStore((state) => state.select);
   const selectMany = useEditorStore((state) => state.selectMany);
+  const paintSettings = useSurfacePaintSettings();
   const viewportRef = useRef<HTMLDivElement>(null);
   const registry = useRef(new Map<string, THREE.Mesh>());
   const selectionApiRef = useRef<SelectionApi | null>(null);
@@ -1040,7 +1068,7 @@ export function EditorViewport() {
 
   const startMarquee = (event: React.PointerEvent<HTMLDivElement>) => {
     viewportRef.current?.focus();
-    if (event.button !== 0 || !event.ctrlKey || !viewportRef.current) return;
+    if (paintSettings.enabled || event.button !== 0 || !event.ctrlKey || !viewportRef.current) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1092,14 +1120,31 @@ export function EditorViewport() {
         camera={{ position: [6, 5, 7], fov: 45, near: 0.05, far: 500 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
         onPointerMissed={(event) => {
-          if (event.button === 0 && !event.ctrlKey && !suppressNextClickRef.current) select(null);
+          if (!paintSettings.enabled && event.button === 0 && !event.ctrlKey && !suppressNextClickRef.current) select(null);
         }}
       >
-        <EditorScene keyboardActive={keyboardActive} selectionActive={Boolean(marquee)} registry={registry} onSelectionApi={registerSelectionApi} />
+        <EditorScene
+          keyboardActive={keyboardActive}
+          selectionActive={Boolean(marquee)}
+          registry={registry}
+          onSelectionApi={registerSelectionApi}
+          paintSettings={paintSettings}
+        />
       </Canvas>
       {marquee && <div className="selection-marquee" style={marqueeStyle} />}
+      {paintSettings.enabled && (
+        <div style={{
+          position: 'absolute', left: 12, top: 12, zIndex: 10, pointerEvents: 'none',
+          padding: '6px 9px', border: '1px solid #68a47d', borderRadius: 4,
+          background: 'rgba(25, 48, 36, 0.9)', color: '#dff4e7', fontSize: 12
+        }}>
+          Malmodus aktiv · direkt auf das ausgewählte Objekt malen
+        </div>
+      )}
       <div className="viewport-hint">
-        Strg + Linksklick-Ziehen: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren
+        {paintSettings.enabled
+          ? 'Malmodus: Kamera und Transformation gesperrt'
+          : 'Strg + Linksklick-Ziehen: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren'}
       </div>
     </div>
   );
