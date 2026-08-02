@@ -69,13 +69,55 @@
   line-height: 18px;
 }
 
+.inventory-category-strip {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+}
+
 .inventory-categories {
   display: flex;
+  min-width: 0;
   gap: 5px;
-  margin-top: 8px;
-  padding-bottom: 2px;
   overflow-x: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.inventory-categories::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.inventory-category-arrow {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 25px;
+  min-width: 22px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--silver);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.inventory-category-arrow:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--panel-light);
+  color: var(--text);
+}
+
+.inventory-category-arrow:disabled {
+  opacity: 0.2;
+  cursor: default;
 }
 
 .inventory-categories button {
@@ -103,7 +145,16 @@
   flex: 1 1 auto;
   min-height: 0;
   padding: 9px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.inventory-results::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .inventory-grid {
