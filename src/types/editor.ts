@@ -6,12 +6,20 @@ export type Vec3 = [number, number, number];
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 export type CameraView = 'perspective' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'focus';
 
+export interface PaintTextureData {
+  dataUrl: string;
+  width: number;
+  height: number;
+  pixelated: boolean;
+}
+
 export interface MaterialData {
   color: string;
   roughness: number;
   metalness: number;
   opacity: number;
   flatShading: boolean;
+  paintTexture?: PaintTextureData;
 }
 
 export interface SceneObjectData {
