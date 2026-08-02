@@ -43,6 +43,13 @@
   border-radius: 4px;
 }
 
+.paint-surface-preview-title {
+  color: var(--silver);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .paint-canvas-shell {
   width: 100%;
   max-width: 280px;
