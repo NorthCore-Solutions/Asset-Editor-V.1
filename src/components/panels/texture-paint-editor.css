@@ -61,6 +61,23 @@
   background-size: 16px 16px;
 }
 
+.paint-canvas-switch {
+  transform-origin: center;
+  animation: paint-surface-enter 180ms ease-out;
+}
+
+@keyframes paint-surface-enter {
+  from {
+    opacity: 0.55;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .paint-canvas-shell canvas {
   width: 100%;
   aspect-ratio: 1;
