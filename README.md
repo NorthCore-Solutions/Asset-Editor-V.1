@@ -81,9 +81,12 @@ Die Build-Ausgabe liegt anschließend unter `dist/`.
 
 | Aktion | Kürzel |
 |---|---|
-| Verschieben | `W` oder `G` |
-| Drehen | `E` oder `R` |
-| Skalieren | `S` |
+| Kamera vorwärts/rückwärts | `W` / `S` bei fokussiertem Viewport |
+| Kamera links/rechts | `A` / `D` bei fokussiertem Viewport |
+| Kamera links/rechts drehen | `Q` / `E` bei fokussiertem Viewport |
+| Werkzeug Verschieben | `W` oder `G` außerhalb des fokussierten Viewports |
+| Werkzeug Drehen | `E` oder `R` außerhalb des fokussierten Viewports |
+| Werkzeug Skalieren | `S` außerhalb des fokussierten Viewports |
 | Löschen | `Entf` |
 | Duplizieren | `Strg + D` |
 | Rückgängig | `Strg + Z` |
@@ -91,7 +94,7 @@ Die Build-Ausgabe liegt anschließend unter `dist/`.
 | Auswahl fokussieren | `F` |
 | Auswahl aufheben | `Escape` |
 
-Tastenkürzel werden in Eingabefeldern nicht ausgelöst.
+Die Kameratasten greifen, sobald der Viewport angeklickt wurde. Tastenkürzel werden in Eingabefeldern nicht ausgelöst.
 
 ### Maussteuerung
 
