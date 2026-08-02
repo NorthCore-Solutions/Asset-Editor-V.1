@@ -1,0 +1,7 @@
+{
+  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  "npm.packageManager": "npm",
+  "liveServer.settings.port": 5500,
+  "liveServer.settings.NoBrowser": true
+}

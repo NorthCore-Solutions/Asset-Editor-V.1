@@ -1,0 +1,29 @@
+import { useEffect } from 'react';
+import { useEditorStore } from '../../store/editorStore';
+
+const isTypingTarget = (target: EventTarget | null): boolean => {
+  const element = target instanceof HTMLElement ? target : null;
+  return Boolean(element?.closest('input, textarea, select, [contenteditable="true"]'));
+};
+
+export function useEditorShortcuts(): void {
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target)) return;
+      const state = useEditorStore.getState();
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'd') { event.preventDefault(); state.duplicateObject(); return; }
+      if ((event.ctrlKey || event.metaKey) && key === 'z' && event.shiftKey) { event.preventDefault(); state.redo(); return; }
+      if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); state.undo(); return; }
+      if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); state.redo(); return; }
+      if (event.key === 'Delete') { state.deleteObject(); return; }
+      if (key === 'w' || key === 'g') state.setTool('translate');
+      else if (key === 'e' || key === 'r') state.setTool('rotate');
+      else if (key === 's') state.setTool('scale');
+      else if (key === 'f') state.requestCameraView('focus');
+      else if (event.key === 'Escape') state.select(null);
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, []);
+}
