@@ -69,36 +69,65 @@ export function createSceneObject(type: PrimitiveType, existingIds: string[] = [
   };
 }
 
-function wedgeGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
-  const w = width / 2; const d = depth / 2;
-  const vertices = new Float32Array([
-    -w,0,-d,  w,0,-d,  w,0,d, -w,0,d,
-    -w,height,d, w,height,d
-  ]);
-  const indices = [0,1,2, 0,2,3, 3,2,5, 3,5,4, 0,3,4, 0,4,1, 1,4,5, 1,5,2];
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geometry.setIndex(indices); geometry.computeVertexNormals();
+function closedFlatGeometry(vertices: number[], indices: number[]): THREE.BufferGeometry {
+  const indexedGeometry = new THREE.BufferGeometry();
+  indexedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  indexedGeometry.setIndex(indices);
+
+  const geometry = indexedGeometry.toNonIndexed();
+  indexedGeometry.dispose();
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
   return geometry;
 }
 
+function wedgeGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
+  const w = width / 2;
+  const d = depth / 2;
+  const vertices = [
+    -w, 0, -d,
+    w, 0, -d,
+    w, 0, d,
+    -w, 0, d,
+    -w, height, d,
+    w, height, d
+  ];
+  const indices = [
+    0, 1, 2, 0, 2, 3,
+    3, 2, 5, 3, 5, 4,
+    0, 3, 4,
+    0, 4, 5, 0, 5, 1,
+    1, 5, 2
+  ];
+  return closedFlatGeometry(vertices, indices);
+}
 
 function prismGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
-  const w = width / 2; const d = depth / 2;
-  const vertices = new Float32Array([
-    -w,0,-d, w,0,-d, 0,height,-d,
-    -w,0,d, w,0,d, 0,height,d
-  ]);
-  const indices = [0,1,2, 3,5,4, 0,3,4, 0,4,1, 2,1,4, 2,4,5, 0,2,5, 0,5,3];
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geometry.setIndex(indices); geometry.computeVertexNormals();
-  return geometry;
+  const w = width / 2;
+  const d = depth / 2;
+  const vertices = [
+    -w, 0, -d,
+    w, 0, -d,
+    0, height, -d,
+    -w, 0, d,
+    w, 0, d,
+    0, height, d
+  ];
+  const indices = [
+    0, 2, 1,
+    3, 4, 5,
+    0, 1, 4, 0, 4, 3,
+    1, 2, 5, 1, 5, 4,
+    0, 3, 5, 0, 5, 2
+  ];
+  return closedFlatGeometry(vertices, indices);
 }
 
 function stairsGeometry(width: number, height: number, depth: number, steps: number): THREE.BufferGeometry {
   const shape = new THREE.Shape();
-  const stepWidth = width / steps; const stepHeight = height / steps;
+  const stepWidth = width / steps;
+  const stepHeight = height / steps;
   shape.moveTo(-width / 2, 0);
   shape.lineTo(width / 2, 0);
   shape.lineTo(width / 2, height);
@@ -114,16 +143,24 @@ function stairsGeometry(width: number, height: number, depth: number, steps: num
 }
 
 function roofGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
-  const w = width / 2; const d = depth / 2;
-  const vertices = new Float32Array([
-    -w,0,-d, w,0,-d, w,0,d, -w,0,d,
-    0,height,-d, 0,height,d
-  ]);
-  const indices = [0,1,4, 3,5,2, 0,4,5, 0,5,3, 1,2,5, 1,5,4, 0,3,2, 0,2,1];
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geometry.setIndex(indices); geometry.computeVertexNormals();
-  return geometry;
+  const w = width / 2;
+  const d = depth / 2;
+  const vertices = [
+    -w, 0, -d,
+    w, 0, -d,
+    w, 0, d,
+    -w, 0, d,
+    0, height, -d,
+    0, height, d
+  ];
+  const indices = [
+    0, 4, 1,
+    3, 2, 5,
+    0, 3, 5, 0, 5, 4,
+    1, 4, 5, 1, 5, 2,
+    0, 1, 2, 0, 2, 3
+  ];
+  return closedFlatGeometry(vertices, indices);
 }
 
 export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'>): THREE.BufferGeometry {
@@ -133,8 +170,16 @@ export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'
     case 'hemisphere': return new THREE.SphereGeometry(g.radius ?? 0.75, g.widthSegments ?? 24, g.heightSegments ?? 12, 0, Math.PI * 2, 0, Math.PI / 2);
     case 'cylinder': return new THREE.CylinderGeometry(g.radiusTop ?? 0.5, g.radiusBottom ?? 0.5, g.height ?? 1.4, g.radialSegments ?? 20);
     case 'cone': return new THREE.ConeGeometry(g.radius ?? 0.65, g.height ?? 1.5, g.radialSegments ?? 20);
-    case 'pyramid': { const geometry = new THREE.ConeGeometry(g.radius ?? 0.8, g.height ?? 1.5, 4); geometry.rotateY(Math.PI / 4); return geometry; }
-    case 'plane': { const geometry = new THREE.PlaneGeometry(g.width ?? 2, g.height ?? 2); geometry.rotateX(-Math.PI / 2); return geometry; }
+    case 'pyramid': {
+      const geometry = new THREE.ConeGeometry(g.radius ?? 0.8, g.height ?? 1.5, 4);
+      geometry.rotateY(Math.PI / 4);
+      return geometry;
+    }
+    case 'plane': {
+      const geometry = new THREE.PlaneGeometry(g.width ?? 2, g.height ?? 2);
+      geometry.rotateX(-Math.PI / 2);
+      return geometry;
+    }
     case 'torus': return new THREE.TorusGeometry(g.radius ?? 0.65, g.tube ?? 0.22, g.radialSegments ?? 12, g.tubularSegments ?? 32);
     case 'wedge': return wedgeGeometry(g.width ?? 1.5, g.height ?? 1, g.depth ?? 1.5);
     case 'prism': return prismGeometry(g.width ?? 1.6, g.height ?? 1.2, g.depth ?? 1.8);
@@ -142,7 +187,13 @@ export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'
     case 'shedRoof': return wedgeGeometry(g.width ?? 3.4, g.height ?? 0.9, g.depth ?? 3.4);
     case 'column': return new THREE.CylinderGeometry(g.radiusTop ?? 0.3, g.radiusBottom ?? 0.36, g.height ?? 2.5, g.radialSegments ?? 16);
     case 'stairs': return stairsGeometry(g.width ?? 2, g.height ?? 1.4, g.depth ?? 1.6, Math.max(2, Math.round(g.steps ?? 5)));
-    case 'cuboid': case 'wall': case 'floor': case 'flatRoof': case 'door': case 'window': case 'chimney':
+    case 'cuboid':
+    case 'wall':
+    case 'floor':
+    case 'flatRoof':
+    case 'door':
+    case 'window':
+    case 'chimney':
       return new THREE.BoxGeometry(g.width ?? 1, g.height ?? 1, g.depth ?? 1);
     default: return new THREE.BoxGeometry(1, 1, 1);
   }
