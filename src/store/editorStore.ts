@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { createSceneObject } from '../geometry/factory';
+import { findAvailableFormPlacement } from '../editor/snapping/formSpawnPlacement';
+import { isFormType } from '../editor/snapping/primitiveSurfaceSnap';
 import { snapPosition } from '../editor/snapping/positionSnap';
 import type { CameraView, MaterialData, PrimitiveType, ProjectFile, SceneObjectData, SceneSettings, Snapshot, SnapSettings, TransformMode, Vec3 } from '../types/editor';
 
@@ -143,8 +145,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addObject: (type) => set((state) => {
     const object = createSceneObject(type, state.objects.map((item) => item.id));
-    object.position = snapHorizontalPosition(object.position, state.snap);
-    return { ...withHistory(state), objects: [...state.objects, object], selectedId: object.id, selectedIds: [object.id], dirty: true, message: `${object.name} hinzugefügt` };
+    const selectedTarget = state.selectedId
+      ? state.objects.find((item) => item.id === state.selectedId && isFormType(item.type))
+      : undefined;
+
+    object.position = isFormType(type)
+      ? findAvailableFormPlacement(object, state.objects, state.snap.position, selectedTarget?.id)
+      : snapHorizontalPosition(object.position, state.snap);
+
+    return {
+      ...withHistory(state),
+      objects: [...state.objects, object],
+      selectedId: object.id,
+      selectedIds: [object.id],
+      dirty: true,
+      message: `${object.name} hinzugefügt`
+    };
   }),
 
   deleteObject: (id) => set((state) => {
@@ -169,14 +185,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (sources.length === 0) return state;
     const groupId = sources.length > 1 ? crypto.randomUUID() : undefined;
     const duplicates = sources.map((source) => {
-      const offsetPosition: Vec3 = [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35];
-      return {
+      const duplicate: SceneObjectData = {
         ...clone(source),
         id: crypto.randomUUID(),
         name: `${source.name} Kopie`,
-        position: snapHorizontalPosition(offsetPosition, state.snap),
         parentId: groupId
       };
+
+      if (sources.length === 1 && isFormType(source.type)) {
+        duplicate.position = findAvailableFormPlacement(
+          duplicate,
+          state.objects,
+          state.snap.position,
+          source.id
+        );
+      } else {
+        const offsetPosition: Vec3 = [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35];
+        duplicate.position = snapHorizontalPosition(offsetPosition, state.snap);
+      }
+
+      return duplicate;
     });
     return {
       ...withHistory(state),
