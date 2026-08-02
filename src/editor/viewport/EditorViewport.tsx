@@ -199,23 +199,27 @@ function SceneMesh({ object }: { object: SceneObjectData }) {
 }
 
 function StableGrid({ cellSize }: { cellSize: number }) {
+  const gridProps = {
+    args: [GRID_EXTENT, GRID_EXTENT] as [number, number],
+    cellSize,
+    cellThickness: 0.6,
+    cellColor: '#53626a',
+    sectionSize: cellSize * 5,
+    sectionThickness: 1,
+    sectionColor: '#4f8f68',
+    fadeDistance: 1000,
+    fadeStrength: 0,
+    followCamera: false,
+    infiniteGrid: false,
+    frustumCulled: false,
+    renderOrder: 1
+  };
+
   return (
-    <Grid
-      args={[GRID_EXTENT, GRID_EXTENT]}
-      position={[0, 0.003, 0]}
-      cellSize={cellSize}
-      cellThickness={0.6}
-      cellColor="#53626a"
-      sectionSize={cellSize * 5}
-      sectionThickness={1}
-      sectionColor="#4f8f68"
-      fadeDistance={1000}
-      fadeStrength={0}
-      followCamera={false}
-      infiniteGrid={false}
-      frustumCulled={false}
-      renderOrder={1}
-    />
+    <group>
+      <Grid {...gridProps} position={[0, 0.003, 0]} />
+      <Grid {...gridProps} position={[0, -0.003, 0]} rotation={[Math.PI, 0, 0]} />
+    </group>
   );
 }
 
@@ -233,7 +237,7 @@ function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
       {scene.axesVisible && <axesHelper args={[3]} />}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={() => select(null)}>
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
-        <shadowMaterial opacity={0.14} transparent depthWrite={false} />
+        <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
       {objects.map((object) => <SceneMesh key={object.id} object={object} />)}
       <OrbitControls
