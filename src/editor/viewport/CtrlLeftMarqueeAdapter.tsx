@@ -5,11 +5,21 @@ export function CtrlLeftMarqueeAdapter() {
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0 || !event.ctrlKey) return;
-
       const target = event.target instanceof Element ? event.target : null;
       const viewport = target?.closest<HTMLElement>('.viewport');
       if (!viewport) return;
+
+      // Ein echter Strg-Rechtsklick darf den Auswahlrahmen nicht mehr starten.
+      // Nicht vertrauenswürdige Rechtsklick-Ereignisse stammen ausschließlich aus
+      // der internen Linksklick-Anbindung und müssen den Viewport weiterhin erreichen.
+      if (event.button === 2 && event.ctrlKey && event.isTrusted) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      if (event.button !== 0 || !event.ctrlKey) return;
 
       activePointerId.current = event.pointerId;
 
