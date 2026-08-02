@@ -1,11 +1,17 @@
 import { create } from 'zustand';
 import { createSceneObject } from '../geometry/factory';
+import { snapPosition } from '../editor/snapping/positionSnap';
 import type { CameraView, MaterialData, PrimitiveType, ProjectFile, SceneObjectData, SceneSettings, Snapshot, SnapSettings, TransformMode, Vec3 } from '../types/editor';
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const now = () => new Date().toISOString();
 const defaultProject = () => ({ name: 'Unbenanntes Asset', createdAt: now(), updatedAt: now() });
 const defaultScene = (): SceneSettings => ({ background: '#11161A', gridVisible: true, axesVisible: true, gridSize: 1 });
+
+const snapHorizontalPosition = (position: Vec3, snap: SnapSettings): Vec3 => {
+  const snapped = snapPosition(position, snap);
+  return [snapped[0], position[1], snapped[2]];
+};
 
 type EditorSnapshot = Snapshot & { selectedIds: string[] };
 
@@ -137,6 +143,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addObject: (type) => set((state) => {
     const object = createSceneObject(type, state.objects.map((item) => item.id));
+    object.position = snapHorizontalPosition(object.position, state.snap);
     return { ...withHistory(state), objects: [...state.objects, object], selectedId: object.id, selectedIds: [object.id], dirty: true, message: `${object.name} hinzugefügt` };
   }),
 
@@ -161,13 +168,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const sources = state.objects.filter((item) => targets.includes(item.id));
     if (sources.length === 0) return state;
     const groupId = sources.length > 1 ? crypto.randomUUID() : undefined;
-    const duplicates = sources.map((source) => ({
-      ...clone(source),
-      id: crypto.randomUUID(),
-      name: `${source.name} Kopie`,
-      position: [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35] as Vec3,
-      parentId: groupId
-    }));
+    const duplicates = sources.map((source) => {
+      const offsetPosition: Vec3 = [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35];
+      return {
+        ...clone(source),
+        id: crypto.randomUUID(),
+        name: `${source.name} Kopie`,
+        position: snapHorizontalPosition(offsetPosition, state.snap),
+        parentId: groupId
+      };
+    });
     return {
       ...withHistory(state),
       objects: [...state.objects, ...duplicates],
@@ -184,7 +194,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     project: { ...state.project, updatedAt: now() }, dirty: true
   })),
 
-  updateTransform: (id, key, value, history = true) => get().updateObject(id, { [key]: value }, history),
+  updateTransform: (id, key, value, history = true) => {
+    const nextValue = key === 'position' ? snapPosition(value, get().snap) : value;
+    get().updateObject(id, { [key]: nextValue }, history);
+  },
 
   updateMaterial: (id, patch, history = true) => set((state) => {
     const current = state.objects.find((item) => item.id === id);
