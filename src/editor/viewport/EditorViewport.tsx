@@ -3,8 +3,10 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
+import { findFormSurfaceSnap, isFormType } from '../snapping/primitiveSurfaceSnap';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData, SnapSettings, TransformMode } from '../../types/editor';
+import { PrimitiveSnapPattern } from './PrimitiveSnapPattern';
 
 interface OrbitControlApi {
   target: THREE.Vector3;
@@ -588,11 +590,14 @@ function GroupTransformControls({ selectedIds, registry, tool, snap, onTransform
   );
 }
 
-function SceneMesh({ object, registry, onTransformDraggingChange }: {
+function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTransformDraggingChange }: {
   object: SceneObjectData;
   registry: MeshRegistry;
+  snapTargetId: string | null;
+  onSnapTargetChange: (targetId: string | null) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
 }) {
+  const objects = useEditorStore((state) => state.objects);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const select = useEditorStore((state) => state.select);
   const tool = useEditorStore((state) => state.tool);
@@ -604,6 +609,7 @@ function SceneMesh({ object, registry, onTransformDraggingChange }: {
   const geometry = useMemo(() => createGeometry({ type: object.type, geometry: object.geometry }), [object.geometry, object.type]);
   const selected = selectedIds.includes(object.id);
   const singleSelection = selected && selectedIds.length === 1;
+  const showSnapPattern = snap.surface && tool === 'translate' && isFormType(object.type) && !singleSelection && object.visible;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => {
@@ -613,15 +619,38 @@ function SceneMesh({ object, registry, onTransformDraggingChange }: {
 
   const syncTransform = () => {
     if (!mesh) return;
-    updateObject(object.id, {
-      position: [mesh.position.x, mesh.position.y, mesh.position.z],
-      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-      scale: [mesh.scale.x, mesh.scale.y, mesh.scale.z]
-    }, false);
+
+    let position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
+    const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
+    const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
+
+    if (tool === 'translate' && snap.surface && singleSelection && isFormType(object.type)) {
+      const candidate: SceneObjectData = { ...object, position, rotation, scale };
+      const result = findFormSurfaceSnap(candidate, objects, snap.position);
+      position = result.position;
+      if (result.targetId) {
+        mesh.position.set(position[0], position[1], position[2]);
+        mesh.updateMatrixWorld(true);
+      }
+      onSnapTargetChange(result.targetId);
+    } else if (tool === 'translate') {
+      onSnapTargetChange(null);
+    }
+
+    updateObject(object.id, { position, rotation, scale }, false);
   };
 
-  const startTransform = () => { beginTransaction(); onTransformDraggingChange(true); };
-  const stopTransform = () => { syncTransform(); endTransaction(); onTransformDraggingChange(false); };
+  const startTransform = () => {
+    onSnapTargetChange(null);
+    beginTransaction();
+    onTransformDraggingChange(true);
+  };
+  const stopTransform = () => {
+    syncTransform();
+    onSnapTargetChange(null);
+    endTransaction();
+    onTransformDraggingChange(false);
+  };
 
   return (
     <>
@@ -654,6 +683,15 @@ function SceneMesh({ object, registry, onTransformDraggingChange }: {
           emissiveIntensity={selected ? 0.72 : 0}
         />
       </mesh>
+
+      {showSnapPattern && (
+        <PrimitiveSnapPattern
+          geometry={geometry}
+          object={object}
+          cellSize={snap.position}
+          highlighted={snapTargetId === object.id}
+        />
+      )}
 
       {singleSelection && !object.locked && object.visible && mesh && (
         tool === 'scale' ? (
@@ -698,8 +736,13 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
   const scene = useEditorStore((state) => state.scene);
   const select = useEditorStore((state) => state.select);
   const [transformDragging, setTransformDragging] = useState(false);
+  const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
   const selectedObjects = objects.filter((object) => selectedIds.includes(object.id));
   const groupMovable = selectedObjects.length > 1 && selectedObjects.every((object) => object.visible && !object.locked);
+
+  useEffect(() => {
+    if (!snap.surface || tool !== 'translate') setSnapTargetId(null);
+  }, [snap.surface, tool]);
 
   return (
     <>
@@ -713,7 +756,16 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {objects.map((object) => <SceneMesh key={object.id} object={object} registry={registry} onTransformDraggingChange={setTransformDragging} />)}
+      {objects.map((object) => (
+        <SceneMesh
+          key={object.id}
+          object={object}
+          registry={registry}
+          snapTargetId={snapTargetId}
+          onSnapTargetChange={setSnapTargetId}
+          onTransformDraggingChange={setTransformDragging}
+        />
+      ))}
       {groupMovable && <GroupTransformControls selectedIds={selectedIds} registry={registry} tool={tool} snap={snap} onTransformDraggingChange={setTransformDragging} />}
       <OrbitControls
         makeDefault
