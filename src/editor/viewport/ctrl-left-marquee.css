@@ -1,8 +1,0 @@
-.viewport-hint {
-  font-size: 0;
-}
-
-.viewport-hint::after {
-  content: "Strg + Linksklick-Ziehen auf leerer Fläche: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren";
-  font-size: 10px;
-}
