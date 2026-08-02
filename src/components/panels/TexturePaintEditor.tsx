@@ -10,6 +10,10 @@ import {
   samplePixel,
   type PaintTool
 } from '../../editor/paint/pixelPaint';
+import {
+  setSurfacePaintSettings,
+  subscribeSurfacePaint
+} from '../../editor/paint/surfacePaintSession';
 
 interface TexturePaintEditorProps {
   objectId: string;
@@ -68,7 +72,33 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
   const [tool, setTool] = useState<PaintTool>('brush');
   const [paintColor, setPaintColor] = useState(baseColor);
   const [brushSize, setBrushSize] = useState(1);
+  const [surfaceEnabled, setSurfaceEnabled] = useState(false);
   const [, refreshControls] = useState(0);
+
+  useEffect(() => subscribeSurfacePaint((settings) => {
+    setSurfaceEnabled(settings.enabled);
+    setTool(settings.tool);
+    setPaintColor(settings.color);
+    setBrushSize(settings.brushSize);
+  }), []);
+
+  useEffect(() => () => setSurfacePaintSettings({ enabled: false }), []);
+
+  const changeTool = (nextTool: PaintTool): void => {
+    setTool(nextTool);
+    setSurfacePaintSettings({ tool: nextTool });
+  };
+
+  const changeColor = (nextColor: string): void => {
+    const normalized = nextColor.toUpperCase();
+    setPaintColor(normalized);
+    setSurfacePaintSettings({ color: normalized });
+  };
+
+  const changeBrushSize = (nextSize: number): void => {
+    setBrushSize(nextSize);
+    setSurfacePaintSettings({ brushSize: nextSize });
+  };
 
   const readCanvas = (): ImageData | null => {
     const canvas = canvasRef.current;
@@ -111,7 +141,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
       canvas.width = DEFAULT_PAINT_SIZE;
       canvas.height = DEFAULT_PAINT_SIZE;
       context.putImageData(createFilledImageData(canvas.width, canvas.height, hexToRgba(baseColor)), 0, 0);
-      setPaintColor(baseColor);
+      changeColor(baseColor);
       return;
     }
 
@@ -142,7 +172,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
 
     if (tool === 'eyedropper') {
       const sampled = samplePixel(image, point[0], point[1]);
-      if (sampled.a > 0) setPaintColor(rgbaToHex(sampled));
+      if (sampled.a > 0) changeColor(rgbaToHex(sampled));
       return;
     }
 
@@ -225,13 +255,23 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
+      <button
+        type="button"
+        aria-pressed={surfaceEnabled}
+        onClick={() => setSurfacePaintSettings({ enabled: !surfaceEnabled })}
+        style={surfaceEnabled ? { outline: '1px solid #7ed99a', background: '#24513a' } : undefined}
+      >
+        {surfaceEnabled ? 'Auf Form malen: aktiv' : 'Auf Form malen'}
+      </button>
+      {surfaceEnabled && <small>Kamera gesperrt · direkt auf die sichtbare Fläche im Hauptfenster malen</small>}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
         {TOOLS.map((entry) => (
           <button
             key={entry.tool}
             type="button"
             aria-pressed={tool === entry.tool}
-            onClick={() => setTool(entry.tool)}
+            onClick={() => changeTool(entry.tool)}
             style={tool === entry.tool ? { outline: '1px solid #68a47d', background: '#22382d' } : undefined}
           >
             {entry.label}
@@ -242,15 +282,15 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
       <div className="field-row">
         <label>Mal-Farbe</label>
         <div className="color-row">
-          <input type="color" value={paintColor} onChange={(event) => setPaintColor(event.target.value.toUpperCase())} />
-          <input value={paintColor} onChange={(event) => /^#[0-9a-fA-F]{6}$/.test(event.target.value) && setPaintColor(event.target.value.toUpperCase())} />
+          <input type="color" value={paintColor} onChange={(event) => changeColor(event.target.value)} />
+          <input value={paintColor} onChange={(event) => /^#[0-9a-fA-F]{6}$/.test(event.target.value) && changeColor(event.target.value)} />
         </div>
       </div>
 
       {(tool === 'brush' || tool === 'eraser') && (
         <div className="range-row">
           <label>Pinselgröße</label>
-          <input type="range" min={1} max={8} step={1} value={brushSize} onChange={(event) => setBrushSize(Number(event.target.value))} />
+          <input type="range" min={1} max={8} step={1} value={brushSize} onChange={(event) => changeBrushSize(Number(event.target.value))} />
           <span>{brushSize}px</span>
         </div>
       )}
@@ -264,7 +304,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
             title={color}
             aria-label={color}
             style={{ background: color }}
-            onClick={() => setPaintColor(color)}
+            onClick={() => changeColor(color)}
           />
         ))}
       </div>
@@ -290,7 +330,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
         <button type="button" disabled={futureRef.current.length === 0} onClick={redo}>Wiederholen</button>
         <button type="button" className="danger" disabled={!texture} onClick={clearTexture}>Bemalung entfernen</button>
       </div>
-      <small>32×32-Pixeltextur · Pinsel, Radierer, Füllen und Pipette</small>
+      <small>32×32-Pixeltextur · 2D-Ansicht für Feinkorrekturen</small>
     </div>
   );
 }
