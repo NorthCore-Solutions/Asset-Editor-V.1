@@ -6,9 +6,7 @@ import { PropertiesPanel } from '../components/panels/PropertiesPanel';
 import { HierarchyPanel } from '../components/panels/HierarchyPanel';
 import { EditorToolbar } from '../components/toolbar/EditorToolbar';
 import { RestoreDialog } from '../components/dialogs/RestoreDialog';
-import { CtrlLeftMarqueeAdapter } from '../editor/viewport/CtrlLeftMarqueeAdapter';
 import { EditorViewport } from '../editor/viewport/EditorViewport';
-import '../editor/viewport/ctrl-left-marquee.css';
 import { useEditorShortcuts } from '../editor/shortcuts/useEditorShortcuts';
 import { AUTOSAVE_KEY, buildProjectFile, deserializeProject, serializeProject } from '../persistence/projectFile';
 import { useEditorStore } from '../store/editorStore';
@@ -42,7 +40,6 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <CtrlLeftMarqueeAdapter />
       <TopBar />
       <EditorToolbar />
       <main className="workspace">
