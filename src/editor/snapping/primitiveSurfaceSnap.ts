@@ -96,7 +96,7 @@ export function findFormSurfaceSnap(
   let bestDistance = Number.POSITIVE_INFINITY;
 
   for (const target of objects) {
-    if (target.id === source.id || !target.visible || target.locked || !isFormType(target.type)) continue;
+    if (target.id === source.id || !target.visible || !isFormType(target.type)) continue;
 
     const targetBounds = geometryBounds(target);
     const targetMatrix = matrixForObject(target);
