@@ -14,8 +14,10 @@ interface OrbitControlApi {
 
 type ScaleAxis = 'X' | 'Y' | 'Z';
 type ScaleSide = -1 | 1;
+type CornerSides = [ScaleSide, ScaleSide, ScaleSide];
 
-interface ScaleHandleDragState {
+interface AxisScaleDragState {
+  kind: 'axis';
   axis: ScaleAxis;
   pointerId: number;
   startPointer: THREE.Vector2;
@@ -24,13 +26,37 @@ interface ScaleHandleDragState {
   anchorCoordinate: number;
   localSize: number;
   startPosition: THREE.Vector3;
-  startQuaternion: THREE.Quaternion;
   startScale: THREE.Vector3;
   worldAxis: THREE.Vector3;
 }
 
+interface UniformScaleDragState {
+  kind: 'uniform';
+  pointerId: number;
+  startPointer: THREE.Vector2;
+  screenAxis: THREE.Vector2;
+  pixelsPerWorldUnit: number;
+  startDiagonalWorld: number;
+  anchorLocal: THREE.Vector3;
+  startPosition: THREE.Vector3;
+  startQuaternion: THREE.Quaternion;
+  startScale: THREE.Vector3;
+}
+
+type ScaleDragState = AxisScaleDragState | UniformScaleDragState;
+
 const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const GRID_EXTENT = 400;
+const CORNERS: CornerSides[] = [
+  [-1, -1, -1],
+  [-1, -1, 1],
+  [-1, 1, -1],
+  [-1, 1, 1],
+  [1, -1, -1],
+  [1, -1, 1],
+  [1, 1, -1],
+  [1, 1, 1]
+];
 
 const axisValue = (vector: THREE.Vector3, axis: ScaleAxis): number => {
   if (axis === 'X') return vector.x;
@@ -54,6 +80,12 @@ const boundingValue = (box: THREE.Box3, axis: ScaleAxis, side: 'min' | 'max'): n
   const vector = side === 'min' ? box.min : box.max;
   return axisValue(vector, axis);
 };
+
+const cornerPoint = (bounds: THREE.Box3, sides: CornerSides): THREE.Vector3 => new THREE.Vector3(
+  sides[0] === 1 ? bounds.max.x : bounds.min.x,
+  sides[1] === 1 ? bounds.max.y : bounds.min.y,
+  sides[2] === 1 ? bounds.max.z : bounds.min.z
+);
 
 function KeyboardCameraControls({ active }: { active: boolean }) {
   const camera = useThree((state) => state.camera);
@@ -215,12 +247,51 @@ function ScaleHandle({
       onPointerDown={(event) => onPointerDown(axis, side, event)}
     >
       <boxGeometry args={[1, 1, 1]} />
-      <meshBasicMaterial
-        color={color}
-        depthTest={false}
-        depthWrite={false}
-        toneMapped={false}
-      />
+      <meshBasicMaterial color={color} depthTest={false} depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
+function CornerScaleHandle({
+  mesh,
+  bounds,
+  sides,
+  onPointerDown
+}: {
+  mesh: THREE.Mesh;
+  bounds: THREE.Box3;
+  sides: CornerSides;
+  onPointerDown: (sides: CornerSides, event: ThreeEvent<PointerEvent>) => void;
+}) {
+  const handleRef = useRef<THREE.Mesh>(null);
+  const camera = useThree((state) => state.camera);
+
+  useFrame(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+
+    mesh.updateMatrixWorld();
+    const distance = camera.position.distanceTo(mesh.position);
+    const marginWorld = Math.max(0.2, distance * 0.022);
+    const localPoint = cornerPoint(bounds, sides);
+
+    localPoint.x += sides[0] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.x));
+    localPoint.y += sides[1] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.y));
+    localPoint.z += sides[2] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.z));
+
+    handle.position.copy(mesh.localToWorld(localPoint));
+    handle.quaternion.copy(mesh.quaternion);
+    handle.scale.setScalar(Math.max(0.1, Math.min(0.28, distance * 0.019)));
+  });
+
+  return (
+    <mesh
+      ref={handleRef}
+      renderOrder={1001}
+      onPointerDown={(event) => onPointerDown(sides, event)}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial color="#f1f4f5" depthTest={false} depthWrite={false} toneMapped={false} />
     </mesh>
   );
 }
@@ -241,7 +312,7 @@ function ScaleHandles({
   const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
-  const dragRef = useRef<ScaleHandleDragState | null>(null);
+  const dragRef = useRef<ScaleDragState | null>(null);
   const updateObject = useEditorStore((state) => state.updateObject);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
@@ -280,21 +351,42 @@ function ScaleHandles({
       event.clientY - drag.startPointer.y
     );
     const worldDelta = pointerDelta.dot(drag.screenAxis) / drag.pixelsPerWorldUnit;
-    const startScale = axisValue(drag.startScale, drag.axis);
-    const startWorldSize = drag.localSize * startScale;
-    const minimumScale = 0.02;
-    let nextScale = Math.max(minimumScale, (startWorldSize + worldDelta) / drag.localSize);
 
-    if (snap.enabled && snap.scale > 0) {
-      nextScale = Math.max(minimumScale, Math.round(nextScale / snap.scale) * snap.scale);
+    if (drag.kind === 'axis') {
+      const startScale = axisValue(drag.startScale, drag.axis);
+      const startWorldSize = drag.localSize * startScale;
+      const minimumScale = 0.02;
+      let nextScale = Math.max(minimumScale, (startWorldSize + worldDelta) / drag.localSize);
+
+      if (snap.enabled && snap.scale > 0) {
+        nextScale = Math.max(minimumScale, Math.round(nextScale / snap.scale) * snap.scale);
+      }
+
+      const nextScaleVector = drag.startScale.clone();
+      setAxisValue(nextScaleVector, drag.axis, nextScale);
+      mesh.scale.copy(nextScaleVector);
+
+      const anchorOffset = drag.anchorCoordinate * (startScale - nextScale);
+      mesh.position.copy(drag.startPosition).addScaledVector(drag.worldAxis, anchorOffset);
+      mesh.updateMatrixWorld();
+      return;
     }
 
-    const nextScaleVector = drag.startScale.clone();
-    setAxisValue(nextScaleVector, drag.axis, nextScale);
-    mesh.scale.copy(nextScaleVector);
+    let factor = Math.max(0.02, (drag.startDiagonalWorld + worldDelta) / drag.startDiagonalWorld);
+    if (snap.enabled && snap.scale > 0) {
+      factor = Math.max(0.02, Math.round(factor / snap.scale) * snap.scale);
+    }
 
-    const anchorOffset = drag.anchorCoordinate * (startScale - nextScale);
-    mesh.position.copy(drag.startPosition).addScaledVector(drag.worldAxis, anchorOffset);
+    const nextScale = drag.startScale.clone().multiplyScalar(factor);
+    mesh.scale.copy(nextScale);
+
+    const localOffset = new THREE.Vector3(
+      drag.anchorLocal.x * (drag.startScale.x - nextScale.x),
+      drag.anchorLocal.y * (drag.startScale.y - nextScale.y),
+      drag.anchorLocal.z * (drag.startScale.z - nextScale.z)
+    ).applyQuaternion(drag.startQuaternion);
+
+    mesh.position.copy(drag.startPosition).add(localOffset);
     mesh.updateMatrixWorld();
   }
 
@@ -313,7 +405,17 @@ function ScaleHandles({
     if (controls) controls.enabled = true;
   }
 
-  const startDrag = (axis: ScaleAxis, side: ScaleSide, event: ThreeEvent<PointerEvent>) => {
+  const beginDrag = () => {
+    if (controls) controls.enabled = false;
+    beginTransaction();
+    onTransformDraggingChange(true);
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('pointerup', finishDrag, true);
+    window.addEventListener('pointercancel', finishDrag, true);
+    window.addEventListener('blur', finishDrag, true);
+  };
+
+  const startAxisDrag = (axis: ScaleAxis, side: ScaleSide, event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     event.nativeEvent.preventDefault();
     event.nativeEvent.stopImmediatePropagation();
@@ -336,6 +438,7 @@ function ScaleHandles({
 
     screenAxis.normalize();
     dragRef.current = {
+      kind: 'axis',
       axis,
       pointerId: event.pointerId,
       startPointer: new THREE.Vector2(event.clientX, event.clientY),
@@ -344,19 +447,53 @@ function ScaleHandles({
       anchorCoordinate: boundingValue(bounds, axis, side === 1 ? 'min' : 'max'),
       localSize,
       startPosition: mesh.position.clone(),
-      startQuaternion,
       startScale: mesh.scale.clone(),
       worldAxis: positiveWorldAxis
     };
 
-    if (controls) controls.enabled = false;
-    beginTransaction();
-    onTransformDraggingChange(true);
+    beginDrag();
+  };
 
-    window.addEventListener('pointermove', handlePointerMove, true);
-    window.addEventListener('pointerup', finishDrag, true);
-    window.addEventListener('pointercancel', finishDrag, true);
-    window.addEventListener('blur', finishDrag, true);
+  const startUniformDrag = (sides: CornerSides, event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    event.nativeEvent.preventDefault();
+    event.nativeEvent.stopImmediatePropagation();
+
+    const startQuaternion = mesh.quaternion.clone();
+    const draggedLocal = cornerPoint(bounds, sides);
+    const oppositeSides: CornerSides = [-sides[0], -sides[1], -sides[2]];
+    const anchorLocal = cornerPoint(bounds, oppositeSides);
+    const localDiagonal = draggedLocal.clone().sub(anchorLocal);
+    const scaledDiagonal = localDiagonal.clone().multiply(mesh.scale);
+    const startDiagonalWorld = scaledDiagonal.length();
+    if (startDiagonalWorld <= 0.000001) return;
+
+    const worldDirection = scaledDiagonal.applyQuaternion(startQuaternion).normalize();
+    const centerProjected = mesh.position.clone().project(camera);
+    const axisProjected = mesh.position.clone().add(worldDirection).project(camera);
+    const screenAxis = new THREE.Vector2(
+      (axisProjected.x - centerProjected.x) * size.width * 0.5,
+      -(axisProjected.y - centerProjected.y) * size.height * 0.5
+    );
+    const pixelsPerWorldUnit = screenAxis.length();
+
+    if (pixelsPerWorldUnit < 2) return;
+
+    screenAxis.normalize();
+    dragRef.current = {
+      kind: 'uniform',
+      pointerId: event.pointerId,
+      startPointer: new THREE.Vector2(event.clientX, event.clientY),
+      screenAxis,
+      pixelsPerWorldUnit,
+      startDiagonalWorld,
+      anchorLocal,
+      startPosition: mesh.position.clone(),
+      startQuaternion,
+      startScale: mesh.scale.clone()
+    };
+
+    beginDrag();
   };
 
   useEffect(() => () => {
@@ -370,12 +507,21 @@ function ScaleHandles({
 
   return (
     <>
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3b30" onPointerDown={startDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3b30" onPointerDown={startDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#22d63a" onPointerDown={startDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={1} color="#22d63a" onPointerDown={startDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={-1} color="#275dff" onPointerDown={startDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={1} color="#275dff" onPointerDown={startDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3b30" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3b30" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#22d63a" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={1} color="#22d63a" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={-1} color="#275dff" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={1} color="#275dff" onPointerDown={startAxisDrag} />
+      {CORNERS.map((sides) => (
+        <CornerScaleHandle
+          key={sides.join(':')}
+          mesh={mesh}
+          bounds={bounds}
+          sides={sides}
+          onPointerDown={startUniformDrag}
+        />
+      ))}
     </>
   );
 }
