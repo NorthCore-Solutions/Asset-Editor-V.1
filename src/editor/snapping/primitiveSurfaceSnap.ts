@@ -19,6 +19,12 @@ const FORM_TYPES = new Set<PrimitiveType>([
 const AXES = ['x', 'y', 'z'] as const;
 type Axis = (typeof AXES)[number];
 
+export interface FormSurfaceSnapResult {
+  position: Vec3;
+  targetId: string | null;
+  distance: number;
+}
+
 const axisValue = (vector: THREE.Vector3, axis: Axis): number => vector[axis];
 const setAxisValue = (vector: THREE.Vector3, axis: Axis, value: number): void => {
   vector[axis] = value;
@@ -68,23 +74,29 @@ const snapInsideTargetGrid = (value: number, minimum: number, step: number): num
 
 export const isFormType = (type: PrimitiveType): boolean => FORM_TYPES.has(type);
 
-export function snapFormToFormSurfaces(
+export function findFormSurfaceSnap(
   source: SceneObjectData,
   objects: SceneObjectData[],
   positionStep: number
-): Vec3 {
-  if (!isFormType(source.type)) return [...source.position] as Vec3;
+): FormSurfaceSnapResult {
+  const unchanged: FormSurfaceSnapResult = {
+    position: [...source.position] as Vec3,
+    targetId: null,
+    distance: Number.POSITIVE_INFINITY
+  };
+  if (!isFormType(source.type)) return unchanged;
 
   const sourceBounds = geometryBounds(source);
   const sourceMatrix = matrixForObject(source);
   const sourceWorldCorners = boxCorners(sourceBounds).map((corner) => corner.applyMatrix4(sourceMatrix));
   const sourcePosition = new THREE.Vector3(...source.position);
-  const worldThreshold = Math.max(0.12, Math.abs(positionStep) * 0.65);
+  const worldThreshold = Math.max(0.28, Math.abs(positionStep) * 1.6);
   let bestPosition: THREE.Vector3 | null = null;
+  let bestTargetId: string | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
 
   for (const target of objects) {
-    if (target.id === source.id || !target.visible || !isFormType(target.type)) continue;
+    if (target.id === source.id || !target.visible || target.locked || !isFormType(target.type)) continue;
 
     const targetBounds = geometryBounds(target);
     const targetMatrix = matrixForObject(target);
@@ -92,7 +104,7 @@ export function snapFormToFormSurfaces(
     const sourceInTarget = new THREE.Box3().setFromPoints(
       sourceWorldCorners.map((corner) => corner.clone().applyMatrix4(inverseTargetMatrix))
     );
-    const targetScale = new THREE.Vector3(...target.scale).set(
+    const targetScale = new THREE.Vector3(
       Math.max(0.0001, Math.abs(target.scale[0])),
       Math.max(0.0001, Math.abs(target.scale[1])),
       Math.max(0.0001, Math.abs(target.scale[2]))
@@ -103,7 +115,7 @@ export function snapFormToFormSurfaces(
       const axisScale = axisValue(targetScale, axis);
       const localThreshold = worldThreshold / axisScale;
       const otherAxes = AXES.filter((candidate) => candidate !== axis);
-      if (!otherAxes.every((otherAxis) => overlapsWithTolerance(sourceInTarget, targetBounds, otherAxis, localThreshold))) continue;
+      if (!otherAxes.every((otherAxis) => overlapsWithTolerance(sourceInTarget, targetBounds, otherAxis, localThreshold * 0.75))) continue;
 
       const faceOffsets = [
         axisValue(targetBounds.min, axis) - axisValue(sourceInTarget.max, axis),
@@ -123,7 +135,11 @@ export function snapFormToFormSurfaces(
             axisValue(targetBounds.min, otherAxis),
             localStep
           );
-          setAxisValue(localOffset, otherAxis, snappedCenter - axisValue(sourceCenter, otherAxis));
+          const gridCorrection = snappedCenter - axisValue(sourceCenter, otherAxis);
+          const maximumGridCorrection = localStep > 0 ? localStep * 0.55 : 0;
+          if (localStep > 0 && Math.abs(gridCorrection) <= maximumGridCorrection) {
+            setAxisValue(localOffset, otherAxis, gridCorrection);
+          }
         }
 
         const targetOriginWorld = new THREE.Vector3(0, 0, 0).applyMatrix4(targetMatrix);
@@ -134,11 +150,24 @@ export function snapFormToFormSurfaces(
 
         bestDistance = distance;
         bestPosition = candidatePosition;
+        bestTargetId = target.id;
       }
     }
   }
 
   return bestPosition
-    ? [bestPosition.x, bestPosition.y, bestPosition.z]
-    : [...source.position] as Vec3;
+    ? {
+      position: [bestPosition.x, bestPosition.y, bestPosition.z],
+      targetId: bestTargetId,
+      distance: bestDistance
+    }
+    : unchanged;
+}
+
+export function snapFormToFormSurfaces(
+  source: SceneObjectData,
+  objects: SceneObjectData[],
+  positionStep: number
+): Vec3 {
+  return findFormSurfaceSnap(source, objects, positionStep).position;
 }
