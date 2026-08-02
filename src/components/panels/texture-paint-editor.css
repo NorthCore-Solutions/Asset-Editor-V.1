@@ -1,0 +1,84 @@
+.paint-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.paint-mode-button {
+  height: 31px;
+  font-weight: 600;
+}
+
+.paint-mode-button.active,
+.paint-tool-button.active,
+.color-target-button.active {
+  background: #22382d;
+  border-color: #68a47d;
+  box-shadow: inset 0 0 0 1px rgba(104, 164, 125, 0.35);
+}
+
+.paint-tool-grid,
+.paint-bulk-actions,
+.color-target-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.paint-tool-grid button,
+.paint-bulk-actions button,
+.color-target-toggle button {
+  min-height: 30px;
+}
+
+.paint-brush-size {
+  grid-template-columns: 78px minmax(0, 1fr) 38px;
+}
+
+.paint-surface-block {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  background: #151c20;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.paint-canvas-shell {
+  width: 100%;
+  max-width: 280px;
+  justify-self: center;
+  padding: 6px;
+  border: 1px solid #425159;
+  border-radius: 4px;
+  background-image: conic-gradient(#c7c7c7 25%, #eeeeee 0 50%, #c7c7c7 0 75%, #eeeeee 0);
+  background-size: 16px 16px;
+}
+
+.paint-canvas-shell canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  image-rendering: pixelated;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.paint-history-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.paint-history-actions button {
+  min-height: 29px;
+  font-size: 11px;
+}
+
+.merged-color-block {
+  display: grid;
+  gap: 7px;
+}
+
+.merged-color-block .palette {
+  margin-top: 0;
+}
