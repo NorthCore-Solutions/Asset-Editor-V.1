@@ -292,6 +292,7 @@ export function useSurfacePaint(
       blockEvent(event);
       const hit = paintHitFromEvent(surface, event);
       if (!hit) return;
+      setSurfacePaintSettings({ islandIndex: hit.islandIndex });
 
       if (settings.tool === 'eyedropper') {
         paintAt(hit.point, null, hit.atlas, hit.islandIndex);
@@ -324,6 +325,7 @@ export function useSurfacePaint(
       }
 
       const sameIsland = activeIslandRef.current === hit.islandIndex;
+      if (!sameIsland) setSurfacePaintSettings({ islandIndex: hit.islandIndex });
       changedRef.current = paintAt(
         hit.point,
         sameIsland ? lastPointRef.current : null,
