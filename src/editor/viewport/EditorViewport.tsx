@@ -72,6 +72,7 @@ interface MarqueeState {
 
 const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const GRID_EXTENT = 400;
+const SCALE_HANDLE_VISUAL_FACTOR = 0.5;
 const CORNERS: CornerSides[] = [
   [-1, -1, -1], [-1, -1, 1], [-1, 1, -1], [-1, 1, 1],
   [1, -1, -1], [1, -1, 1], [1, 1, -1], [1, 1, 1]
@@ -290,12 +291,12 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
     const localPoint = bounds.getCenter(new THREE.Vector3());
     const scaleOnAxis = Math.max(0.0001, Math.abs(axisValue(mesh.scale, axis)));
     const distance = camera.position.distanceTo(mesh.position);
-    const marginWorld = Math.max(0.16, distance * 0.018);
+    const marginWorld = Math.max(0.16, distance * 0.018) * SCALE_HANDLE_VISUAL_FACTOR;
     const edge = boundingValue(bounds, axis, side === 1 ? 'max' : 'min');
     setAxisValue(localPoint, axis, edge + side * marginWorld / scaleOnAxis);
     handle.position.copy(mesh.localToWorld(localPoint));
     handle.quaternion.copy(mesh.quaternion);
-    handle.scale.setScalar(Math.max(0.1, Math.min(0.28, distance * 0.018)));
+    handle.scale.setScalar(Math.max(0.1, Math.min(0.28, distance * 0.018)) * SCALE_HANDLE_VISUAL_FACTOR);
   });
 
   return (
@@ -320,14 +321,14 @@ function CornerScaleHandle({ mesh, bounds, sides, onPointerDown }: {
     if (!handle) return;
     mesh.updateMatrixWorld();
     const distance = camera.position.distanceTo(mesh.position);
-    const marginWorld = Math.max(0.2, distance * 0.022);
+    const marginWorld = Math.max(0.2, distance * 0.022) * SCALE_HANDLE_VISUAL_FACTOR;
     const localPoint = cornerPoint(bounds, sides);
     localPoint.x += sides[0] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.x));
     localPoint.y += sides[1] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.y));
     localPoint.z += sides[2] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.z));
     handle.position.copy(mesh.localToWorld(localPoint));
     handle.quaternion.copy(camera.quaternion);
-    handle.scale.setScalar(Math.max(0.14, Math.min(0.36, distance * 0.024)));
+    handle.scale.setScalar(Math.max(0.14, Math.min(0.36, distance * 0.024)) * SCALE_HANDLE_VISUAL_FACTOR);
   });
 
   return (
