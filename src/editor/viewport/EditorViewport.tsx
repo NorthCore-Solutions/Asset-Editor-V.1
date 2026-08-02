@@ -8,6 +8,7 @@ import type { SceneObjectData } from '../../types/editor';
 
 interface OrbitControlApi {
   target: THREE.Vector3;
+  enabled: boolean;
   update: () => void;
 }
 
@@ -131,7 +132,13 @@ function CameraController() {
   return null;
 }
 
-function SceneMesh({ object }: { object: SceneObjectData }) {
+function SceneMesh({
+  object,
+  onTransformDraggingChange
+}: {
+  object: SceneObjectData;
+  onTransformDraggingChange: (dragging: boolean) => void;
+}) {
   const selectedId = useEditorStore((state) => state.selectedId);
   const select = useEditorStore((state) => state.select);
   const tool = useEditorStore((state) => state.tool);
@@ -139,6 +146,7 @@ function SceneMesh({ object }: { object: SceneObjectData }) {
   const updateTransform = useEditorStore((state) => state.updateTransform);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
+  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const meshRef = useRef<THREE.Mesh>(null);
   const geometry = useMemo(
     () => createGeometry({ type: object.type, geometry: object.geometry }),
@@ -147,6 +155,22 @@ function SceneMesh({ object }: { object: SceneObjectData }) {
   const selected = selectedId === object.id;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useEffect(() => () => {
+    if (controls) controls.enabled = true;
+  }, [controls]);
+
+  const startTransform = () => {
+    if (controls) controls.enabled = false;
+    beginTransaction();
+    onTransformDraggingChange(true);
+  };
+
+  const stopTransform = () => {
+    endTransaction();
+    onTransformDraggingChange(false);
+    if (controls) controls.enabled = true;
+  };
 
   const syncTransform = () => {
     const mesh = meshRef.current;
@@ -186,11 +210,13 @@ function SceneMesh({ object }: { object: SceneObjectData }) {
   return (
     <TransformControls
       mode={tool}
+      space="world"
+      size={1.05}
       translationSnap={snap.enabled ? snap.position : undefined}
       rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
       scaleSnap={snap.enabled ? snap.scale : undefined}
-      onMouseDown={beginTransaction}
-      onMouseUp={endTransaction}
+      onMouseDown={startTransform}
+      onMouseUp={stopTransform}
       onObjectChange={syncTransform}
     >
       {mesh}
@@ -227,6 +253,29 @@ function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
   const objects = useEditorStore((state) => state.objects);
   const scene = useEditorStore((state) => state.scene);
   const select = useEditorStore((state) => state.select);
+  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
+  const [transformDragging, setTransformDragging] = useState(false);
+
+  useEffect(() => {
+    if (!transformDragging) return;
+
+    const releaseTransform = () => {
+      useEditorStore.getState().endTransaction();
+      setTransformDragging(false);
+      if (controls) controls.enabled = true;
+    };
+
+    window.addEventListener('pointerup', releaseTransform);
+    window.addEventListener('pointercancel', releaseTransform);
+    window.addEventListener('blur', releaseTransform);
+
+    return () => {
+      window.removeEventListener('pointerup', releaseTransform);
+      window.removeEventListener('pointercancel', releaseTransform);
+      window.removeEventListener('blur', releaseTransform);
+    };
+  }, [controls, transformDragging]);
+
   return (
     <>
       <color attach="background" args={[scene.background]} />
@@ -239,9 +288,16 @@ function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {objects.map((object) => <SceneMesh key={object.id} object={object} />)}
+      {objects.map((object) => (
+        <SceneMesh
+          key={object.id}
+          object={object}
+          onTransformDraggingChange={setTransformDragging}
+        />
+      ))}
       <OrbitControls
         makeDefault
+        enabled={!transformDragging}
         enableDamping
         dampingFactor={0.08}
         mouseButtons={{
@@ -250,7 +306,7 @@ function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
           RIGHT: THREE.MOUSE.ROTATE
         }}
       />
-      <KeyboardCameraControls active={keyboardActive} />
+      <KeyboardCameraControls active={keyboardActive && !transformDragging} />
       <CameraController />
     </>
   );
@@ -278,7 +334,7 @@ export function EditorViewport() {
       >
         <EditorScene keyboardActive={keyboardActive} />
       </Canvas>
-      <div className="viewport-hint">Links: verschieben · Rechts: drehen · WASD: bewegen · Q/E: drehen · Mausrad: zoomen</div>
+      <div className="viewport-hint">Links: verschieben · Rechts: drehen · Gizmo mit Links ziehen · WASD: bewegen · Q/E: drehen · Mausrad: zoomen</div>
     </div>
   );
 }
