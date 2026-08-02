@@ -9,6 +9,7 @@ import { RestoreDialog } from '../components/dialogs/RestoreDialog';
 import { EditorViewport } from '../editor/viewport/EditorViewport';
 import { ViewportHelp } from '../editor/viewport/ViewportHelp';
 import '../editor/viewport/viewport-help.css';
+import '../styles/panel-collapse.css';
 import { useEditorShortcuts } from '../editor/shortcuts/useEditorShortcuts';
 import { AUTOSAVE_KEY, buildProjectFile, deserializeProject, serializeProject } from '../persistence/projectFile';
 import { useEditorStore } from '../store/editorStore';
@@ -22,6 +23,9 @@ export function App() {
   const setMessage = useEditorStore((state) => state.setMessage);
   const initialAutosave = useMemo(() => localStorage.getItem(AUTOSAVE_KEY), []);
   const [restoreOpen, setRestoreOpen] = useState(Boolean(initialAutosave));
+  const [inventoryCollapsed, setInventoryCollapsed] = useState(false);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
+  const [hierarchyCollapsed, setHierarchyCollapsed] = useState(false);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -39,17 +43,23 @@ export function App() {
   };
 
   const discard = () => { localStorage.removeItem(AUTOSAVE_KEY); setRestoreOpen(false); };
+  const workspaceClassName = [
+    'workspace',
+    inventoryCollapsed ? 'inventory-collapsed' : '',
+    propertiesCollapsed ? 'properties-collapsed' : '',
+    hierarchyCollapsed ? 'hierarchy-collapsed' : ''
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="app-shell">
       <TopBar />
       <EditorToolbar />
-      <main className="workspace">
-        <ShapesPanel />
+      <main className={workspaceClassName}>
+        <ShapesPanel collapsed={inventoryCollapsed} onToggle={() => setInventoryCollapsed((current) => !current)} />
         <EditorViewport />
         <ViewportHelp />
-        <PropertiesPanel />
-        <HierarchyPanel />
+        <PropertiesPanel collapsed={propertiesCollapsed} onToggle={() => setPropertiesCollapsed((current) => !current)} />
+        <HierarchyPanel collapsed={hierarchyCollapsed} onToggle={() => setHierarchyCollapsed((current) => !current)} />
       </main>
       <StatusBar />
       {restoreOpen && <RestoreDialog onRestore={restore} onDiscard={discard} />}
