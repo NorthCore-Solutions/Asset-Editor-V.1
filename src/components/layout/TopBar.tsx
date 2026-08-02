@@ -66,7 +66,7 @@ export function TopBar() {
   return (
     <>
       <header className="topbar">
-        <details className="menu">
+        <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
           <summary>Datei</summary>
           <div className="menu-popover">
             <button onClick={() => { newProject(); closeMenus(); }}>Neu</button>
@@ -74,7 +74,7 @@ export function TopBar() {
             <button onClick={save}>Speichern…</button>
           </div>
         </details>
-        <details className="menu">
+        <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
           <summary>Bearbeiten</summary>
           <div className="menu-popover">
             <button disabled={pastCount === 0} onClick={() => { undo(); closeMenus(); }}>Rückgängig</button>
@@ -83,7 +83,7 @@ export function TopBar() {
             <button disabled={!selectedId} className="danger" onClick={() => { deleteObject(); closeMenus(); }}>Löschen</button>
           </div>
         </details>
-        <details className="menu">
+        <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
           <summary>Ansicht</summary>
           <div className="menu-popover">
             <button onClick={() => { requestCameraView('perspective'); closeMenus(); }}>Perspektive</button>
@@ -92,7 +92,7 @@ export function TopBar() {
             <button onClick={() => { setScene({ axesVisible: !scene.axesVisible }); closeMenus(); }}>Achsen {scene.axesVisible ? 'aus' : 'ein'}</button>
           </div>
         </details>
-        <details className="menu">
+        <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
           <summary>Export</summary>
           <div className="menu-popover">
             <button onClick={() => { setExportOpen(true); closeMenus(); }}>GLB exportieren…</button>
