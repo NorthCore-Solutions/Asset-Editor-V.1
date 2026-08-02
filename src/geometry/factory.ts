@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PrimitiveType, SceneObjectData } from '../types/editor';
+import { applySurfaceUvAtlas } from './uvAtlas';
 
 const DEFAULT_MATERIAL = { color: '#AEB8BE', roughness: 0.8, metalness: 0, opacity: 1, flatShading: true } as const;
 
@@ -55,7 +56,27 @@ const defaultGeometry = (type: PrimitiveType): Record<string, number> => {
 };
 
 const defaultPosition = (type: PrimitiveType): [number, number, number] => {
-  const y: Partial<Record<PrimitiveType, number>> = { sphere: 0.65, hemisphere: 0, cylinder: 0.7, cone: 0.75, pyramid: 0.75, plane: 0.002, torus: 0.9, wedge: 0, prism: 0, wall: 1.25, floor: 0.1, flatRoof: 3, gableRoof: 3.1, shedRoof: 3, door: 1, window: 1.4, column: 1.25, chimney: 0.85, stairs: 0 };
+  const y: Partial<Record<PrimitiveType, number>> = {
+    sphere: 0.65,
+    hemisphere: 0,
+    cylinder: 0.7,
+    cone: 0.75,
+    pyramid: 0.75,
+    plane: 0.002,
+    torus: 0.9,
+    wedge: 0,
+    prism: 0,
+    wall: 1.25,
+    floor: 0.1,
+    flatRoof: 3,
+    gableRoof: 3.1,
+    shedRoof: 3,
+    door: 1,
+    window: 1.4,
+    column: 1.25,
+    chimney: 0.85,
+    stairs: 0
+  };
   return [0, y[type] ?? 0.5, 0];
 };
 
@@ -64,47 +85,17 @@ export function createSceneObject(type: PrimitiveType, existingIds: string[] = [
   while (existingIds.includes(id)) id = crypto.randomUUID();
   const label = SHAPE_DEFINITIONS.find((item) => item.type === type)?.label ?? type;
   return {
-    id, name: label, type, visible: true, locked: false,
-    position: defaultPosition(type), rotation: [0, 0, 0], scale: [1, 1, 1],
-    geometry: defaultGeometry(type), material: { ...DEFAULT_MATERIAL }
+    id,
+    name: label,
+    type,
+    visible: true,
+    locked: false,
+    position: defaultPosition(type),
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    geometry: defaultGeometry(type),
+    material: { ...DEFAULT_MATERIAL }
   };
-}
-
-function assignBoxProjectedUvs(geometry: THREE.BufferGeometry): void {
-  const position = geometry.getAttribute('position');
-  const normal = geometry.getAttribute('normal');
-  if (!position || !normal) return;
-
-  geometry.computeBoundingBox();
-  const bounds = geometry.boundingBox;
-  if (!bounds) return;
-  const size = bounds.getSize(new THREE.Vector3());
-  const safeX = Math.max(size.x, 0.000001);
-  const safeY = Math.max(size.y, 0.000001);
-  const safeZ = Math.max(size.z, 0.000001);
-  const uv = new Float32Array(position.count * 2);
-
-  for (let index = 0; index < position.count; index += 1) {
-    const x = (position.getX(index) - bounds.min.x) / safeX;
-    const y = (position.getY(index) - bounds.min.y) / safeY;
-    const z = (position.getZ(index) - bounds.min.z) / safeZ;
-    const nx = Math.abs(normal.getX(index));
-    const ny = Math.abs(normal.getY(index));
-    const nz = Math.abs(normal.getZ(index));
-
-    if (nx >= ny && nx >= nz) {
-      uv[index * 2] = z;
-      uv[index * 2 + 1] = y;
-    } else if (ny >= nx && ny >= nz) {
-      uv[index * 2] = x;
-      uv[index * 2 + 1] = z;
-    } else {
-      uv[index * 2] = x;
-      uv[index * 2 + 1] = y;
-    }
-  }
-
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
 }
 
 function closedFlatGeometry(vertices: number[], indices: number[]): THREE.BufferGeometry {
@@ -115,7 +106,6 @@ function closedFlatGeometry(vertices: number[], indices: number[]): THREE.Buffer
   const geometry = indexedGeometry.toNonIndexed();
   indexedGeometry.dispose();
   geometry.computeVertexNormals();
-  assignBoxProjectedUvs(geometry);
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
@@ -128,7 +118,7 @@ function cappedHemisphereGeometry(radius: number, widthSegments: number, heightS
   const cap = new THREE.CircleGeometry(radius, radialSegments);
   cap.rotateX(Math.PI / 2);
 
-  const geometry = mergeGeometries([shell, cap], false);
+  const geometry = mergeGeometries([shell, cap], true);
   shell.dispose();
   cap.dispose();
 
@@ -191,26 +181,39 @@ function roofGeometry(width: number, height: number, depth: number): THREE.Buffe
   return closedFlatGeometry(vertices, indices);
 }
 
-export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'>): THREE.BufferGeometry {
+function createRawGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'>): THREE.BufferGeometry {
   const g = object.geometry;
   switch (object.type) {
-    case 'sphere': return new THREE.SphereGeometry(g.radius ?? 0.65, g.widthSegments ?? 24, g.heightSegments ?? 16);
-    case 'hemisphere': return cappedHemisphereGeometry(g.radius ?? 0.75, g.widthSegments ?? 24, g.heightSegments ?? 12);
-    case 'cylinder': return new THREE.CylinderGeometry(g.radiusTop ?? 0.5, g.radiusBottom ?? 0.5, g.height ?? 1.4, g.radialSegments ?? 20);
-    case 'cone': return new THREE.ConeGeometry(g.radius ?? 0.65, g.height ?? 1.5, g.radialSegments ?? 20);
+    case 'sphere':
+      return new THREE.SphereGeometry(g.radius ?? 0.65, g.widthSegments ?? 24, g.heightSegments ?? 16);
+    case 'hemisphere':
+      return cappedHemisphereGeometry(g.radius ?? 0.75, g.widthSegments ?? 24, g.heightSegments ?? 12);
+    case 'cylinder':
+      return new THREE.CylinderGeometry(g.radiusTop ?? 0.5, g.radiusBottom ?? 0.5, g.height ?? 1.4, g.radialSegments ?? 20);
+    case 'cone':
+      return new THREE.ConeGeometry(g.radius ?? 0.65, g.height ?? 1.5, g.radialSegments ?? 20);
     case 'pyramid': {
       const geometry = new THREE.ConeGeometry(g.radius ?? 0.8, g.height ?? 1.5, 4);
       geometry.rotateY(Math.PI / 4);
       return geometry;
     }
-    case 'plane': return twoSidedPlaneGeometry(g.width ?? 2, g.height ?? 2);
-    case 'torus': return new THREE.TorusGeometry(g.radius ?? 0.65, g.tube ?? 0.22, g.radialSegments ?? 12, g.tubularSegments ?? 32);
-    case 'wedge': return wedgeGeometry(g.width ?? 1.5, g.height ?? 1, g.depth ?? 1.5);
-    case 'prism': return prismGeometry(g.width ?? 1.6, g.height ?? 1.2, g.depth ?? 1.8);
-    case 'gableRoof': return roofGeometry(g.width ?? 3.4, g.height ?? 1.2, g.depth ?? 3.4);
-    case 'shedRoof': return wedgeGeometry(g.width ?? 3.4, g.height ?? 0.9, g.depth ?? 3.4);
-    case 'column': return new THREE.CylinderGeometry(g.radiusTop ?? 0.3, g.radiusBottom ?? 0.36, g.height ?? 2.5, g.radialSegments ?? 16);
-    case 'stairs': return stairsGeometry(g.width ?? 2, g.height ?? 1.4, g.depth ?? 1.6, Math.max(2, Math.round(g.steps ?? 5)));
+    case 'plane':
+      return twoSidedPlaneGeometry(g.width ?? 2, g.height ?? 2);
+    case 'torus':
+      return new THREE.TorusGeometry(g.radius ?? 0.65, g.tube ?? 0.22, g.radialSegments ?? 12, g.tubularSegments ?? 32);
+    case 'wedge':
+      return wedgeGeometry(g.width ?? 1.5, g.height ?? 1, g.depth ?? 1.5);
+    case 'prism':
+      return prismGeometry(g.width ?? 1.6, g.height ?? 1.2, g.depth ?? 1.8);
+    case 'gableRoof':
+      return roofGeometry(g.width ?? 3.4, g.height ?? 1.2, g.depth ?? 3.4);
+    case 'shedRoof':
+      return wedgeGeometry(g.width ?? 3.4, g.height ?? 0.9, g.depth ?? 3.4);
+    case 'column':
+      return new THREE.CylinderGeometry(g.radiusTop ?? 0.3, g.radiusBottom ?? 0.36, g.height ?? 2.5, g.radialSegments ?? 16);
+    case 'stairs':
+      return stairsGeometry(g.width ?? 2, g.height ?? 1.4, g.depth ?? 1.6, Math.max(2, Math.round(g.steps ?? 5)));
+    case 'box':
     case 'cuboid':
     case 'wall':
     case 'floor':
@@ -219,8 +222,13 @@ export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'
     case 'window':
     case 'chimney':
       return new THREE.BoxGeometry(g.width ?? 1, g.height ?? 1, g.depth ?? 1);
-    default: return new THREE.BoxGeometry(1, 1, 1);
+    default:
+      return new THREE.BoxGeometry(1, 1, 1);
   }
+}
+
+export function createGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'>): THREE.BufferGeometry {
+  return applySurfaceUvAtlas(createRawGeometry(object), object.type);
 }
 
 export function triangleCount(object: Pick<SceneObjectData, 'type' | 'geometry'>): number {
