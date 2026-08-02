@@ -813,7 +813,7 @@ export function EditorViewport() {
 
   const startMarquee = (event: React.PointerEvent<HTMLDivElement>) => {
     viewportRef.current?.focus();
-    if (event.button !== 2 || !viewportRef.current) return;
+    if (event.button !== 2 || !event.ctrlKey || !viewportRef.current) return;
     if (selectionApiRef.current?.hitTest(event.clientX, event.clientY)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -860,7 +860,7 @@ export function EditorViewport() {
       </Canvas>
       {marquee && <div className="selection-marquee" style={marqueeStyle} />}
       <div className="viewport-hint">
-        Rechts auf leerer Fläche: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren
+        Strg + Rechtsziehen auf leerer Fläche: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren
       </div>
     </div>
   );
