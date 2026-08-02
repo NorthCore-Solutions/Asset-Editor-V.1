@@ -13,16 +13,19 @@ function groupIsland(geometry: THREE.BufferGeometry, start: number): number {
 }
 
 describe('Oberflächen-UV-Atlas', () => {
-  it('ordnet den sechs Würfelseiten sechs getrennte UV-Inseln zu', () => {
+  it('ordnet den sechs Würfelseiten sechs benannte UV-Inseln zu', () => {
     const geometry = createGeometry({
       type: 'box',
-      geometry: { width: 1, height: 1, depth: 1 }
+      geometry: { width: 4, height: 2, depth: 0.25 }
     });
     const atlas = getSurfaceUvAtlas(geometry);
     const islands = new Set(geometry.groups.map((group) => groupIsland(geometry, group.start)));
 
     expect(atlas.mode).toBe('groups');
     expect(atlas.islands).toHaveLength(6);
+    expect(atlas.islands.map((island) => island.label)).toEqual([
+      'Rechts', 'Links', 'Oben', 'Unten', 'Vorne', 'Hinten'
+    ]);
     expect(islands.size).toBe(6);
     geometry.dispose();
   });
@@ -36,6 +39,7 @@ describe('Oberflächen-UV-Atlas', () => {
 
     expect(atlas.mode).toBe('planar');
     expect(atlas.islands.length).toBeGreaterThan(6);
+    expect(atlas.islands.some((island) => island.label.startsWith('Oben'))).toBe(true);
     geometry.dispose();
   });
 
@@ -48,6 +52,7 @@ describe('Oberflächen-UV-Atlas', () => {
 
     expect(atlas.mode).toBe('native');
     expect(atlas.islands).toHaveLength(1);
+    expect(atlas.islands[0].label).toBe('Oberfläche');
     geometry.dispose();
   });
 });
