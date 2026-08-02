@@ -51,7 +51,6 @@ interface OrbitControlApi {
 }
 
 interface CameraTransition {
-  requestId: number;
   startedAt: number;
   duration: number;
   startPosition: THREE.Vector3;
@@ -59,7 +58,7 @@ interface CameraTransition {
   startTarget: THREE.Vector3;
   endTarget: THREE.Vector3;
   startUp: THREE.Vector3;
-  endUp: THREE.Vector3;
+  upRotation: THREE.Quaternion;
 }
 
 export interface SurfacePaintBinding {
@@ -217,13 +216,17 @@ export function useSurfacePaint(
   const lastPointRef = useRef<[number, number] | null>(null);
   const changedRef = useRef(false);
   const wasActiveRef = useRef(false);
+  const handledCameraRequestRef = useRef(settings.cameraRequestId);
   const cameraTransitionRef = useRef<CameraTransition | null>(null);
   const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
 
   useEffect(() => {
-    if (!selected || !controls || !settings.cameraView) return;
+    if (settings.cameraRequestId === handledCameraRequestRef.current || !controls) return;
+    handledCameraRequestRef.current = settings.cameraRequestId;
+    if (!selected || !settings.cameraView) return;
+
     const target = new THREE.Vector3(...object.position);
     const distance = Math.max(
       3.5,
@@ -232,16 +235,17 @@ export function useSurfacePaint(
     const destination = cameraDestination(settings.cameraView, target, distance);
     if (!destination) return;
 
+    const startUp = camera.up.clone().normalize();
+    const endUp = destination.up.clone().normalize();
     cameraTransitionRef.current = {
-      requestId: settings.cameraRequestId,
       startedAt: performance.now(),
       duration: 420,
       startPosition: camera.position.clone(),
       endPosition: destination.position,
       startTarget: controls.target.clone(),
       endTarget: target,
-      startUp: camera.up.clone(),
-      endUp: destination.up
+      startUp,
+      upRotation: new THREE.Quaternion().setFromUnitVectors(startUp, endUp)
     };
   }, [
     camera,
@@ -272,10 +276,11 @@ export function useSurfacePaint(
       1
     );
     const eased = smoothStep(progress);
+    const upStep = new THREE.Quaternion().identity().slerp(transition.upRotation, eased);
 
     camera.position.lerpVectors(transition.startPosition, transition.endPosition, eased);
     controls.target.lerpVectors(transition.startTarget, transition.endTarget, eased);
-    camera.up.lerpVectors(transition.startUp, transition.endUp, eased).normalize();
+    camera.up.copy(transition.startUp).applyQuaternion(upStep).normalize();
     camera.lookAt(controls.target);
     camera.updateMatrixWorld(true);
     controls.update();
