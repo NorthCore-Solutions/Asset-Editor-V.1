@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ThreeEvent } from '@react-three/fiber';
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData } from '../../types/editor';
@@ -40,6 +40,12 @@ interface PaintHit {
 interface CapturableTarget {
   setPointerCapture?: (pointerId: number) => void;
   releasePointerCapture?: (pointerId: number) => void;
+}
+
+interface OrbitControlApi {
+  enabled: boolean;
+  enablePan: boolean;
+  enableRotate: boolean;
 }
 
 export interface SurfacePaintBinding {
@@ -149,6 +155,7 @@ export function useSurfacePaint(
   selected: boolean,
   settings: SurfacePaintSettings
 ): SurfacePaintBinding {
+  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const updateMaterial = useEditorStore((state) => state.updateMaterial);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
@@ -162,6 +169,13 @@ export function useSurfacePaint(
   const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
+
+  useFrame(() => {
+    if (!active || !controls) return;
+    controls.enabled = true;
+    controls.enablePan = false;
+    controls.enableRotate = true;
+  });
 
   useEffect(() => () => {
     if (activePointerRef.current !== null) {
@@ -274,9 +288,8 @@ export function useSurfacePaint(
     active,
     texture: textureVisible ? surface.texture : null,
     onPointerDown: (event) => {
-      if (!active) return;
+      if (!active || event.button !== 0) return;
       blockEvent(event);
-      if (event.button !== 0) return;
       const hit = paintHitFromEvent(surface, event);
       if (!hit) return;
 
