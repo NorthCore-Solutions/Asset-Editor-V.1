@@ -210,7 +210,7 @@ function SceneMesh({
           object={mesh}
           mode={tool}
           space="world"
-          size={1.15}
+          size={tool === 'rotate' ? 1.4 : 1.15}
           translationSnap={snap.enabled ? snap.position : undefined}
           rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
           scaleSnap={snap.enabled ? snap.scale : undefined}
