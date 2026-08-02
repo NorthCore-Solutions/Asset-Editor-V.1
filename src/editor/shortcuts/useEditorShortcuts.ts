@@ -12,6 +12,8 @@ export function useEditorShortcuts(): void {
       if (isTypingTarget(event.target)) return;
       const state = useEditorStore.getState();
       const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'g' && event.shiftKey) { event.preventDefault(); state.ungroupSelection(); return; }
+      if ((event.ctrlKey || event.metaKey) && key === 'g') { event.preventDefault(); state.groupSelection(); return; }
       if ((event.ctrlKey || event.metaKey) && key === 'd') { event.preventDefault(); state.duplicateObject(); return; }
       if ((event.ctrlKey || event.metaKey) && key === 'z' && event.shiftKey) { event.preventDefault(); state.redo(); return; }
       if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); state.undo(); return; }
