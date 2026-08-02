@@ -430,7 +430,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
       Math.abs(drag.startScale.y) > 0.000001 ? mesh.scale.y / drag.startScale.y : 1,
       Math.abs(drag.startScale.z) > 0.000001 ? mesh.scale.z / drag.startScale.z : 1
     ];
-    const currentFactor = (factors[0] + factors[1] + factors[2]) / 3;
+    const currentFactor = factors.reduce((sum, factor) => sum + factor, 0) / factors.length;
     const snappedFactor = Math.max(0.02, currentFactor + projectedCorrection / drag.startDiagonalWorld);
     const snappedScale = drag.startScale.clone().multiplyScalar(snappedFactor);
     mesh.scale.copy(snappedScale);
