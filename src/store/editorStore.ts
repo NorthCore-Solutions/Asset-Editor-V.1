@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { createSceneObject } from '../geometry/factory';
 import { snapPosition } from '../editor/snapping/positionSnap';
-import { snapFormToFormSurfaces } from '../editor/snapping/primitiveSurfaceSnap';
 import type { CameraView, MaterialData, PrimitiveType, ProjectFile, SceneObjectData, SceneSettings, Snapshot, SnapSettings, TransformMode, Vec3 } from '../types/editor';
 
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -189,36 +188,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  updateObject: (id, patch, history = true) => set((state) => {
-    const current = state.objects.find((object) => object.id === id);
-    let nextPatch = patch;
-
-    if (
-      current
-      && patch.position
-      && state.snap.surface
-      && state.tool === 'translate'
-      && state.selectedIds.length === 1
-      && state.selectedIds[0] === id
-    ) {
-      const candidate: SceneObjectData = {
-        ...current,
-        ...patch,
-        position: [...patch.position] as Vec3
-      };
-      nextPatch = {
-        ...patch,
-        position: snapFormToFormSurfaces(candidate, state.objects, state.snap.position)
-      };
-    }
-
-    return {
-      ...(history ? withHistory(state) : {}),
-      objects: state.objects.map((object) => object.id === id ? { ...object, ...nextPatch } : object),
-      project: { ...state.project, updatedAt: now() },
-      dirty: true
-    };
-  }),
+  updateObject: (id, patch, history = true) => set((state) => ({
+    ...(history ? withHistory(state) : {}),
+    objects: state.objects.map((object) => object.id === id ? { ...object, ...patch } : object),
+    project: { ...state.project, updatedAt: now() }, dirty: true
+  })),
 
   updateTransform: (id, key, value, history = true) => {
     const nextValue = key === 'position' ? snapPosition(value, get().snap) : value;
