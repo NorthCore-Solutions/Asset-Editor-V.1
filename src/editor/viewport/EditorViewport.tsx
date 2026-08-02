@@ -59,7 +59,6 @@ interface SelectionRect {
 }
 
 interface SelectionApi {
-  hitTest: (clientX: number, clientY: number) => boolean;
   idsInRect: (rect: SelectionRect) => string[];
 }
 
@@ -232,23 +231,7 @@ function SelectionBridge({ registry, onReady }: { registry: MeshRegistry; onRead
   const gl = useThree((state) => state.gl);
 
   useEffect(() => {
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-
-    const clientToNdc = (clientX: number, clientY: number) => {
-      const rect = gl.domElement.getBoundingClientRect();
-      pointer.set(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1
-      );
-    };
-
     const api: SelectionApi = {
-      hitTest: (clientX, clientY) => {
-        clientToNdc(clientX, clientY);
-        raycaster.setFromCamera(pointer, camera);
-        return raycaster.intersectObjects([...registry.current.values()].filter((mesh) => mesh.visible), false).length > 0;
-      },
       idsInRect: (rect) => {
         const canvasRect = gl.domElement.getBoundingClientRect();
         const ids: string[] = [];
@@ -731,7 +714,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
       <hemisphereLight args={['#dbe7ee', '#2a312c', 0.8]} />
       {scene.gridVisible && <StableGrid cellSize={scene.gridSize} />}
       {scene.axesVisible && <axesHelper args={[3]} />}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={(event) => { if (event.button === 0) select(null); }}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={(event) => { if (event.button === 0 && !event.ctrlKey) select(null); }}>
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
@@ -758,6 +741,7 @@ export function EditorViewport() {
   const registry = useRef(new Map<string, THREE.Mesh>());
   const selectionApiRef = useRef<SelectionApi | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
+  const suppressNextClickRef = useRef(false);
   const [keyboardActive, setKeyboardActive] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
 
@@ -770,11 +754,17 @@ export function EditorViewport() {
     window.removeEventListener('blur', finishMarquee, true);
   }, []);
 
+  function stopMarqueeEvent(event: Event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if ('stopImmediatePropagation' in event) event.stopImmediatePropagation();
+  }
+
   function handleMarqueeMove(event: PointerEvent) {
     const current = marqueeRef.current;
     const viewport = viewportRef.current;
     if (!current || !viewport || event.pointerId !== current.pointerId) return;
-    event.preventDefault();
+    stopMarqueeEvent(event);
     const bounds = viewport.getBoundingClientRect();
     const next = {
       ...current,
@@ -790,14 +780,16 @@ export function EditorViewport() {
     const viewport = viewportRef.current;
     if (!current || !viewport) return;
     if (event instanceof PointerEvent && event.pointerId !== current.pointerId) return;
-    event?.preventDefault();
+    if (event) stopMarqueeEvent(event);
     removeMarqueeListeners();
     marqueeRef.current = null;
     setMarquee(null);
 
     const width = Math.abs(current.currentX - current.startX);
     const height = Math.abs(current.currentY - current.startY);
+    suppressNextClickRef.current = true;
     if (width < 4 || height < 4) return;
+
     const viewportBounds = viewport.getBoundingClientRect();
     const rect: SelectionRect = {
       left: viewportBounds.left + Math.min(current.startX, current.currentX),
@@ -813,10 +805,12 @@ export function EditorViewport() {
 
   const startMarquee = (event: React.PointerEvent<HTMLDivElement>) => {
     viewportRef.current?.focus();
-    if (event.button !== 2 || !event.ctrlKey || !viewportRef.current) return;
-    if (selectionApiRef.current?.hitTest(event.clientX, event.clientY)) return;
+    if (event.button !== 0 || !event.ctrlKey || !viewportRef.current) return;
+
     event.preventDefault();
     event.stopPropagation();
+    event.nativeEvent.stopImmediatePropagation();
+
     const bounds = viewportRef.current.getBoundingClientRect();
     const state: MarqueeState = {
       pointerId: event.pointerId,
@@ -826,6 +820,7 @@ export function EditorViewport() {
       currentY: event.clientY - bounds.top
     };
     marqueeRef.current = state;
+    suppressNextClickRef.current = false;
     setMarquee(state);
     window.addEventListener('pointermove', handleMarqueeMove, true);
     window.addEventListener('pointerup', finishMarquee, true);
@@ -845,7 +840,14 @@ export function EditorViewport() {
       ref={viewportRef}
       className="viewport"
       tabIndex={0}
-      onPointerDown={startMarquee}
+      onPointerDownCapture={startMarquee}
+      onClickCapture={(event) => {
+        if (!suppressNextClickRef.current) return;
+        suppressNextClickRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+      }}
       onContextMenu={(event) => event.preventDefault()}
       onFocus={() => setKeyboardActive(true)}
       onBlur={() => setKeyboardActive(false)}
@@ -854,13 +856,15 @@ export function EditorViewport() {
         shadows
         camera={{ position: [6, 5, 7], fov: 45, near: 0.05, far: 500 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
-        onPointerMissed={(event) => { if (event.button === 0) select(null); }}
+        onPointerMissed={(event) => {
+          if (event.button === 0 && !event.ctrlKey && !suppressNextClickRef.current) select(null);
+        }}
       >
         <EditorScene keyboardActive={keyboardActive} selectionActive={Boolean(marquee)} registry={registry} onSelectionApi={registerSelectionApi} />
       </Canvas>
       {marquee && <div className="selection-marquee" style={marqueeStyle} />}
       <div className="viewport-hint">
-        Strg + Rechtsziehen auf leerer Fläche: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren
+        Strg + Linksklick-Ziehen: Auswahlrahmen · Shift + Linksklick: Mehrfachauswahl · Strg + G: gruppieren
       </div>
     </div>
   );
