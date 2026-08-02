@@ -148,6 +148,7 @@ function SceneMesh({
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const meshRef = useRef<THREE.Mesh>(null);
+  const draggingRef = useRef(false);
   const geometry = useMemo(
     () => createGeometry({ type: object.type, geometry: object.geometry }),
     [object.geometry, object.type]
@@ -156,29 +157,54 @@ function SceneMesh({
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
-  useEffect(() => () => {
-    if (controls) controls.enabled = true;
-  }, [controls]);
-
-  const startTransform = () => {
-    if (controls) controls.enabled = false;
-    beginTransaction();
-    onTransformDraggingChange(true);
+  const removeReleaseListeners = () => {
+    window.removeEventListener('pointerup', stopTransform, true);
+    window.removeEventListener('pointercancel', stopTransform, true);
+    window.removeEventListener('blur', stopTransform, true);
   };
 
-  const stopTransform = () => {
-    endTransaction();
-    onTransformDraggingChange(false);
-    if (controls) controls.enabled = true;
-  };
-
-  const syncTransform = () => {
+  const commitMeshTransform = () => {
     const mesh = meshRef.current;
     if (!mesh) return;
+
     updateTransform(object.id, 'position', [mesh.position.x, mesh.position.y, mesh.position.z], false);
     updateTransform(object.id, 'rotation', [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z], false);
     updateTransform(object.id, 'scale', [mesh.scale.x, mesh.scale.y, mesh.scale.z], false);
   };
+
+  function stopTransform() {
+    if (!draggingRef.current) return;
+
+    draggingRef.current = false;
+    removeReleaseListeners();
+    commitMeshTransform();
+    endTransaction();
+    onTransformDraggingChange(false);
+    if (controls) controls.enabled = true;
+  }
+
+  const startTransform = () => {
+    if (draggingRef.current) return;
+
+    draggingRef.current = true;
+    if (controls) controls.enabled = false;
+    beginTransaction();
+    onTransformDraggingChange(true);
+
+    window.addEventListener('pointerup', stopTransform, true);
+    window.addEventListener('pointercancel', stopTransform, true);
+    window.addEventListener('blur', stopTransform, true);
+  };
+
+  useEffect(() => () => {
+    removeReleaseListeners();
+    if (draggingRef.current) {
+      commitMeshTransform();
+      endTransaction();
+      onTransformDraggingChange(false);
+    }
+    if (controls) controls.enabled = true;
+  });
 
   const mesh = (
     <mesh
@@ -217,7 +243,6 @@ function SceneMesh({
       scaleSnap={snap.enabled ? snap.scale : undefined}
       onMouseDown={startTransform}
       onMouseUp={stopTransform}
-      onObjectChange={syncTransform}
     >
       {mesh}
     </TransformControls>
@@ -253,28 +278,7 @@ function EditorScene({ keyboardActive }: { keyboardActive: boolean }) {
   const objects = useEditorStore((state) => state.objects);
   const scene = useEditorStore((state) => state.scene);
   const select = useEditorStore((state) => state.select);
-  const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const [transformDragging, setTransformDragging] = useState(false);
-
-  useEffect(() => {
-    if (!transformDragging) return;
-
-    const releaseTransform = () => {
-      useEditorStore.getState().endTransaction();
-      setTransformDragging(false);
-      if (controls) controls.enabled = true;
-    };
-
-    window.addEventListener('pointerup', releaseTransform);
-    window.addEventListener('pointercancel', releaseTransform);
-    window.addEventListener('blur', releaseTransform);
-
-    return () => {
-      window.removeEventListener('pointerup', releaseTransform);
-      window.removeEventListener('pointercancel', releaseTransform);
-      window.removeEventListener('blur', releaseTransform);
-    };
-  }, [controls, transformDragging]);
 
   return (
     <>
@@ -322,7 +326,7 @@ export function EditorViewport() {
       ref={viewportRef}
       className="viewport"
       tabIndex={0}
-      onPointerDownCapture={() => viewportRef.current?.focus()}
+      onPointerDown={() => viewportRef.current?.focus()}
       onFocus={() => setKeyboardActive(true)}
       onBlur={() => setKeyboardActive(false)}
     >
