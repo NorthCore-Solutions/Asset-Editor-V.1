@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { PaintTextureData } from '../../types/editor';
+import type { CameraView, PaintTextureData } from '../../types/editor';
 import { atlasPixelRegion, type SurfaceUvAtlas } from '../../geometry/uvAtlas';
 import {
   DEFAULT_PAINT_SIZE,
@@ -12,6 +12,7 @@ import {
   type PaintTool
 } from '../../editor/paint/pixelPaint';
 import {
+  requestSurfaceCameraView,
   setSurfacePaintSettings,
   subscribeSurfacePaint
 } from '../../editor/paint/surfacePaintSession';
@@ -38,6 +39,17 @@ const cloneImage = (image: ImageData): ImageData =>
 function surfaceDisplayLabel(index: number, label: string): string {
   const numberedLabel = `Fläche ${index + 1}`;
   return /^Fläche\s+\d+$/i.test(label) ? numberedLabel : `${numberedLabel} · ${label}`;
+}
+
+function cameraViewForSurface(label: string): CameraView | null {
+  const direction = label.replace(/\s+\d+$/u, '');
+  if (direction === 'Vorne') return 'front';
+  if (direction === 'Hinten') return 'back';
+  if (direction === 'Links') return 'left';
+  if (direction === 'Rechts') return 'right';
+  if (direction === 'Oben') return 'top';
+  if (direction === 'Unten') return 'bottom';
+  return null;
 }
 
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): [number, number] {
@@ -81,7 +93,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
   const [paintColor, setPaintColor] = useState(baseColor);
   const [brushSize, setBrushSize] = useState(1);
   const [surfaceEnabled, setSurfaceEnabled] = useState(false);
-  const [selectedIsland, setSelectedIsland] = useState(0);
+  const [selectedIsland, setSelectedIsland] = useState(-1);
   const [, refreshControls] = useState(0);
 
   const ensureAtlasCanvas = (): HTMLCanvasElement => {
@@ -97,6 +109,15 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     const previewCanvas = previewCanvasRef.current;
     const previewContext = previewCanvas?.getContext('2d', { willReadFrequently: true });
     if (!atlasCanvas || !previewCanvas || !previewContext || atlasCanvas.width <= 0 || atlasCanvas.height <= 0) return;
+
+    if (islandIndex < 0) {
+      previewCanvas.width = atlasCanvas.width;
+      previewCanvas.height = atlasCanvas.height;
+      previewContext.imageSmoothingEnabled = false;
+      previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      previewContext.drawImage(atlasCanvas, 0, 0);
+      return;
+    }
 
     const region = atlasPixelRegion(atlas, islandIndex, atlasCanvas.width, atlasCanvas.height);
     const width = Math.max(1, region.maxX - region.minX + 1);
@@ -114,10 +135,27 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     const context = atlasContext();
     if (!atlasCanvas || !previewCanvas || !context || previewCanvas.width <= 0 || previewCanvas.height <= 0) return;
 
+    context.imageSmoothingEnabled = false;
+
+    if (islandIndex < 0) {
+      context.clearRect(0, 0, atlasCanvas.width, atlasCanvas.height);
+      context.drawImage(
+        previewCanvas,
+        0,
+        0,
+        previewCanvas.width,
+        previewCanvas.height,
+        0,
+        0,
+        atlasCanvas.width,
+        atlasCanvas.height
+      );
+      return;
+    }
+
     const region = atlasPixelRegion(atlas, islandIndex, atlasCanvas.width, atlasCanvas.height);
     const width = Math.max(1, region.maxX - region.minX + 1);
     const height = Math.max(1, region.maxY - region.minY + 1);
-    context.imageSmoothingEnabled = false;
     context.clearRect(region.minX, region.minY, width, height);
     context.drawImage(previewCanvas, 0, 0, previewCanvas.width, previewCanvas.height, region.minX, region.minY, width, height);
   };
@@ -163,13 +201,13 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     setTool(settings.tool);
     setPaintColor(settings.color);
     setBrushSize(settings.brushSize);
-    setSelectedIsland(Math.min(settings.islandIndex, Math.max(0, atlas.islands.length - 1)));
+    setSelectedIsland(Math.min(Math.max(-1, settings.islandIndex), Math.max(0, atlas.islands.length - 1)));
   }), [atlas.islands.length]);
 
   useEffect(() => () => setSurfacePaintSettings({ enabled: false }), []);
 
   useEffect(() => {
-    const clamped = Math.min(selectedIsland, Math.max(0, atlas.islands.length - 1));
+    const clamped = Math.min(Math.max(-1, selectedIsland), Math.max(0, atlas.islands.length - 1));
     if (clamped !== selectedIsland) {
       setSelectedIsland(clamped);
       setSurfacePaintSettings({ islandIndex: clamped });
@@ -195,9 +233,14 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
   };
 
   const changeIsland = (nextIsland: number): void => {
-    const clamped = Math.max(0, Math.min(atlas.islands.length - 1, nextIsland));
+    const clamped = Math.max(-1, Math.min(atlas.islands.length - 1, nextIsland));
     setSelectedIsland(clamped);
     setSurfacePaintSettings({ islandIndex: clamped });
+
+    if (clamped >= 0) {
+      const view = cameraViewForSurface(atlas.islands[clamped]?.label ?? '');
+      if (view) requestSurfaceCameraView(view);
+    }
   };
 
   useEffect(() => {
@@ -298,7 +341,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     const atlasCanvas = atlasCanvasRef.current;
     const previewCanvas = previewCanvasRef.current;
     const context = atlasContext();
-    if (!atlasCanvas || !previewCanvas || !context || atlas.islands.length < 2) return;
+    if (!atlasCanvas || !previewCanvas || !context || atlas.islands.length < 2 || selectedIsland < 0) return;
 
     syncPreviewToAtlas();
     pushHistory();
@@ -383,8 +426,10 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
     refreshControls((value) => value + 1);
   };
 
-  const selectedSurface = atlas.islands[selectedIsland] ?? atlas.islands[0];
-  const selectedSurfaceLabel = surfaceDisplayLabel(selectedIsland, selectedSurface?.label ?? 'Oberfläche');
+  const selectedSurface = selectedIsland >= 0 ? atlas.islands[selectedIsland] : undefined;
+  const selectedSurfaceLabel = selectedIsland < 0
+    ? 'Fläche X · Gesamtübersicht'
+    : surfaceDisplayLabel(selectedIsland, selectedSurface?.label ?? 'Oberfläche');
 
   return (
     <div className="paint-editor">
@@ -423,6 +468,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
         <div className="field-row">
           <label>Fläche</label>
           <select value={selectedIsland} onChange={(event) => changeIsland(Number(event.target.value))}>
+            <option value={-1}>Fläche X · Gesamtübersicht</option>
             {atlas.islands.map((island, islandIndex) => (
               <option key={`${island.label}:${islandIndex}`} value={islandIndex}>
                 {surfaceDisplayLabel(islandIndex, island.label)}
@@ -431,13 +477,19 @@ export function TexturePaintEditor({ objectId, baseColor, texture, atlas, onComm
           </select>
         </div>
         <div className="paint-bulk-actions">
-          <button type="button" disabled={atlas.islands.length < 2} onClick={copySelectedSurfaceToAll}>Auf alle kopieren</button>
+          <button
+            type="button"
+            disabled={atlas.islands.length < 2 || selectedIsland < 0}
+            onClick={copySelectedSurfaceToAll}
+          >
+            Auf alle kopieren
+          </button>
           <button type="button" onClick={fillAllSurfaces}>Alle Flächen füllen</button>
         </div>
       </div>
 
       <div className="paint-surface-preview-title">{selectedSurfaceLabel}</div>
-      <div className="paint-canvas-shell">
+      <div key={selectedIsland} className="paint-canvas-shell paint-canvas-switch">
         <canvas
           ref={previewCanvasRef}
           onPointerDown={startPaint}
