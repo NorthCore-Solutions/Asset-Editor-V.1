@@ -839,7 +839,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
       <directionalLight position={[6, 10, 5]} intensity={2.1} castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
       <hemisphereLight args={['#dbe7ee', '#2a312c', 0.8]} />
       {scene.gridVisible && <StableGrid cellSize={scene.gridSize} />}
-      {scene.axesVisible && <axesHelper args={[3]} />
+      {scene.axesVisible && <axesHelper args={[3]} />}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={(event) => { if (event.button === 0 && !event.ctrlKey) select(null); }}>
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
