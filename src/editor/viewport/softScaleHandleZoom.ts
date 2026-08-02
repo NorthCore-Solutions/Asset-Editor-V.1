@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 type PatchedRendererPrototype = THREE.WebGLRenderer & {
-  __northcoreSoftScaleHandleZoom?: boolean;
+  __northcoreSoftScaleHandleZoomV3?: boolean;
 };
 
 const approximately = (value: number | undefined, expected: number): boolean =>
@@ -28,11 +28,17 @@ const projectionFactor = (camera: THREE.Camera, worldPosition: THREE.Vector3): n
 
 const softenedZoom = (camera: THREE.Camera, object: THREE.Object3D): number => {
   const worldPosition = object.getWorldPosition(new THREE.Vector3());
-  return Math.pow(projectionFactor(camera, worldPosition), 0.6);
+  return Math.pow(projectionFactor(camera, worldPosition), 0.45);
 };
 
 const axisHandleScale = (zoom: number): number =>
-  THREE.MathUtils.clamp(zoom * 0.026, 0.045, 0.18);
+  THREE.MathUtils.clamp(zoom * 0.045, 0.075, 0.22);
+
+const cornerHandleScale = (axisScale: number): number =>
+  axisScale * 0.79;
+
+const centerHandleScale = (axisScale: number): number =>
+  axisScale * 3.42;
 
 const isAxisScaleHandle = (object: THREE.Object3D): object is THREE.Mesh => {
   if (!(object instanceof THREE.Mesh) || object.renderOrder !== 1000) return false;
@@ -64,55 +70,56 @@ const centerScaleHandleContainer = (object: THREE.Object3D): THREE.Group | null 
   if (!approximately(radius, 0.1) && !approximately(radius, 0.2)) return null;
 
   const parent = object.parent;
-  if (!(parent instanceof THREE.Group) || parent.children.length !== 2) return null;
+  if (!(parent instanceof THREE.Group)) return null;
 
   const radii = parent.children
     .map(octahedronRadius)
-    .sort((left, right) => (left ?? 0) - (right ?? 0));
+    .filter((value): value is number => typeof value === 'number')
+    .sort((left, right) => left - right);
 
   return radii.length === 2 && approximately(radii[0], 0.1) && approximately(radii[1], 0.2)
     ? parent
     : null;
 };
 
+const installZoomCallback = (object: THREE.Object3D): void => {
+  if (isAxisScaleHandle(object)) {
+    object.onBeforeRender = (_renderer, _scene, camera) => {
+      object.scale.setScalar(axisHandleScale(softenedZoom(camera, object)));
+    };
+    return;
+  }
+
+  if (isCornerScaleHandle(object)) {
+    object.onBeforeRender = (_renderer, _scene, camera) => {
+      const axisScale = axisHandleScale(softenedZoom(camera, object));
+      object.scale.setScalar(cornerHandleScale(axisScale));
+    };
+    return;
+  }
+
+  const center = centerScaleHandleContainer(object);
+  if (!center || !(object instanceof THREE.Mesh)) return;
+
+  object.onBeforeRender = (_renderer, _scene, camera) => {
+    const axisScale = axisHandleScale(softenedZoom(camera, center));
+    center.scale.setScalar(centerHandleScale(axisScale));
+  };
+};
+
 const prototype = THREE.WebGLRenderer.prototype as PatchedRendererPrototype;
 
-if (!prototype.__northcoreSoftScaleHandleZoom) {
+if (!prototype.__northcoreSoftScaleHandleZoomV3) {
   const originalRender = prototype.render;
 
-  prototype.render = function renderWithSoftScaleHandles(
+  prototype.render = function renderWithBalancedScaleHandles(
     this: THREE.WebGLRenderer,
     scene: THREE.Object3D,
     camera: THREE.Camera
   ): void {
-    const processedCenters = new Set<THREE.Group>();
-
-    scene.traverse((object) => {
-      if (isAxisScaleHandle(object)) {
-        object.scale.setScalar(axisHandleScale(softenedZoom(camera, object)));
-        return;
-      }
-
-      if (isCornerScaleHandle(object)) {
-        const zoom = softenedZoom(camera, object);
-        object.scale.setScalar(THREE.MathUtils.clamp(zoom * 0.034, 0.07, 0.24));
-        return;
-      }
-
-      const center = centerScaleHandleContainer(object);
-      if (!center || processedCenters.has(center)) return;
-      processedCenters.add(center);
-
-      const zoom = softenedZoom(camera, center);
-      const axisScale = axisHandleScale(zoom);
-
-      // Achsenpunkt: Boxbreite 0.72. Mittelpunkt: Oktaederdurchmesser 0.20.
-      // Faktor 3.6 erzeugt dadurch dieselbe sichtbare Breite.
-      center.scale.setScalar(axisScale * 3.6);
-    });
-
+    scene.traverse(installZoomCallback);
     originalRender.call(this, scene, camera);
   };
 
-  prototype.__northcoreSoftScaleHandleZoom = true;
+  prototype.__northcoreSoftScaleHandleZoomV3 = true;
 }
