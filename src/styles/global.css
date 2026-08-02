@@ -55,6 +55,9 @@ input:focus, select:focus { outline: 1px solid var(--green-accent); border-color
 .viewport { min-width: 0; min-height: 0; position: relative; background: var(--bg); }
 .hierarchy { grid-column: 1 / -1; border-top-width: 1px; }
 .panel-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 0 10px; background: #171e22; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 700; color: var(--silver); text-transform: uppercase; letter-spacing: .04em; }
+.hierarchy-actions { display: flex; align-items: center; gap: 6px; }
+.hierarchy-actions button { height: 24px; padding: 0 8px; font-size: 10px; text-transform: none; letter-spacing: 0; }
+.hierarchy-actions span { min-width: 72px; text-align: right; }
 .panel-section { padding: 9px; border-bottom: 1px solid var(--border); }
 .panel-section h3 { margin: 0 0 7px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .shape-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
@@ -80,7 +83,7 @@ input:focus, select:focus { outline: 1px solid var(--green-accent); border-color
 .object-list td { border-bottom: 1px solid #273138; padding: 4px 8px; height: 29px; }
 .object-list tbody tr { cursor: pointer; }
 .object-list tbody tr:hover { background: #222c31; }
-.object-list tbody tr.selected { background: #294334; }
+.object-list tbody tr.selected { background: #294334; box-shadow: inset 3px 0 0 var(--green-accent); }
 .object-list .icon-button { width: 25px; height: 22px; padding: 0; font-size: 11px; }
 .statusbar { display: flex; align-items: center; gap: 14px; padding: 0 9px; background: #141a1e; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 .statusbar .message { margin-left: auto; color: var(--silver); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -95,3 +98,11 @@ input:focus, select:focus { outline: 1px solid var(--green-accent); border-color
 .warning-list { margin: 8px 0 0; padding-left: 18px; color: var(--warning); }
 .empty-state { padding: 24px; color: var(--muted); text-align: center; font-size: 12px; }
 .viewport-hint { position: absolute; left: 10px; bottom: 10px; pointer-events: none; padding: 5px 7px; background: rgba(17,22,26,.78); border: 1px solid rgba(72,87,96,.7); border-radius: 4px; color: var(--muted); font-size: 10px; }
+.selection-marquee {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  background: rgba(79, 143, 104, 0.20);
+  border: 2px solid var(--green-accent);
+  box-shadow: inset 0 0 0 1px rgba(79, 143, 104, 0.7), 0 0 12px rgba(79, 143, 104, 0.22);
+}
