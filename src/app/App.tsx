@@ -8,6 +8,7 @@ import { EditorToolbar } from '../components/toolbar/EditorToolbar';
 import { RestoreDialog } from '../components/dialogs/RestoreDialog';
 import { EditorViewport } from '../editor/viewport/EditorViewport';
 import '../editor/paint/paintTextureRuntime';
+import '../editor/paint/surfacePaintShield.css';
 import { ViewportHelp } from '../editor/viewport/ViewportHelp';
 import '../editor/viewport/viewport-help.css';
 import '../styles/panel-collapse.css';
