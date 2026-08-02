@@ -18,7 +18,11 @@ export function useEditorShortcuts(): void {
       if ((event.ctrlKey || event.metaKey) && key === 'z' && event.shiftKey) { event.preventDefault(); state.redo(); return; }
       if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); state.undo(); return; }
       if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); state.redo(); return; }
-      if (event.key === 'Delete') { state.deleteObject(); return; }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        state.deleteObject();
+        return;
+      }
       if (key === 'w' || key === 'g') state.setTool('translate');
       else if (key === 'e' || key === 'r') state.setTool('rotate');
       else if (key === 's') state.setTool('scale');
