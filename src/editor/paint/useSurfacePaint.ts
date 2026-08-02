@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEditorStore } from '../../store/editorStore';
-import type { SceneObjectData } from '../../types/editor';
+import type { CameraView, SceneObjectData } from '../../types/editor';
 import {
   atlasIslandAtUv,
   atlasPixelRegion,
@@ -48,6 +48,18 @@ interface OrbitControlApi {
   enableRotate: boolean;
   target: THREE.Vector3;
   update: () => void;
+}
+
+interface CameraTransition {
+  requestId: number;
+  startedAt: number;
+  duration: number;
+  startPosition: THREE.Vector3;
+  endPosition: THREE.Vector3;
+  startTarget: THREE.Vector3;
+  endTarget: THREE.Vector3;
+  startUp: THREE.Vector3;
+  endUp: THREE.Vector3;
 }
 
 export interface SurfacePaintBinding {
@@ -146,6 +158,41 @@ function blockEvent(event: ThreeEvent<PointerEvent>): void {
   event.nativeEvent.stopImmediatePropagation();
 }
 
+function cameraDestination(
+  view: CameraView,
+  target: THREE.Vector3,
+  distance: number
+): { position: THREE.Vector3; up: THREE.Vector3 } | null {
+  const up = new THREE.Vector3(0, 1, 0);
+
+  switch (view) {
+    case 'front':
+      return { position: target.clone().add(new THREE.Vector3(0, 0, distance)), up };
+    case 'back':
+      return { position: target.clone().add(new THREE.Vector3(0, 0, -distance)), up };
+    case 'left':
+      return { position: target.clone().add(new THREE.Vector3(-distance, 0, 0)), up };
+    case 'right':
+      return { position: target.clone().add(new THREE.Vector3(distance, 0, 0)), up };
+    case 'top':
+      return {
+        position: target.clone().add(new THREE.Vector3(0, distance, 0.001)),
+        up: new THREE.Vector3(0, 0, -1)
+      };
+    case 'bottom':
+      return {
+        position: target.clone().add(new THREE.Vector3(0, -distance, 0.001)),
+        up: new THREE.Vector3(0, 0, 1)
+      };
+    default:
+      return null;
+  }
+}
+
+function smoothStep(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
 export function useSurfacePaintSettings(): SurfacePaintSettings {
   const [settings, setSettings] = useState<SurfacePaintSettings>(() => getSurfacePaintSettings());
   useEffect(() => subscribeSurfacePaint(setSettings), []);
@@ -170,15 +217,70 @@ export function useSurfacePaint(
   const lastPointRef = useRef<[number, number] | null>(null);
   const changedRef = useRef(false);
   const wasActiveRef = useRef(false);
+  const cameraTransitionRef = useRef<CameraTransition | null>(null);
   const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
 
+  useEffect(() => {
+    if (!selected || !controls || !settings.cameraView) return;
+    const target = new THREE.Vector3(...object.position);
+    const distance = Math.max(
+      3.5,
+      Math.max(Math.abs(object.scale[0]), Math.abs(object.scale[1]), Math.abs(object.scale[2])) * 4
+    );
+    const destination = cameraDestination(settings.cameraView, target, distance);
+    if (!destination) return;
+
+    cameraTransitionRef.current = {
+      requestId: settings.cameraRequestId,
+      startedAt: performance.now(),
+      duration: 420,
+      startPosition: camera.position.clone(),
+      endPosition: destination.position,
+      startTarget: controls.target.clone(),
+      endTarget: target,
+      startUp: camera.up.clone(),
+      endUp: destination.up
+    };
+  }, [
+    camera,
+    controls,
+    object.position[0],
+    object.position[1],
+    object.position[2],
+    object.scale[0],
+    object.scale[1],
+    object.scale[2],
+    selected,
+    settings.cameraRequestId,
+    settings.cameraView
+  ]);
+
   useFrame(() => {
-    if (!active || !controls) return;
-    controls.enabled = true;
-    controls.enablePan = false;
-    controls.enableRotate = true;
+    if (active && controls) {
+      controls.enabled = true;
+      controls.enablePan = false;
+      controls.enableRotate = true;
+    }
+
+    const transition = cameraTransitionRef.current;
+    if (!transition || !controls || !selected) return;
+    const progress = THREE.MathUtils.clamp(
+      (performance.now() - transition.startedAt) / transition.duration,
+      0,
+      1
+    );
+    const eased = smoothStep(progress);
+
+    camera.position.lerpVectors(transition.startPosition, transition.endPosition, eased);
+    controls.target.lerpVectors(transition.startTarget, transition.endTarget, eased);
+    camera.up.lerpVectors(transition.startUp, transition.endUp, eased).normalize();
+    camera.lookAt(controls.target);
+    camera.updateMatrixWorld(true);
+    controls.update();
+
+    if (progress >= 1) cameraTransitionRef.current = null;
   });
 
   useEffect(() => {
