@@ -1,21 +1,138 @@
+import { useMemo, useState } from 'react';
 import { SHAPE_DEFINITIONS } from '../../geometry/factory';
 import { useEditorStore } from '../../store/editorStore';
+import './shapes-inventory.css';
+
+type InventoryCategory = 'Alle' | 'Formen' | 'Gebäude' | 'Möbel' | 'Natur' | 'Infrastruktur' | 'Dekoration' | 'Importiert';
+
+const INVENTORY_CATEGORIES: InventoryCategory[] = [
+  'Alle',
+  'Formen',
+  'Gebäude',
+  'Möbel',
+  'Natur',
+  'Infrastruktur',
+  'Dekoration',
+  'Importiert'
+];
+
+const SHAPE_ICONS: Partial<Record<(typeof SHAPE_DEFINITIONS)[number]['type'], string>> = {
+  box: '■',
+  cuboid: '▰',
+  sphere: '●',
+  hemisphere: '◒',
+  cylinder: '⬤',
+  cone: '▲',
+  pyramid: '◆',
+  plane: '▱',
+  torus: '◎',
+  wedge: '◢',
+  prism: '⬡',
+  wall: '▥',
+  floor: '▬',
+  flatRoof: '▔',
+  gableRoof: '⌂',
+  shedRoof: '◩',
+  door: '▯',
+  window: '⊞',
+  column: '▮',
+  chimney: '▯',
+  stairs: '▟'
+};
+
+const inventoryCategoryFor = (category: (typeof SHAPE_DEFINITIONS)[number]['category']): InventoryCategory =>
+  category === 'Grundformen' ? 'Formen' : 'Gebäude';
 
 export function ShapesPanel() {
   const addObject = useEditorStore((state) => state.addObject);
+  const [activeCategory, setActiveCategory] = useState<InventoryCategory>('Alle');
+  const [search, setSearch] = useState('');
+
+  const filteredShapes = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('de-DE');
+
+    return SHAPE_DEFINITIONS.filter((shape) => {
+      const category = inventoryCategoryFor(shape.category);
+      const matchesCategory = activeCategory === 'Alle' || activeCategory === category;
+      const matchesSearch = !query || [shape.label, shape.type, category]
+        .some((value) => value.toLocaleLowerCase('de-DE').includes(query));
+      return matchesCategory && matchesSearch;
+    });
+  }, [activeCategory, search]);
+
+  const activeCategoryHasAssets = activeCategory === 'Alle' || activeCategory === 'Formen' || activeCategory === 'Gebäude';
+
   return (
-    <aside className="panel left-panel">
-      <div className="panel-header">Formen</div>
-      {(['Grundformen', 'Gebäude'] as const).map((category) => (
-        <section className="panel-section" key={category}>
-          <h3>{category}</h3>
-          <div className="shape-grid">
-            {SHAPE_DEFINITIONS.filter((shape) => shape.category === category).map((shape) => (
-              <button className="shape-button" key={shape.type} onClick={() => addObject(shape.type)}>{shape.label}</button>
-            ))}
+    <aside className="panel left-panel shapes-inventory">
+      <div className="panel-header inventory-header">
+        <span>Inventar</span>
+        <span className="inventory-count">{filteredShapes.length}</span>
+      </div>
+
+      <div className="inventory-controls">
+        <label className="inventory-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Assets suchen…"
+            aria-label="Assets suchen"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch('')} aria-label="Suche leeren">×</button>
+          )}
+        </label>
+
+        <nav className="inventory-categories" aria-label="Asset-Kategorien">
+          {INVENTORY_CATEGORIES.map((category) => (
+            <button
+              type="button"
+              key={category}
+              className={activeCategory === category ? 'active' : undefined}
+              onClick={() => setActiveCategory(category)}
+            >
+              {category}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <section className="inventory-results" aria-live="polite">
+        {filteredShapes.length > 0 ? (
+          <div className="inventory-grid">
+            {filteredShapes.map((shape) => {
+              const category = inventoryCategoryFor(shape.category);
+              return (
+                <button
+                  type="button"
+                  className="inventory-item"
+                  key={shape.type}
+                  onClick={() => addObject(shape.type)}
+                  title={`${shape.label} hinzufügen`}
+                >
+                  <span className={`inventory-preview inventory-preview-${category === 'Formen' ? 'shape' : 'building'}`} aria-hidden="true">
+                    {SHAPE_ICONS[shape.type] ?? '◆'}
+                  </span>
+                  <span className="inventory-item-label">{shape.label}</span>
+                  <span className="inventory-item-category">{category}</span>
+                </button>
+              );
+            })}
           </div>
-        </section>
-      ))}
+        ) : (
+          <div className="inventory-empty">
+            <strong>{search ? 'Keine Treffer' : activeCategory}</strong>
+            <span>
+              {search
+                ? `Für „${search}“ wurden keine Assets gefunden.`
+                : activeCategoryHasAssets
+                  ? 'In dieser Kategorie sind derzeit keine passenden Assets vorhanden.'
+                  : 'Diese Kategorie ist für spätere Asset-Pakete vorbereitet.'}
+            </span>
+          </div>
+        )}
+      </section>
     </aside>
   );
 }
