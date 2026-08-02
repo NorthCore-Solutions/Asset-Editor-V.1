@@ -7,17 +7,20 @@ const now = () => new Date().toISOString();
 const defaultProject = () => ({ name: 'Unbenanntes Asset', createdAt: now(), updatedAt: now() });
 const defaultScene = (): SceneSettings => ({ background: '#11161A', gridVisible: true, axesVisible: true, gridSize: 1 });
 
+type EditorSnapshot = Snapshot & { selectedIds: string[] };
+
 interface EditorState {
   objects: SceneObjectData[];
   selectedId: string | null;
+  selectedIds: string[];
   project: ReturnType<typeof defaultProject>;
   scene: SceneSettings;
   tool: TransformMode;
   snap: SnapSettings;
   recentColors: string[];
-  past: Snapshot[];
-  future: Snapshot[];
-  transactionStart: Snapshot | null;
+  past: EditorSnapshot[];
+  future: EditorSnapshot[];
+  transactionStart: EditorSnapshot | null;
   dirty: boolean;
   message: string;
   cameraView: CameraView;
@@ -28,7 +31,10 @@ interface EditorState {
   requestCameraView: (view: CameraView) => void;
   setScene: (patch: Partial<SceneSettings>) => void;
   setSnap: (patch: Partial<SnapSettings>) => void;
-  select: (id: string | null) => void;
+  select: (id: string | null, additive?: boolean) => void;
+  selectMany: (ids: string[], additive?: boolean) => void;
+  groupSelection: () => void;
+  ungroupSelection: () => void;
   addObject: (type: PrimitiveType) => void;
   deleteObject: (id?: string) => void;
   duplicateObject: (id?: string) => void;
@@ -42,19 +48,38 @@ interface EditorState {
   newProject: (name?: string) => void;
   loadProject: (file: ProjectFile) => void;
   markSaved: () => void;
-  snapshot: () => Snapshot;
+  snapshot: () => EditorSnapshot;
 }
 
-const snapshotFrom = (state: Pick<EditorState, 'objects' | 'project' | 'scene' | 'selectedId'>): Snapshot => ({
-  objects: clone(state.objects), project: clone(state.project), scene: clone(state.scene), selectedId: state.selectedId
+const snapshotFrom = (state: Pick<EditorState, 'objects' | 'project' | 'scene' | 'selectedId' | 'selectedIds'>): EditorSnapshot => ({
+  objects: clone(state.objects),
+  project: clone(state.project),
+  scene: clone(state.scene),
+  selectedId: state.selectedId,
+  selectedIds: [...state.selectedIds]
 });
 
 const withHistory = (state: EditorState): Pick<EditorState, 'past' | 'future'> => ({
-  past: [...state.past.slice(-99), snapshotFrom(state)], future: []
+  past: [...state.past.slice(-99), snapshotFrom(state)],
+  future: []
 });
 
+const expandSelection = (objects: SceneObjectData[], ids: string[]): string[] => {
+  const expanded = new Set<string>();
+  for (const id of ids) {
+    const object = objects.find((item) => item.id === id);
+    if (!object) continue;
+    if (object.parentId) {
+      objects.filter((item) => item.parentId === object.parentId).forEach((item) => expanded.add(item.id));
+    } else {
+      expanded.add(id);
+    }
+  }
+  return [...expanded];
+};
+
 export const useEditorStore = create<EditorState>((set, get) => ({
-  objects: [], selectedId: null, project: defaultProject(), scene: defaultScene(), tool: 'translate',
+  objects: [], selectedId: null, selectedIds: [], project: defaultProject(), scene: defaultScene(), tool: 'translate',
   snap: { enabled: false, position: 0.25, rotation: 15, scale: 0.1 }, recentColors: [],
   past: [], future: [], transactionStart: null, dirty: false, message: 'Bereit', cameraView: 'perspective', cameraRequestId: 0,
 
@@ -64,30 +89,93 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   requestCameraView: (cameraView) => set((state) => ({ cameraView, cameraRequestId: state.cameraRequestId + 1 })),
   setScene: (patch) => set((state) => ({ ...withHistory(state), scene: { ...state.scene, ...patch }, dirty: true })),
   setSnap: (patch) => set((state) => ({ snap: { ...state.snap, ...patch } })),
-  select: (selectedId) => set({ selectedId }),
+
+  select: (id, additive = false) => set((state) => {
+    if (!id) return { selectedId: null, selectedIds: [] };
+    const targets = expandSelection(state.objects, [id]);
+    if (!additive) return { selectedId: id, selectedIds: targets };
+
+    const selected = new Set(state.selectedIds);
+    const allSelected = targets.every((target) => selected.has(target));
+    targets.forEach((target) => allSelected ? selected.delete(target) : selected.add(target));
+    const selectedIds = [...selected];
+    return { selectedId: selectedIds.includes(id) ? id : (selectedIds.at(-1) ?? null), selectedIds };
+  }),
+
+  selectMany: (ids, additive = false) => set((state) => {
+    const targets = expandSelection(state.objects, ids);
+    const selectedIds = additive ? [...new Set([...state.selectedIds, ...targets])] : targets;
+    return { selectedIds, selectedId: selectedIds.at(-1) ?? null };
+  }),
+
+  groupSelection: () => set((state) => {
+    if (state.selectedIds.length < 2) return state;
+    const groupId = crypto.randomUUID();
+    const selected = new Set(state.selectedIds);
+    return {
+      ...withHistory(state),
+      objects: state.objects.map((object) => selected.has(object.id) ? { ...object, parentId: groupId } : object),
+      dirty: true,
+      message: `${state.selectedIds.length} Objekte gruppiert`
+    };
+  }),
+
+  ungroupSelection: () => set((state) => {
+    const groupIds = new Set(
+      state.objects.filter((object) => state.selectedIds.includes(object.id) && object.parentId).map((object) => object.parentId as string)
+    );
+    if (groupIds.size === 0) return state;
+    return {
+      ...withHistory(state),
+      objects: state.objects.map((object) => object.parentId && groupIds.has(object.parentId)
+        ? { ...object, parentId: undefined }
+        : object),
+      dirty: true,
+      message: 'Gruppierung aufgehoben'
+    };
+  }),
 
   addObject: (type) => set((state) => {
     const object = createSceneObject(type, state.objects.map((item) => item.id));
-    return { ...withHistory(state), objects: [...state.objects, object], selectedId: object.id, dirty: true, message: `${object.name} hinzugefügt` };
+    return { ...withHistory(state), objects: [...state.objects, object], selectedId: object.id, selectedIds: [object.id], dirty: true, message: `${object.name} hinzugefügt` };
   }),
 
   deleteObject: (id) => set((state) => {
-    const target = id ?? state.selectedId;
-    if (!target) return state;
-    const object = state.objects.find((item) => item.id === target);
-    if (!object) return state;
-    return { ...withHistory(state), objects: state.objects.filter((item) => item.id !== target), selectedId: state.selectedId === target ? null : state.selectedId, dirty: true, message: `${object.name} gelöscht` };
+    const targets = id ? [id] : state.selectedIds;
+    if (targets.length === 0) return state;
+    const targetSet = new Set(targets);
+    const objects = state.objects.filter((item) => !targetSet.has(item.id));
+    const selectedIds = state.selectedIds.filter((selected) => !targetSet.has(selected));
+    return {
+      ...withHistory(state),
+      objects,
+      selectedIds,
+      selectedId: selectedIds.at(-1) ?? null,
+      dirty: true,
+      message: `${targets.length} Objekt${targets.length === 1 ? '' : 'e'} gelöscht`
+    };
   }),
 
   duplicateObject: (id) => set((state) => {
-    const target = id ?? state.selectedId;
-    const source = state.objects.find((item) => item.id === target);
-    if (!source) return state;
-    const duplicate = clone(source);
-    duplicate.id = crypto.randomUUID();
-    duplicate.name = `${source.name} Kopie`;
-    duplicate.position = [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35];
-    return { ...withHistory(state), objects: [...state.objects, duplicate], selectedId: duplicate.id, dirty: true, message: `${source.name} dupliziert` };
+    const targets = id ? [id] : state.selectedIds;
+    const sources = state.objects.filter((item) => targets.includes(item.id));
+    if (sources.length === 0) return state;
+    const groupId = sources.length > 1 ? crypto.randomUUID() : undefined;
+    const duplicates = sources.map((source) => ({
+      ...clone(source),
+      id: crypto.randomUUID(),
+      name: `${source.name} Kopie`,
+      position: [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35] as Vec3,
+      parentId: groupId
+    }));
+    return {
+      ...withHistory(state),
+      objects: [...state.objects, ...duplicates],
+      selectedIds: duplicates.map((item) => item.id),
+      selectedId: duplicates.at(-1)?.id ?? null,
+      dirty: true,
+      message: `${duplicates.length} Objekt${duplicates.length === 1 ? '' : 'e'} dupliziert`
+    };
   }),
 
   updateObject: (id, patch, history = true) => set((state) => ({
@@ -130,11 +218,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
 
   newProject: (name = 'Unbenanntes Asset') => set({
-    objects: [], selectedId: null, project: { ...defaultProject(), name }, scene: defaultScene(), past: [], future: [], transactionStart: null, dirty: false, message: 'Neues Projekt erstellt'
+    objects: [], selectedId: null, selectedIds: [], project: { ...defaultProject(), name }, scene: defaultScene(), past: [], future: [], transactionStart: null, dirty: false, message: 'Neues Projekt erstellt'
   }),
 
   loadProject: (file) => set({
-    objects: clone(file.objects), selectedId: null, project: clone(file.project), scene: clone(file.scene), past: [], future: [], transactionStart: null, dirty: false, message: `${file.project.name} geladen`
+    objects: clone(file.objects), selectedId: null, selectedIds: [], project: clone(file.project), scene: clone(file.scene), past: [], future: [], transactionStart: null, dirty: false, message: `${file.project.name} geladen`
   }),
 
   markSaved: () => set({ dirty: false, message: 'Projekt gespeichert' }),
