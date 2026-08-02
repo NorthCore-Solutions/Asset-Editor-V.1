@@ -1,4 +1,7 @@
+import { useMemo } from 'react';
 import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../materials/presets';
+import { createGeometry } from '../../geometry/factory';
+import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, Vec3 } from '../../types/editor';
 import { TexturePaintEditor } from './TexturePaintEditor';
@@ -62,6 +65,13 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const duplicateObject = useEditorStore((state) => state.duplicateObject);
   const deleteObject = useEditorStore((state) => state.deleteObject);
   const recentColors = useEditorStore((state) => state.recentColors);
+  const paintAtlas = useMemo(() => {
+    if (!object) return FULL_SURFACE_UV_ATLAS;
+    const geometry = createGeometry({ type: object.type, geometry: object.geometry });
+    const atlas = getSurfaceUvAtlas(geometry);
+    geometry.dispose();
+    return atlas;
+  }, [object?.geometry, object?.type]);
 
   if (collapsed) {
     return <aside className="panel right-panel panel-collapsed"><PropertiesHeader collapsed onToggle={onToggle} /></aside>;
@@ -118,6 +128,7 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
             baseColor={object.material.color}
             texture={object.material.paintTexture}
             palette={paintPalette}
+            atlas={paintAtlas}
             onCommit={(paintTexture) => setMaterial({ paintTexture })}
           />
         </section>
