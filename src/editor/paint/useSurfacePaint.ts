@@ -4,6 +4,12 @@ import * as THREE from 'three';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData } from '../../types/editor';
 import {
+  atlasIslandAtUv,
+  atlasPixelRegion,
+  getSurfaceUvAtlas,
+  type SurfaceUvAtlas
+} from '../../geometry/uvAtlas';
+import {
   DEFAULT_PAINT_SIZE,
   createFilledImageData,
   floodFill,
@@ -23,6 +29,12 @@ interface PaintSurface {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
+}
+
+interface PaintHit {
+  point: [number, number];
+  islandIndex: number;
+  atlas: SurfaceUvAtlas;
 }
 
 interface CapturableTarget {
@@ -82,14 +94,21 @@ function resizeSurface(surface: PaintSurface, width: number, height: number): vo
   surface.texture.needsUpdate = true;
 }
 
-function pointFromUv(surface: PaintSurface, uv: THREE.Vector2 | undefined): [number, number] | null {
-  if (!uv) return null;
-  const u = THREE.MathUtils.clamp(uv.x, 0, 0.999999);
-  const v = THREE.MathUtils.clamp(uv.y, 0, 0.999999);
-  return [
-    Math.max(0, Math.min(surface.canvas.width - 1, Math.floor(u * surface.canvas.width))),
-    Math.max(0, Math.min(surface.canvas.height - 1, Math.floor((1 - v) * surface.canvas.height)))
-  ];
+function paintHitFromEvent(surface: PaintSurface, event: ThreeEvent<PointerEvent>): PaintHit | null {
+  if (!event.uv || !(event.object instanceof THREE.Mesh)) return null;
+  const geometry = event.object.geometry;
+  const atlas = getSurfaceUvAtlas(geometry);
+  const islandIndex = atlasIslandAtUv(atlas, event.uv);
+  const u = THREE.MathUtils.clamp(event.uv.x, 0, 0.999999);
+  const v = THREE.MathUtils.clamp(event.uv.y, 0, 0.999999);
+  return {
+    point: [
+      Math.max(0, Math.min(surface.canvas.width - 1, Math.floor(u * surface.canvas.width))),
+      Math.max(0, Math.min(surface.canvas.height - 1, Math.floor((1 - v) * surface.canvas.height)))
+    ],
+    islandIndex,
+    atlas
+  };
 }
 
 function linePoints(from: [number, number], to: [number, number]): Array<[number, number]> {
@@ -137,6 +156,7 @@ export function useSurfacePaint(
   const loadedDataUrlRef = useRef<string | null>(null);
   const requestedDataUrlRef = useRef<string | null>(null);
   const activePointerRef = useRef<number | null>(null);
+  const activeIslandRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const changedRef = useRef(false);
   const paintTexture = object.material.paintTexture;
@@ -146,6 +166,7 @@ export function useSurfacePaint(
   useEffect(() => () => {
     if (activePointerRef.current !== null) {
       activePointerRef.current = null;
+      activeIslandRef.current = null;
       endTransaction();
     }
     surface.texture.dispose();
@@ -196,7 +217,12 @@ export function useSurfacePaint(
     }, false);
   };
 
-  const paintAt = (point: [number, number], previous: [number, number] | null): boolean => {
+  const paintAt = (
+    point: [number, number],
+    previous: [number, number] | null,
+    atlas: SurfaceUvAtlas,
+    islandIndex: number
+  ): boolean => {
     const image = surface.context.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
 
     if (settings.tool === 'eyedropper') {
@@ -206,7 +232,14 @@ export function useSurfacePaint(
     }
 
     if (settings.tool === 'fill') {
-      floodFill(image, point[0], point[1], hexToRgba(settings.color));
+      floodFill(
+        image,
+        point[0],
+        point[1],
+        hexToRgba(settings.color),
+        0,
+        atlasPixelRegion(atlas, islandIndex, image.width, image.height)
+      );
     } else {
       const color = settings.tool === 'eraser'
         ? hexToRgba('#000000', 0)
@@ -229,6 +262,7 @@ export function useSurfacePaint(
     if (activePointerRef.current !== event.pointerId) return;
     blockEvent(event);
     activePointerRef.current = null;
+    activeIslandRef.current = null;
     lastPointRef.current = null;
     if (changedRef.current) persist();
     changedRef.current = false;
@@ -243,16 +277,16 @@ export function useSurfacePaint(
       if (!active) return;
       blockEvent(event);
       if (event.button !== 0) return;
-      const point = pointFromUv(surface, event.uv);
-      if (!point) return;
+      const hit = paintHitFromEvent(surface, event);
+      if (!hit) return;
 
       if (settings.tool === 'eyedropper') {
-        paintAt(point, null);
+        paintAt(hit.point, null, hit.atlas, hit.islandIndex);
         return;
       }
 
       beginTransaction();
-      const changed = paintAt(point, null);
+      const changed = paintAt(hit.point, null, hit.atlas, hit.islandIndex);
       if (settings.tool === 'fill') {
         if (changed) persist();
         endTransaction();
@@ -260,7 +294,8 @@ export function useSurfacePaint(
       }
 
       activePointerRef.current = event.pointerId;
-      lastPointRef.current = point;
+      activeIslandRef.current = hit.islandIndex;
+      lastPointRef.current = hit.point;
       changedRef.current = changed;
       const target = event.target as CapturableTarget;
       target.setPointerCapture?.(event.pointerId);
@@ -268,19 +303,22 @@ export function useSurfacePaint(
     onPointerMove: (event) => {
       if (activePointerRef.current !== event.pointerId) return;
       blockEvent(event);
-      const point = pointFromUv(surface, event.uv);
-      if (!point) {
+      const hit = paintHitFromEvent(surface, event);
+      if (!hit) {
+        activeIslandRef.current = null;
         lastPointRef.current = null;
         return;
       }
 
-      const previous = lastPointRef.current;
-      const crossesUvSeam = previous
-        ? Math.abs(previous[0] - point[0]) > surface.canvas.width / 2
-          || Math.abs(previous[1] - point[1]) > surface.canvas.height / 2
-        : false;
-      changedRef.current = paintAt(point, crossesUvSeam ? null : previous) || changedRef.current;
-      lastPointRef.current = point;
+      const sameIsland = activeIslandRef.current === hit.islandIndex;
+      changedRef.current = paintAt(
+        hit.point,
+        sameIsland ? lastPointRef.current : null,
+        hit.atlas,
+        hit.islandIndex
+      ) || changedRef.current;
+      activeIslandRef.current = hit.islandIndex;
+      lastPointRef.current = hit.point;
     },
     onPointerUp: finishStroke,
     onPointerCancel: finishStroke
