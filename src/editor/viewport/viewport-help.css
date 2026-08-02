@@ -17,21 +17,23 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid #667279;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(102, 114, 121, 0.72);
   border-radius: 50%;
-  background: rgba(55, 63, 68, 0.92);
-  color: #c3cbd0;
+  background: rgba(55, 63, 68, 0.68);
+  color: rgba(195, 203, 208, 0.9);
   font-size: 13px;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 1;
   text-align: center;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.22);
 }
 
 .viewport-help-button:hover,
 .viewport-help-button[aria-expanded="true"] {
-  background: #4a555b;
-  border-color: #89949a;
+  background: rgba(74, 85, 91, 0.82);
+  border-color: rgba(137, 148, 154, 0.86);
   color: #f0f3f4;
 }
 
@@ -43,12 +45,12 @@
 .viewport-help-popover {
   max-width: 460px;
   padding: 7px 9px;
-  border: 1px solid rgba(102, 114, 121, 0.85);
+  border: 1px solid rgba(102, 114, 121, 0.72);
   border-radius: 4px;
-  background: rgba(29, 36, 40, 0.96);
+  background: rgba(29, 36, 40, 0.86);
   color: var(--silver);
   font-size: 10px;
   line-height: 1.45;
   white-space: nowrap;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.36);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
