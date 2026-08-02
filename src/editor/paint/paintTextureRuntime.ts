@@ -3,11 +3,11 @@ import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData } from '../../types/editor';
 
 type PatchedRendererPrototype = THREE.WebGLRenderer & {
-  __northcorePaintTextureRuntimeV2?: boolean;
+  __northcorePaintTextureRuntimeV3?: boolean;
 };
 
 const textureCache = new Map<string, THREE.Texture>();
-const pendingTextures = new Set<string>();
+const pendingCallbacks = new Map<string, Array<(texture: THREE.Texture) => void>>();
 
 function configureTexture(texture: THREE.Texture): void {
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -16,6 +16,7 @@ function configureTexture(texture: THREE.Texture): void {
   texture.generateMipmaps = false;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
+  texture.flipY = true;
   texture.needsUpdate = true;
 }
 
@@ -26,20 +27,30 @@ function requestTexture(dataUrl: string, onReady: (texture: THREE.Texture) => vo
     return;
   }
 
-  if (pendingTextures.has(dataUrl)) return;
-  pendingTextures.add(dataUrl);
+  const waiting = pendingCallbacks.get(dataUrl);
+  if (waiting) {
+    waiting.push(onReady);
+    return;
+  }
 
-  new THREE.TextureLoader().load(
-    dataUrl,
-    (texture) => {
-      pendingTextures.delete(dataUrl);
-      configureTexture(texture);
-      textureCache.set(dataUrl, texture);
-      onReady(texture);
-    },
-    undefined,
-    () => pendingTextures.delete(dataUrl)
-  );
+  pendingCallbacks.set(dataUrl, [onReady]);
+  const image = new Image();
+
+  image.onload = () => {
+    const texture = new THREE.Texture(image);
+    configureTexture(texture);
+    textureCache.set(dataUrl, texture);
+
+    const callbacks = pendingCallbacks.get(dataUrl) ?? [];
+    pendingCallbacks.delete(dataUrl);
+    callbacks.forEach((callback) => callback(texture));
+  };
+
+  image.onerror = () => {
+    pendingCallbacks.delete(dataUrl);
+  };
+
+  image.src = dataUrl;
 }
 
 function applyTexture(material: THREE.MeshStandardMaterial, object: SceneObjectData): void {
@@ -49,11 +60,13 @@ function applyTexture(material: THREE.MeshStandardMaterial, object: SceneObjectD
   material.emissive.set('#000000');
   material.emissiveIntensity = 0;
   material.opacity = object.material.opacity;
+  material.roughness = object.material.roughness;
+  material.metalness = object.material.metalness;
+  material.flatShading = object.material.flatShading;
 
   if (!paint) {
     material.transparent = object.material.opacity < 1;
     material.alphaTest = 0;
-    if (!activeUrl && !material.map) return;
     material.userData.northcorePaintDataUrl = undefined;
     material.map = null;
     material.color.set(object.material.color);
@@ -64,8 +77,18 @@ function applyTexture(material: THREE.MeshStandardMaterial, object: SceneObjectD
   material.transparent = true;
   material.alphaTest = 0.001;
   material.color.set('#FFFFFF');
-  if (activeUrl === paint.dataUrl && material.map) return;
   material.userData.northcorePaintDataUrl = paint.dataUrl;
+
+  const cached = textureCache.get(paint.dataUrl);
+  if (cached) {
+    if (material.map !== cached) {
+      material.map = cached;
+      material.needsUpdate = true;
+    }
+    return;
+  }
+
+  if (activeUrl === paint.dataUrl && material.map) return;
 
   requestTexture(paint.dataUrl, (texture) => {
     if (material.userData.northcorePaintDataUrl !== paint.dataUrl) return;
@@ -86,7 +109,7 @@ function sceneObjectsByName(): Map<string, SceneObjectData[]> {
 
 const prototype = THREE.WebGLRenderer.prototype as PatchedRendererPrototype;
 
-if (!prototype.__northcorePaintTextureRuntimeV2) {
+if (!prototype.__northcorePaintTextureRuntimeV3) {
   const originalRender = prototype.render;
 
   prototype.render = function renderWithPaintTextures(
@@ -116,5 +139,5 @@ if (!prototype.__northcorePaintTextureRuntimeV2) {
     originalRender.call(this, scene, camera);
   };
 
-  prototype.__northcorePaintTextureRuntimeV2 = true;
+  prototype.__northcorePaintTextureRuntimeV3 = true;
 }
