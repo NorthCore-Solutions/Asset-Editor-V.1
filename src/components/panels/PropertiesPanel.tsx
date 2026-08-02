@@ -2,6 +2,11 @@ import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../mater
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, Vec3 } from '../../types/editor';
 
+interface PropertiesPanelProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
 const round = (value: number) => Number(value.toFixed(4));
 
 function VectorEditor({ label, value, unit, onChange }: { label: string; value: Vec3; unit?: 'deg'; onChange: (value: Vec3) => void }) {
@@ -27,7 +32,24 @@ function RangeField({ label, value, min, max, step, onChange }: { label: string;
   return <div className="range-row"><label>{label}</label><input type="range" min={min} max={max} step={step} value={value} onPointerDown={begin} onPointerUp={end} onChange={(event) => onChange(Number(event.target.value), false)} /><span>{value.toFixed(2)}</span></div>;
 }
 
-export function PropertiesPanel() {
+function PropertiesHeader({ collapsed, onToggle }: PropertiesPanelProps) {
+  return (
+    <div className="panel-header">
+      {!collapsed && <span className="panel-title">Eigenschaften</span>}
+      <button
+        type="button"
+        className="panel-collapse-button"
+        onClick={onToggle}
+        aria-label={collapsed ? 'Eigenschaften einblenden' : 'Eigenschaften ausblenden'}
+        title={collapsed ? 'Eigenschaften einblenden' : 'Eigenschaften ausblenden'}
+      >
+        {collapsed ? '‹' : '›'}
+      </button>
+    </div>
+  );
+}
+
+export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const selectedId = useEditorStore((state) => state.selectedId);
   const object = useEditorStore((state) => state.objects.find((item) => item.id === selectedId));
   const updateObject = useEditorStore((state) => state.updateObject);
@@ -37,13 +59,20 @@ export function PropertiesPanel() {
   const deleteObject = useEditorStore((state) => state.deleteObject);
   const recentColors = useEditorStore((state) => state.recentColors);
 
-  if (!object) return <aside className="panel right-panel"><div className="panel-header">Eigenschaften</div><div className="empty-state">Kein Objekt ausgewählt</div></aside>;
+  if (collapsed) {
+    return <aside className="panel right-panel panel-collapsed"><PropertiesHeader collapsed onToggle={onToggle} /></aside>;
+  }
+
+  if (!object) {
+    return <aside className="panel right-panel"><PropertiesHeader collapsed={false} onToggle={onToggle} /><div className="empty-state">Kein Objekt ausgewählt</div></aside>;
+  }
+
   const setMaterial = (patch: Partial<MaterialData>, history = true) => updateMaterial(object.id, patch, history);
   const palettes = [{ title: 'Zuletzt', colors: recentColors }, { title: 'NorthCore', colors: NORTHCORE_COLORS }, { title: 'Low-Poly', colors: LOW_POLY_COLORS }];
 
   return (
     <aside className="panel right-panel">
-      <div className="panel-header">Eigenschaften</div>
+      <PropertiesHeader collapsed={false} onToggle={onToggle} />
       <section className="panel-section">
         <h3>Objekt</h3>
         <div className="field-row"><label>Name</label><input value={object.name} onChange={(event) => updateObject(object.id, { name: event.target.value })} /></div>
