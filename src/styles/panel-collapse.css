@@ -74,6 +74,10 @@
   height: 0;
 }
 
+.properties-scroll-content > .panel-section:last-child {
+  border-bottom: 0;
+}
+
 .panel-end-space {
   flex: 0 0 10px;
   min-height: 10px;
