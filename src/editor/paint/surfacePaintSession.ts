@@ -5,6 +5,7 @@ export interface SurfacePaintSettings {
   tool: PaintTool;
   color: string;
   brushSize: number;
+  islandIndex: number;
 }
 
 type SurfacePaintListener = (settings: SurfacePaintSettings) => void;
@@ -13,7 +14,8 @@ let settings: SurfacePaintSettings = {
   enabled: false,
   tool: 'brush',
   color: '#AEB8BE',
-  brushSize: 1
+  brushSize: 1,
+  islandIndex: 0
 };
 
 const listeners = new Set<SurfacePaintListener>();
@@ -28,7 +30,10 @@ export function setSurfacePaintSettings(patch: Partial<SurfacePaintSettings>): v
     ...patch,
     brushSize: patch.brushSize === undefined
       ? settings.brushSize
-      : Math.max(1, Math.min(8, Math.round(patch.brushSize)))
+      : Math.max(1, Math.min(8, Math.round(patch.brushSize))),
+    islandIndex: patch.islandIndex === undefined
+      ? settings.islandIndex
+      : Math.max(0, Math.round(patch.islandIndex))
   };
   listeners.forEach((listener) => listener(settings));
 }
