@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SHAPE_DEFINITIONS } from '../../geometry/factory';
 import { useEditorStore } from '../../store/editorStore';
 import './shapes-inventory.css';
@@ -45,8 +45,30 @@ const inventoryCategoryFor = (category: (typeof SHAPE_DEFINITIONS)[number]['cate
 
 export function ShapesPanel() {
   const addObject = useEditorStore((state) => state.addObject);
+  const categoryListRef = useRef<HTMLElement>(null);
   const [activeCategory, setActiveCategory] = useState<InventoryCategory>('Alle');
   const [search, setSearch] = useState('');
+  const [canScrollCategoriesLeft, setCanScrollCategoriesLeft] = useState(false);
+  const [canScrollCategoriesRight, setCanScrollCategoriesRight] = useState(false);
+
+  const updateCategoryScrollState = useCallback(() => {
+    const categoryList = categoryListRef.current;
+    if (!categoryList) return;
+
+    const maximumScrollLeft = Math.max(0, categoryList.scrollWidth - categoryList.clientWidth);
+    setCanScrollCategoriesLeft(categoryList.scrollLeft > 1);
+    setCanScrollCategoriesRight(categoryList.scrollLeft < maximumScrollLeft - 1);
+  }, []);
+
+  useEffect(() => {
+    updateCategoryScrollState();
+    window.addEventListener('resize', updateCategoryScrollState);
+    return () => window.removeEventListener('resize', updateCategoryScrollState);
+  }, [updateCategoryScrollState]);
+
+  const scrollCategories = (direction: -1 | 1) => {
+    categoryListRef.current?.scrollBy({ left: direction * 120, behavior: 'smooth' });
+  };
 
   const filteredShapes = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('de-DE');
@@ -84,18 +106,45 @@ export function ShapesPanel() {
           )}
         </label>
 
-        <nav className="inventory-categories" aria-label="Asset-Kategorien">
-          {INVENTORY_CATEGORIES.map((category) => (
-            <button
-              type="button"
-              key={category}
-              className={activeCategory === category ? 'active' : undefined}
-              onClick={() => setActiveCategory(category)}
-            >
-              {category}
-            </button>
-          ))}
-        </nav>
+        <div className="inventory-category-strip">
+          <button
+            type="button"
+            className="inventory-category-arrow inventory-category-arrow-left"
+            onClick={() => scrollCategories(-1)}
+            disabled={!canScrollCategoriesLeft}
+            aria-label="Vorherige Kategorien anzeigen"
+          >
+            ‹
+          </button>
+
+          <nav
+            ref={categoryListRef}
+            className="inventory-categories"
+            aria-label="Asset-Kategorien"
+            onScroll={updateCategoryScrollState}
+          >
+            {INVENTORY_CATEGORIES.map((category) => (
+              <button
+                type="button"
+                key={category}
+                className={activeCategory === category ? 'active' : undefined}
+                onClick={() => setActiveCategory(category)}
+              >
+                {category}
+              </button>
+            ))}
+          </nav>
+
+          <button
+            type="button"
+            className="inventory-category-arrow inventory-category-arrow-right"
+            onClick={() => scrollCategories(1)}
+            disabled={!canScrollCategoriesRight}
+            aria-label="Weitere Kategorien anzeigen"
+          >
+            ›
+          </button>
+        </div>
       </div>
 
       <section className="inventory-results" aria-live="polite">
