@@ -127,7 +127,19 @@ export function getSurfaceUvAtlas(geometry: THREE.BufferGeometry): SurfaceUvAtla
 
 function ensureNonIndexed(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   if (!geometry.index) return geometry;
+
+  const groups = geometry.groups.map((group) => ({
+    start: group.start,
+    count: group.count,
+    materialIndex: group.materialIndex
+  }));
   const converted = geometry.toNonIndexed();
+
+  if (groups.length > 0) {
+    converted.clearGroups();
+    groups.forEach((group) => converted.addGroup(group.start, group.count, group.materialIndex));
+  }
+
   geometry.dispose();
   return converted;
 }
