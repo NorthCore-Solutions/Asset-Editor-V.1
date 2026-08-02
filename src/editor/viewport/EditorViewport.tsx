@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
-import type { TransformControls as TransformControlsImpl } from 'three/addons/controls/TransformControls.js';
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
 import { useEditorStore } from '../../store/editorStore';
@@ -14,16 +13,9 @@ interface OrbitControlApi {
 }
 
 type ScaleAxis = 'X' | 'Y' | 'Z';
+type ScaleSide = -1 | 1;
 
-interface ScaleDragState {
-  axis: ScaleAxis;
-  anchorCoordinate: number;
-  startPosition: THREE.Vector3;
-  startQuaternion: THREE.Quaternion;
-  startScale: THREE.Vector3;
-}
-
-interface OppositeScaleDragState {
+interface ScaleHandleDragState {
   axis: ScaleAxis;
   pointerId: number;
   startPointer: THREE.Vector2;
@@ -39,9 +31,6 @@ interface OppositeScaleDragState {
 
 const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const GRID_EXTENT = 400;
-
-const isScaleAxis = (axis: string | null | undefined): axis is ScaleAxis =>
-  axis === 'X' || axis === 'Y' || axis === 'Z';
 
 const axisValue = (vector: THREE.Vector3, axis: ScaleAxis): number => {
   if (axis === 'X') return vector.x;
@@ -184,39 +173,86 @@ function CameraController() {
   return null;
 }
 
-function OppositeScaleHandles({
+function ScaleHandle({
+  mesh,
+  bounds,
+  axis,
+  side,
+  color,
+  onPointerDown
+}: {
+  mesh: THREE.Mesh;
+  bounds: THREE.Box3;
+  axis: ScaleAxis;
+  side: ScaleSide;
+  color: string;
+  onPointerDown: (axis: ScaleAxis, side: ScaleSide, event: ThreeEvent<PointerEvent>) => void;
+}) {
+  const handleRef = useRef<THREE.Mesh>(null);
+  const camera = useThree((state) => state.camera);
+
+  useFrame(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+
+    mesh.updateMatrixWorld();
+    const localPoint = bounds.getCenter(new THREE.Vector3());
+    const scaleOnAxis = Math.max(0.0001, Math.abs(axisValue(mesh.scale, axis)));
+    const distance = camera.position.distanceTo(mesh.position);
+    const marginWorld = Math.max(0.16, distance * 0.018);
+    const edge = boundingValue(bounds, axis, side === 1 ? 'max' : 'min');
+    setAxisValue(localPoint, axis, edge + side * marginWorld / scaleOnAxis);
+
+    handle.position.copy(mesh.localToWorld(localPoint));
+    handle.quaternion.copy(mesh.quaternion);
+    handle.scale.setScalar(Math.max(0.12, Math.min(0.34, distance * 0.022)));
+  });
+
+  return (
+    <mesh
+      ref={handleRef}
+      renderOrder={1000}
+      onPointerDown={(event) => onPointerDown(axis, side, event)}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshBasicMaterial
+        color={color}
+        depthTest={false}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
+}
+
+function ScaleHandles({
   mesh,
   geometry,
   object,
   snap,
-  transformControls,
   onTransformDraggingChange
 }: {
   mesh: THREE.Mesh;
   geometry: THREE.BufferGeometry;
   object: SceneObjectData;
   snap: SnapSettings;
-  transformControls: TransformControlsImpl | null;
   onTransformDraggingChange: (dragging: boolean) => void;
 }) {
   const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
-  const groupRef = useRef<THREE.Group>(null);
-  const dragRef = useRef<OppositeScaleDragState | null>(null);
+  const dragRef = useRef<ScaleHandleDragState | null>(null);
   const updateObject = useEditorStore((state) => state.updateObject);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
 
-  useFrame(() => {
-    const group = groupRef.current;
-    if (!group) return;
-
-    group.position.copy(mesh.position);
-    group.quaternion.copy(mesh.quaternion);
-    const distance = camera.position.distanceTo(mesh.position);
-    group.scale.setScalar(Math.max(0.45, distance * 0.14));
-  });
+  const bounds = useMemo(() => {
+    geometry.computeBoundingBox();
+    return geometry.boundingBox?.clone() ?? new THREE.Box3(
+      new THREE.Vector3(-0.5, -0.5, -0.5),
+      new THREE.Vector3(0.5, 0.5, 0.5)
+    );
+  }, [geometry]);
 
   const removeWindowListeners = () => {
     window.removeEventListener('pointermove', handlePointerMove, true);
@@ -247,7 +283,7 @@ function OppositeScaleHandles({
     const startScale = axisValue(drag.startScale, drag.axis);
     const startWorldSize = drag.localSize * startScale;
     const minimumScale = 0.02;
-    let nextScale = Math.max(minimumScale, (startWorldSize - worldDelta) / drag.localSize);
+    let nextScale = Math.max(minimumScale, (startWorldSize + worldDelta) / drag.localSize);
 
     if (snap.enabled && snap.scale > 0) {
       nextScale = Math.max(minimumScale, Math.round(nextScale / snap.scale) * snap.scale);
@@ -275,25 +311,21 @@ function OppositeScaleHandles({
     endTransaction();
     onTransformDraggingChange(false);
     if (controls) controls.enabled = true;
-    if (transformControls) transformControls.enabled = true;
   }
 
-  const startDrag = (axis: ScaleAxis, event: ThreeEvent<PointerEvent>) => {
+  const startDrag = (axis: ScaleAxis, side: ScaleSide, event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     event.nativeEvent.preventDefault();
     event.nativeEvent.stopImmediatePropagation();
-
-    geometry.computeBoundingBox();
-    const bounds = geometry.boundingBox;
-    if (!bounds) return;
 
     const localSize = boundingValue(bounds, axis, 'max') - boundingValue(bounds, axis, 'min');
     if (localSize <= 0.000001) return;
 
     const startQuaternion = mesh.quaternion.clone();
-    const worldAxis = axisVector(axis, 1).applyQuaternion(startQuaternion).normalize();
+    const positiveWorldAxis = axisVector(axis, 1).applyQuaternion(startQuaternion).normalize();
+    const outwardWorldAxis = positiveWorldAxis.clone().multiplyScalar(side);
     const centerProjected = mesh.position.clone().project(camera);
-    const axisProjected = mesh.position.clone().add(worldAxis).project(camera);
+    const axisProjected = mesh.position.clone().add(outwardWorldAxis).project(camera);
     const screenAxis = new THREE.Vector2(
       (axisProjected.x - centerProjected.x) * size.width * 0.5,
       -(axisProjected.y - centerProjected.y) * size.height * 0.5
@@ -309,16 +341,15 @@ function OppositeScaleHandles({
       startPointer: new THREE.Vector2(event.clientX, event.clientY),
       screenAxis,
       pixelsPerWorldUnit,
-      anchorCoordinate: boundingValue(bounds, axis, 'max'),
+      anchorCoordinate: boundingValue(bounds, axis, side === 1 ? 'min' : 'max'),
       localSize,
       startPosition: mesh.position.clone(),
       startQuaternion,
       startScale: mesh.scale.clone(),
-      worldAxis
+      worldAxis: positiveWorldAxis
     };
 
     if (controls) controls.enabled = false;
-    if (transformControls) transformControls.enabled = false;
     beginTransaction();
     onTransformDraggingChange(true);
 
@@ -332,42 +363,20 @@ function OppositeScaleHandles({
     if (!dragRef.current) return;
     removeWindowListeners();
     dragRef.current = null;
+    endTransaction();
     if (controls) controls.enabled = true;
-    if (transformControls) transformControls.enabled = true;
     onTransformDraggingChange(false);
-  }, [controls, transformControls, onTransformDraggingChange]);
-
-  const handleMaterial = (color: string) => (
-    <meshBasicMaterial color={color} depthTest={false} depthWrite={false} toneMapped={false} />
-  );
+  }, [controls, endTransaction, onTransformDraggingChange]);
 
   return (
-    <group ref={groupRef} renderOrder={1000}>
-      <mesh
-        position={[-1, 0, 0]}
-        renderOrder={1000}
-        onPointerDown={(event) => startDrag('X', event)}
-      >
-        <boxGeometry args={[0.18, 0.18, 0.18]} />
-        {handleMaterial('#ff3b30')}
-      </mesh>
-      <mesh
-        position={[0, -1, 0]}
-        renderOrder={1000}
-        onPointerDown={(event) => startDrag('Y', event)}
-      >
-        <boxGeometry args={[0.18, 0.18, 0.18]} />
-        {handleMaterial('#22d63a')}
-      </mesh>
-      <mesh
-        position={[0, 0, -1]}
-        renderOrder={1000}
-        onPointerDown={(event) => startDrag('Z', event)}
-      >
-        <boxGeometry args={[0.18, 0.18, 0.18]} />
-        {handleMaterial('#275dff')}
-      </mesh>
-    </group>
+    <>
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3b30" onPointerDown={startDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3b30" onPointerDown={startDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#22d63a" onPointerDown={startDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={1} color="#22d63a" onPointerDown={startDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={-1} color="#275dff" onPointerDown={startDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={1} color="#275dff" onPointerDown={startDrag} />
+    </>
   );
 }
 
@@ -386,8 +395,6 @@ function SceneMesh({
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const [mesh, setMesh] = useState<THREE.Mesh | null>(null);
-  const transformControlsRef = useRef<TransformControlsImpl>(null);
-  const scaleDragRef = useRef<ScaleDragState | null>(null);
   const geometry = useMemo(
     () => createGeometry({ type: object.type, geometry: object.geometry }),
     [object.geometry, object.type]
@@ -397,60 +404,22 @@ function SceneMesh({
   useEffect(() => () => geometry.dispose(), [geometry]);
 
   const startTransform = () => {
-    scaleDragRef.current = null;
-
-    if (tool === 'scale' && mesh) {
-      const axis = transformControlsRef.current?.axis;
-      geometry.computeBoundingBox();
-      const bounds = geometry.boundingBox;
-
-      if (bounds && isScaleAxis(axis)) {
-        scaleDragRef.current = {
-          axis,
-          anchorCoordinate: boundingValue(bounds, axis, 'min'),
-          startPosition: mesh.position.clone(),
-          startQuaternion: mesh.quaternion.clone(),
-          startScale: mesh.scale.clone()
-        };
-      }
-    }
-
     beginTransaction();
     onTransformDraggingChange(true);
   };
 
-  const applyOneSidedScale = () => {
-    const scaleDrag = scaleDragRef.current;
-    if (!mesh || !scaleDrag || tool !== 'scale') return;
-
-    const startScale = axisValue(scaleDrag.startScale, scaleDrag.axis);
-    const currentScale = axisValue(mesh.scale, scaleDrag.axis);
-    const localOffset = axisVector(
-      scaleDrag.axis,
-      scaleDrag.anchorCoordinate * (startScale - currentScale)
-    );
-
-    localOffset.applyQuaternion(scaleDrag.startQuaternion);
-    mesh.position.copy(scaleDrag.startPosition).add(localOffset);
-    mesh.updateMatrixWorld();
-  };
-
   const stopTransform = () => {
     if (!mesh) {
-      scaleDragRef.current = null;
       onTransformDraggingChange(false);
       endTransaction();
       return;
     }
-
-    applyOneSidedScale();
 
     const position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
     const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
     const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
 
     updateObject(object.id, { position, rotation, scale }, false);
-    scaleDragRef.current = null;
     endTransaction();
     onTransformDraggingChange(false);
   };
@@ -485,31 +454,26 @@ function SceneMesh({
       </mesh>
 
       {selected && !object.locked && object.visible && mesh && (
-        <>
+        tool === 'scale' ? (
+          <ScaleHandles
+            mesh={mesh}
+            geometry={geometry}
+            object={object}
+            snap={snap}
+            onTransformDraggingChange={onTransformDraggingChange}
+          />
+        ) : (
           <TransformControls
-            ref={transformControlsRef}
             object={mesh}
             mode={tool}
             space="world"
             size={tool === 'rotate' ? 1.4 : 1.15}
             translationSnap={snap.enabled ? snap.position : undefined}
             rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
-            scaleSnap={snap.enabled ? snap.scale : undefined}
             onMouseDown={startTransform}
-            onObjectChange={applyOneSidedScale}
             onMouseUp={stopTransform}
           />
-          {tool === 'scale' && (
-            <OppositeScaleHandles
-              mesh={mesh}
-              geometry={geometry}
-              object={object}
-              snap={snap}
-              transformControls={transformControlsRef.current}
-              onTransformDraggingChange={onTransformDraggingChange}
-            />
-          )}
-        </>
+        )
       )}
     </>
   );
