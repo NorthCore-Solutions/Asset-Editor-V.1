@@ -19,18 +19,11 @@ export interface ExportReport {
 interface ExportResources {
   geometries: Set<THREE.BufferGeometry>;
   materials: Set<THREE.Material>;
+  textures: Set<THREE.Texture>;
 }
 
 const UNION_TYPES = new Set<PrimitiveType>([
-  'box',
-  'cuboid',
-  'sphere',
-  'cylinder',
-  'cone',
-  'pyramid',
-  'torus',
-  'wedge',
-  'prism'
+  'box', 'cuboid', 'sphere', 'cylinder', 'cone', 'pyramid', 'torus', 'wedge', 'prism'
 ]);
 
 export function filterExportObjects(objects: SceneObjectData[], selectedId: string | null, selectionOnly: boolean): SceneObjectData[] {
@@ -38,7 +31,9 @@ export function filterExportObjects(objects: SceneObjectData[], selectedId: stri
 }
 
 function isUnionEligible(object: SceneObjectData): boolean {
-  return UNION_TYPES.has(object.type) && object.material.opacity > 0;
+  return UNION_TYPES.has(object.type)
+    && object.material.opacity > 0
+    && !object.material.paintTexture;
 }
 
 function liesBelowGround(object: SceneObjectData): boolean {
@@ -75,23 +70,51 @@ export function inspectExport(
 
   if (geometryMode === 'union') {
     if (unionEligible < 2) {
-      warnings.push('Union benötigt mindestens zwei geschlossene Grundformen. Der Export bleibt für diese Auswahl getrennt.');
+      warnings.push('Union benötigt mindestens zwei geschlossene, unbemalte Grundformen. Der Export bleibt für diese Auswahl getrennt.');
     }
     if (unionSeparate > 0) {
-      warnings.push(`${unionSeparate} nicht geschlossene oder nicht unterstützte Objekt${unionSeparate === 1 ? '' : 'e'} werden separat exportiert.`);
+      warnings.push(`${unionSeparate} bemalte, nicht geschlossene oder nicht unterstützte Objekt${unionSeparate === 1 ? '' : 'e'} werden separat exportiert.`);
     }
   }
 
   return { objects: filtered, triangles, warnings, unionEligible, unionSeparate };
 }
 
-function createMaterial(object: SceneObjectData): THREE.MeshStandardMaterial {
+function loadTexture(dataUrl: string): Promise<THREE.Texture> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const texture = new THREE.Texture(image);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.flipY = false;
+      texture.needsUpdate = true;
+      resolve(texture);
+    };
+    image.onerror = () => reject(new Error('Bemalungstextur konnte nicht geladen werden.'));
+    image.src = dataUrl;
+  });
+}
+
+async function loadPaintTextures(objects: SceneObjectData[]): Promise<Map<string, THREE.Texture>> {
+  const urls = [...new Set(objects.map((object) => object.material.paintTexture?.dataUrl).filter((url): url is string => Boolean(url)))];
+  const entries = await Promise.all(urls.map(async (url) => [url, await loadTexture(url)] as const));
+  return new Map(entries);
+}
+
+function createMaterial(object: SceneObjectData, paintTextures: Map<string, THREE.Texture>): THREE.MeshStandardMaterial {
+  const paintUrl = object.material.paintTexture?.dataUrl;
+  const map = paintUrl ? paintTextures.get(paintUrl) ?? null : null;
   return new THREE.MeshStandardMaterial({
-    color: object.material.color,
+    color: map ? '#FFFFFF' : object.material.color,
+    map,
     roughness: object.material.roughness,
     metalness: object.material.metalness,
     opacity: object.material.opacity,
-    transparent: object.material.opacity < 1,
+    transparent: object.material.opacity < 1 || Boolean(map),
+    alphaTest: map ? 0.001 : 0,
     flatShading: object.material.flatShading
   });
 }
@@ -117,9 +140,7 @@ function createWorldGeometry(object: SceneObjectData, forUnion: boolean): THREE.
 
   if (forUnion) {
     for (const attributeName of Object.keys(geometry.attributes)) {
-      if (attributeName !== 'position' && attributeName !== 'normal') {
-        geometry.deleteAttribute(attributeName);
-      }
+      if (attributeName !== 'position' && attributeName !== 'normal') geometry.deleteAttribute(attributeName);
     }
     if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
     const count = geometry.index?.count ?? geometry.getAttribute('position').count;
@@ -133,9 +154,14 @@ function createWorldGeometry(object: SceneObjectData, forUnion: boolean): THREE.
   return geometry;
 }
 
-function addSeparateMesh(group: THREE.Group, object: SceneObjectData, resources: ExportResources): void {
+function addSeparateMesh(
+  group: THREE.Group,
+  object: SceneObjectData,
+  resources: ExportResources,
+  paintTextures: Map<string, THREE.Texture>
+): void {
   const geometry = createWorldGeometry(object, false);
-  const material = createMaterial(object);
+  const material = createMaterial(object, paintTextures);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = object.name;
   resources.geometries.add(geometry);
@@ -150,10 +176,7 @@ function effectiveDrawRange(geometry: THREE.BufferGeometry): { start: number; co
   return { start, count: Math.max(0, Math.min(total - start, requestedCount)) };
 }
 
-function extractGeometryGroups(
-  source: THREE.BufferGeometry,
-  materialIndex: number | null
-): THREE.BufferGeometry | null {
+function extractGeometryGroups(source: THREE.BufferGeometry, materialIndex: number | null): THREE.BufferGeometry | null {
   const drawRange = effectiveDrawRange(source);
   const drawEnd = drawRange.start + drawRange.count;
   const sourceGroups = source.groups.length > 0
@@ -183,11 +206,7 @@ function extractGeometryGroups(
   return geometry;
 }
 
-function addUnionResult(
-  group: THREE.Group,
-  result: Brush,
-  resources: ExportResources
-): void {
+function addUnionResult(group: THREE.Group, result: Brush, resources: ExportResources): void {
   const materials = Array.isArray(result.material) ? result.material : [result.material];
   materials.forEach((material) => resources.materials.add(material));
 
@@ -214,13 +233,14 @@ function addUnionResult(
 function addUnionMeshes(
   group: THREE.Group,
   objects: SceneObjectData[],
-  resources: ExportResources
+  resources: ExportResources,
+  paintTextures: Map<string, THREE.Texture>
 ): void {
   const unionObjects = objects.filter(isUnionEligible);
   const separateObjects = objects.filter((object) => !isUnionEligible(object));
 
   if (unionObjects.length < 2) {
-    objects.forEach((object) => addSeparateMesh(group, object, resources));
+    objects.forEach((object) => addSeparateMesh(group, object, resources, paintTextures));
     return;
   }
 
@@ -234,7 +254,7 @@ function addUnionMeshes(
 
   for (const object of unionObjects) {
     const geometry = createWorldGeometry(object, true);
-    const material = createMaterial(object);
+    const material = createMaterial(object, paintTextures);
     const brush = new Brush(geometry, material);
     brush.name = object.name;
     brush.updateMatrixWorld(true);
@@ -256,7 +276,7 @@ function addUnionMeshes(
 
   if (!result) throw new Error('Es konnten keine Grundformen für die Union vorbereitet werden.');
   addUnionResult(group, result, resources);
-  separateObjects.forEach((object) => addSeparateMesh(group, object, resources));
+  separateObjects.forEach((object) => addSeparateMesh(group, object, resources, paintTextures));
 }
 
 export async function exportGlb(
@@ -267,21 +287,23 @@ export async function exportGlb(
   const group = new THREE.Group();
   const resources: ExportResources = {
     geometries: new Set<THREE.BufferGeometry>(),
-    materials: new Set<THREE.Material>()
+    materials: new Set<THREE.Material>(),
+    textures: new Set<THREE.Texture>()
   };
 
   try {
+    const paintTextures = await loadPaintTextures(objects);
+    paintTextures.forEach((texture) => resources.textures.add(texture));
+
     if (geometryMode === 'union') {
-      addUnionMeshes(group, objects, resources);
+      addUnionMeshes(group, objects, resources, paintTextures);
     } else {
-      objects.forEach((object) => addSeparateMesh(group, object, resources));
+      objects.forEach((object) => addSeparateMesh(group, object, resources, paintTextures));
     }
 
     const exporter = new GLTFExporter();
     const result = await exporter.parseAsync(group, { binary: true, onlyVisible: true });
-    if (!(result instanceof ArrayBuffer)) {
-      throw new Error('Der binäre GLB-Export hat kein ArrayBuffer erzeugt.');
-    }
+    if (!(result instanceof ArrayBuffer)) throw new Error('Der binäre GLB-Export hat kein ArrayBuffer erzeugt.');
 
     const blob = new Blob([result], { type: 'model/gltf-binary' });
     const url = URL.createObjectURL(blob);
@@ -300,5 +322,6 @@ export async function exportGlb(
   } finally {
     resources.geometries.forEach((geometry) => geometry.dispose());
     resources.materials.forEach((material) => material.dispose());
+    resources.textures.forEach((texture) => texture.dispose());
   }
 }
