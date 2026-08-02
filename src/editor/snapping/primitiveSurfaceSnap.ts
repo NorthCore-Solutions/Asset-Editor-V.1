@@ -77,6 +77,20 @@ const snapInsideTargetGrid = (value: number, minimum: number, step: number): num
   return minimum + Math.round((value - minimum) / step) * step;
 };
 
+const gridPlanes = (minimum: number, maximum: number, step: number): number[] => {
+  if (!Number.isFinite(step) || step <= 0 || maximum <= minimum) return [minimum, maximum];
+
+  const planes = [minimum];
+  const count = Math.min(2048, Math.floor((maximum - minimum) / step));
+  for (let index = 1; index <= count; index += 1) {
+    const coordinate = minimum + index * step;
+    if (coordinate >= maximum - 0.000001) break;
+    planes.push(coordinate);
+  }
+  planes.push(maximum);
+  return planes;
+};
+
 const localAxisVector = (axis: Axis): THREE.Vector3 => {
   if (axis === 'x') return new THREE.Vector3(1, 0, 0);
   if (axis === 'y') return new THREE.Vector3(0, 1, 0);
@@ -89,7 +103,7 @@ const detectScaleInteraction = (source: SceneObjectData, objects: SceneObjectDat
 
   const scaleDeltas = source.scale.map((value, index) => value - storedSource.scale[index]);
   const changedAxes = AXES
-    .map((axis, index) => ({ axis, index, delta: scaleDeltas[index] }))
+    .map((axis, index) => ({ axis, delta: scaleDeltas[index] }))
     .filter((entry) => Math.abs(entry.delta) > 0.000001)
     .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
 
@@ -164,8 +178,53 @@ export function findFormSurfaceSnap(
       Math.max(0.0001, Math.abs(target.scale[1])),
       Math.max(0.0001, Math.abs(target.scale[2]))
     );
-    const sourceCenter = sourceInTarget.getCenter(new THREE.Vector3());
 
+    if (scaleInteraction.active && scaleInteraction.direction) {
+      const targetOriginWorld = new THREE.Vector3(0, 0, 0).applyMatrix4(targetMatrix);
+      const localOrigin = targetOriginWorld.clone().applyMatrix4(inverseTargetMatrix);
+      const localDirectionPerWorld = targetOriginWorld
+        .clone()
+        .add(scaleInteraction.direction)
+        .applyMatrix4(inverseTargetMatrix)
+        .sub(localOrigin);
+
+      for (const axis of AXES) {
+        const directionComponent = axisValue(localDirectionPerWorld, axis);
+        if (Math.abs(directionComponent) < 0.000001) continue;
+
+        const localThreshold = worldThreshold * Math.abs(directionComponent);
+        const otherAxes = AXES.filter((candidate) => candidate !== axis);
+        if (!otherAxes.every((otherAxis) => overlapsWithTolerance(sourceInTarget, targetBounds, otherAxis, localThreshold * 0.75))) continue;
+
+        const activeSourceFace = directionComponent > 0
+          ? axisValue(sourceInTarget.max, axis)
+          : axisValue(sourceInTarget.min, axis);
+        const localStep = positionStep > 0
+          ? positionStep / axisValue(targetScale, axis)
+          : 0;
+
+        for (const plane of gridPlanes(
+          axisValue(targetBounds.min, axis),
+          axisValue(targetBounds.max, axis),
+          localStep
+        )) {
+          const localDistance = plane - activeSourceFace;
+          const worldDistanceAlongDrag = localDistance / directionComponent;
+          const distance = Math.abs(worldDistanceAlongDrag);
+          if (distance > worldThreshold || distance >= bestDistance) continue;
+
+          bestDistance = distance;
+          bestPosition = sourcePosition
+            .clone()
+            .addScaledVector(scaleInteraction.direction, worldDistanceAlongDrag);
+          bestTargetId = target.id;
+        }
+      }
+
+      continue;
+    }
+
+    const sourceCenter = sourceInTarget.getCenter(new THREE.Vector3());
     for (const axis of AXES) {
       const axisScale = axisValue(targetScale, axis);
       const localThreshold = worldThreshold / axisScale;
@@ -183,32 +242,23 @@ export function findFormSurfaceSnap(
         const localOffset = new THREE.Vector3();
         setAxisValue(localOffset, axis, faceOffset);
 
-        if (!scaleInteraction.active) {
-          for (const otherAxis of otherAxes) {
-            const localStep = positionStep > 0 ? positionStep / axisValue(targetScale, otherAxis) : 0;
-            const snappedCenter = snapInsideTargetGrid(
-              axisValue(sourceCenter, otherAxis),
-              axisValue(targetBounds.min, otherAxis),
-              localStep
-            );
-            const gridCorrection = snappedCenter - axisValue(sourceCenter, otherAxis);
-            const maximumGridCorrection = localStep > 0 ? localStep * 0.55 : 0;
-            if (localStep > 0 && Math.abs(gridCorrection) <= maximumGridCorrection) {
-              setAxisValue(localOffset, otherAxis, gridCorrection);
-            }
+        for (const otherAxis of otherAxes) {
+          const localStep = positionStep > 0 ? positionStep / axisValue(targetScale, otherAxis) : 0;
+          const snappedCenter = snapInsideTargetGrid(
+            axisValue(sourceCenter, otherAxis),
+            axisValue(targetBounds.min, otherAxis),
+            localStep
+          );
+          const gridCorrection = snappedCenter - axisValue(sourceCenter, otherAxis);
+          const maximumGridCorrection = localStep > 0 ? localStep * 0.55 : 0;
+          if (localStep > 0 && Math.abs(gridCorrection) <= maximumGridCorrection) {
+            setAxisValue(localOffset, otherAxis, gridCorrection);
           }
         }
 
         const targetOriginWorld = new THREE.Vector3(0, 0, 0).applyMatrix4(targetMatrix);
         const offsetWorld = localOffset.clone().applyMatrix4(targetMatrix).sub(targetOriginWorld);
         const distance = offsetWorld.length();
-        if (distance <= 0.000001) continue;
-
-        if (scaleInteraction.active && scaleInteraction.direction) {
-          const alignment = Math.abs(offsetWorld.clone().normalize().dot(scaleInteraction.direction));
-          if (alignment < 0.82) continue;
-        }
-
         if (distance >= bestDistance) continue;
 
         bestDistance = distance;
