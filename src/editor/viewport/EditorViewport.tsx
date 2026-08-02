@@ -22,6 +22,7 @@ type MeshRegistry = MutableRefObject<Map<string, THREE.Mesh>>;
 interface AxisScaleDragState {
   kind: 'axis';
   axis: ScaleAxis;
+  side: ScaleSide;
   pointerId: number;
   startPointer: THREE.Vector2;
   screenAxis: THREE.Vector2;
@@ -40,6 +41,7 @@ interface UniformScaleDragState {
   screenAxis: THREE.Vector2;
   pixelsPerWorldUnit: number;
   startDiagonalWorld: number;
+  worldDirection: THREE.Vector3;
   anchorLocal: THREE.Vector3;
   startPosition: THREE.Vector3;
   startQuaternion: THREE.Quaternion;
@@ -335,16 +337,18 @@ function CornerScaleHandle({ mesh, bounds, sides, onPointerDown }: {
   );
 }
 
-function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange }: {
+function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTransformDraggingChange }: {
   mesh: THREE.Mesh;
   geometry: THREE.BufferGeometry;
   object: SceneObjectData;
   snap: SnapSettings;
+  onSnapTargetChange: (targetId: string | null) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
 }) {
   const camera = useThree((state) => state.camera);
   const size = useThree((state) => state.size);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
+  const objects = useEditorStore((state) => state.objects);
   const dragRef = useRef<ScaleDragState | null>(null);
   const updateObject = useEditorStore((state) => state.updateObject);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
@@ -369,6 +373,77 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
     }, false);
   };
 
+  const applySurfaceScaleSnap = (drag: ScaleDragState) => {
+    if (!snap.surface || !isFormType(object.type)) {
+      onSnapTargetChange(null);
+      return;
+    }
+
+    const candidate: SceneObjectData = {
+      ...object,
+      position: [mesh.position.x, mesh.position.y, mesh.position.z],
+      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+      scale: [mesh.scale.x, mesh.scale.y, mesh.scale.z]
+    };
+    const result = findFormSurfaceSnap(candidate, objects, snap.position);
+    if (!result.targetId) {
+      onSnapTargetChange(null);
+      return;
+    }
+
+    const correction = new THREE.Vector3(...result.position).sub(mesh.position);
+    const correctionLength = correction.length();
+    if (correctionLength <= 0.000001) {
+      onSnapTargetChange(result.targetId);
+      return;
+    }
+
+    if (drag.kind === 'axis') {
+      const outwardAxis = drag.worldAxis.clone().multiplyScalar(drag.side);
+      const projectedCorrection = correction.dot(outwardAxis);
+      const alignment = Math.abs(projectedCorrection) / correctionLength;
+      if (alignment < 0.7) {
+        onSnapTargetChange(null);
+        return;
+      }
+
+      const startScale = axisValue(drag.startScale, drag.axis);
+      const currentScale = axisValue(mesh.scale, drag.axis);
+      const snappedScale = Math.max(0.02, currentScale + projectedCorrection / drag.localSize);
+      setAxisValue(mesh.scale, drag.axis, snappedScale);
+      const anchorOffset = drag.anchorCoordinate * (startScale - snappedScale);
+      mesh.position.copy(drag.startPosition).addScaledVector(drag.worldAxis, anchorOffset);
+      mesh.updateMatrixWorld(true);
+      onSnapTargetChange(result.targetId);
+      return;
+    }
+
+    const projectedCorrection = correction.dot(drag.worldDirection);
+    const alignment = Math.abs(projectedCorrection) / correctionLength;
+    if (alignment < 0.35) {
+      onSnapTargetChange(null);
+      return;
+    }
+
+    const factors = [
+      Math.abs(drag.startScale.x) > 0.000001 ? mesh.scale.x / drag.startScale.x : 1,
+      Math.abs(drag.startScale.y) > 0.000001 ? mesh.scale.y / drag.startScale.y : 1,
+      Math.abs(drag.startScale.z) > 0.000001 ? mesh.scale.z / drag.startScale.z : 1
+    ];
+    const currentFactor = (factors[0] + factors[1] + factors[2]) / 3;
+    const snappedFactor = Math.max(0.02, currentFactor + projectedCorrection / drag.startDiagonalWorld);
+    const snappedScale = drag.startScale.clone().multiplyScalar(snappedFactor);
+    mesh.scale.copy(snappedScale);
+    const localOffset = new THREE.Vector3(
+      drag.anchorLocal.x * (drag.startScale.x - snappedScale.x),
+      drag.anchorLocal.y * (drag.startScale.y - snappedScale.y),
+      drag.anchorLocal.z * (drag.startScale.z - snappedScale.z)
+    ).applyQuaternion(drag.startQuaternion);
+    mesh.position.copy(drag.startPosition).add(localOffset);
+    mesh.updateMatrixWorld(true);
+    onSnapTargetChange(result.targetId);
+  };
+
   function handlePointerMove(event: PointerEvent) {
     const drag = dragRef.current;
     if (!drag || event.pointerId !== drag.pointerId) return;
@@ -389,6 +464,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
       const anchorOffset = drag.anchorCoordinate * (startScale - nextScale);
       mesh.position.copy(drag.startPosition).addScaledVector(drag.worldAxis, anchorOffset);
       mesh.updateMatrixWorld();
+      applySurfaceScaleSnap(drag);
       syncTransform();
       return;
     }
@@ -404,6 +480,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
     ).applyQuaternion(drag.startQuaternion);
     mesh.position.copy(drag.startPosition).add(localOffset);
     mesh.updateMatrixWorld();
+    applySurfaceScaleSnap(drag);
     syncTransform();
   }
 
@@ -415,6 +492,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
     dragRef.current = null;
     removeWindowListeners();
     syncTransform();
+    onSnapTargetChange(null);
     endTransaction();
     onTransformDraggingChange(false);
     if (controls) controls.enabled = true;
@@ -422,6 +500,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
 
   const beginDrag = () => {
     if (controls) controls.enabled = false;
+    onSnapTargetChange(null);
     beginTransaction();
     onTransformDraggingChange(true);
     window.addEventListener('pointermove', handlePointerMove, true);
@@ -446,7 +525,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
     if (pixelsPerWorldUnit < 2) return;
     screenAxis.normalize();
     dragRef.current = {
-      kind: 'axis', axis, pointerId: event.pointerId,
+      kind: 'axis', axis, side, pointerId: event.pointerId,
       startPointer: new THREE.Vector2(event.clientX, event.clientY), screenAxis, pixelsPerWorldUnit,
       anchorCoordinate: boundingValue(bounds, axis, side === 1 ? 'min' : 'max'), localSize,
       startPosition: mesh.position.clone(), startScale: mesh.scale.clone(), worldAxis: positiveWorldAxis
@@ -475,7 +554,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
     dragRef.current = {
       kind: 'uniform', pointerId: event.pointerId,
       startPointer: new THREE.Vector2(event.clientX, event.clientY), screenAxis, pixelsPerWorldUnit,
-      startDiagonalWorld, anchorLocal, startPosition: mesh.position.clone(), startQuaternion, startScale: mesh.scale.clone()
+      startDiagonalWorld, worldDirection, anchorLocal, startPosition: mesh.position.clone(), startQuaternion, startScale: mesh.scale.clone()
     };
     beginDrag();
   };
@@ -484,10 +563,11 @@ function ScaleHandles({ mesh, geometry, object, snap, onTransformDraggingChange 
     if (!dragRef.current) return;
     removeWindowListeners();
     dragRef.current = null;
+    onSnapTargetChange(null);
     endTransaction();
     if (controls) controls.enabled = true;
     onTransformDraggingChange(false);
-  }, [controls, endTransaction, onTransformDraggingChange]);
+  }, [controls, endTransaction, onSnapTargetChange, onTransformDraggingChange]);
 
   return (
     <>
@@ -609,7 +689,8 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
   const geometry = useMemo(() => createGeometry({ type: object.type, geometry: object.geometry }), [object.geometry, object.type]);
   const selected = selectedIds.includes(object.id);
   const singleSelection = selected && selectedIds.length === 1;
-  const showSnapPattern = snap.surface && tool === 'translate' && isFormType(object.type) && !singleSelection && object.visible;
+  const snapToolActive = tool === 'translate' || tool === 'scale';
+  const showSnapPattern = snap.surface && snapToolActive && isFormType(object.type) && !singleSelection && object.visible;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => {
@@ -695,7 +776,14 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
 
       {singleSelection && !object.locked && object.visible && mesh && (
         tool === 'scale' ? (
-          <ScaleHandles mesh={mesh} geometry={geometry} object={object} snap={snap} onTransformDraggingChange={onTransformDraggingChange} />
+          <ScaleHandles
+            mesh={mesh}
+            geometry={geometry}
+            object={object}
+            snap={snap}
+            onSnapTargetChange={onSnapTargetChange}
+            onTransformDraggingChange={onTransformDraggingChange}
+          />
         ) : (
           <TransformControls
             object={mesh}
@@ -741,7 +829,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
   const groupMovable = selectedObjects.length > 1 && selectedObjects.every((object) => object.visible && !object.locked);
 
   useEffect(() => {
-    if (!snap.surface || tool !== 'translate') setSnapTargetId(null);
+    if (!snap.surface || (tool !== 'translate' && tool !== 'scale')) setSnapTargetId(null);
   }, [snap.surface, tool]);
 
   return (
@@ -751,7 +839,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
       <directionalLight position={[6, 10, 5]} intensity={2.1} castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
       <hemisphereLight args={['#dbe7ee', '#2a312c', 0.8]} />
       {scene.gridVisible && <StableGrid cellSize={scene.gridSize} />}
-      {scene.axesVisible && <axesHelper args={[3]} />}
+      {scene.axesVisible && <axesHelper args={[3]} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow onClick={(event) => { if (event.button === 0 && !event.ctrlKey) select(null); }}>
         <planeGeometry args={[GRID_EXTENT, GRID_EXTENT]} />
         <shadowMaterial opacity={0.14} transparent depthWrite={false} side={THREE.DoubleSide} />
