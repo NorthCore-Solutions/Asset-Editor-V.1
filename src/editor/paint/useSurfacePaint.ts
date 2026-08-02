@@ -46,6 +46,8 @@ interface OrbitControlApi {
   enabled: boolean;
   enablePan: boolean;
   enableRotate: boolean;
+  target: THREE.Vector3;
+  update: () => void;
 }
 
 export interface SurfacePaintBinding {
@@ -155,6 +157,7 @@ export function useSurfacePaint(
   selected: boolean,
   settings: SurfacePaintSettings
 ): SurfacePaintBinding {
+  const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const updateMaterial = useEditorStore((state) => state.updateMaterial);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
@@ -166,6 +169,7 @@ export function useSurfacePaint(
   const activeIslandRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const changedRef = useRef(false);
+  const wasActiveRef = useRef(false);
   const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
@@ -176,6 +180,22 @@ export function useSurfacePaint(
     controls.enablePan = false;
     controls.enableRotate = true;
   });
+
+  useEffect(() => {
+    if (active) {
+      wasActiveRef.current = true;
+      return;
+    }
+
+    if (!wasActiveRef.current || !controls) return;
+    wasActiveRef.current = false;
+    controls.enabled = true;
+    controls.enablePan = true;
+    controls.enableRotate = true;
+    camera.up.set(0, 1, 0);
+    controls.update();
+    camera.updateMatrixWorld(true);
+  }, [active, camera, controls]);
 
   useEffect(() => () => {
     if (activePointerRef.current !== null) {
