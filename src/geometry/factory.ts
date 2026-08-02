@@ -70,6 +70,43 @@ export function createSceneObject(type: PrimitiveType, existingIds: string[] = [
   };
 }
 
+function assignBoxProjectedUvs(geometry: THREE.BufferGeometry): void {
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  if (!position || !normal) return;
+
+  geometry.computeBoundingBox();
+  const bounds = geometry.boundingBox;
+  if (!bounds) return;
+  const size = bounds.getSize(new THREE.Vector3());
+  const safeX = Math.max(size.x, 0.000001);
+  const safeY = Math.max(size.y, 0.000001);
+  const safeZ = Math.max(size.z, 0.000001);
+  const uv = new Float32Array(position.count * 2);
+
+  for (let index = 0; index < position.count; index += 1) {
+    const x = (position.getX(index) - bounds.min.x) / safeX;
+    const y = (position.getY(index) - bounds.min.y) / safeY;
+    const z = (position.getZ(index) - bounds.min.z) / safeZ;
+    const nx = Math.abs(normal.getX(index));
+    const ny = Math.abs(normal.getY(index));
+    const nz = Math.abs(normal.getZ(index));
+
+    if (nx >= ny && nx >= nz) {
+      uv[index * 2] = z;
+      uv[index * 2 + 1] = y;
+    } else if (ny >= nx && ny >= nz) {
+      uv[index * 2] = x;
+      uv[index * 2 + 1] = z;
+    } else {
+      uv[index * 2] = x;
+      uv[index * 2 + 1] = y;
+    }
+  }
+
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+
 function closedFlatGeometry(vertices: number[], indices: number[]): THREE.BufferGeometry {
   const indexedGeometry = new THREE.BufferGeometry();
   indexedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
@@ -78,6 +115,7 @@ function closedFlatGeometry(vertices: number[], indices: number[]): THREE.Buffer
   const geometry = indexedGeometry.toNonIndexed();
   indexedGeometry.dispose();
   geometry.computeVertexNormals();
+  assignBoxProjectedUvs(geometry);
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
@@ -86,15 +124,7 @@ function closedFlatGeometry(vertices: number[], indices: number[]): THREE.Buffer
 function cappedHemisphereGeometry(radius: number, widthSegments: number, heightSegments: number): THREE.BufferGeometry {
   const radialSegments = Math.max(3, Math.round(widthSegments));
   const verticalSegments = Math.max(2, Math.round(heightSegments));
-  const shell = new THREE.SphereGeometry(
-    radius,
-    radialSegments,
-    verticalSegments,
-    0,
-    Math.PI * 2,
-    0,
-    Math.PI / 2
-  );
+  const shell = new THREE.SphereGeometry(radius, radialSegments, verticalSegments, 0, Math.PI * 2, 0, Math.PI / 2);
   const cap = new THREE.CircleGeometry(radius, radialSegments);
   cap.rotateX(Math.PI / 2);
 
@@ -112,63 +142,26 @@ function twoSidedPlaneGeometry(width: number, depth: number): THREE.BufferGeomet
   const w = width / 2;
   const d = depth / 2;
   const vertices = [
-    -w, 0, -d,
-    w, 0, -d,
-    w, 0, d,
-    -w, 0, d,
-    -w, 0, -d,
-    w, 0, -d,
-    w, 0, d,
-    -w, 0, d
+    -w, 0, -d, w, 0, -d, w, 0, d, -w, 0, d,
+    -w, 0, -d, w, 0, -d, w, 0, d, -w, 0, d
   ];
-  const indices = [
-    0, 2, 1,
-    0, 3, 2,
-    4, 5, 6,
-    4, 6, 7
-  ];
+  const indices = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7];
   return closedFlatGeometry(vertices, indices);
 }
 
 function wedgeGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
   const w = width / 2;
   const d = depth / 2;
-  const vertices = [
-    -w, 0, -d,
-    w, 0, -d,
-    w, 0, d,
-    -w, 0, d,
-    -w, height, d,
-    w, height, d
-  ];
-  const indices = [
-    0, 1, 2, 0, 2, 3,
-    3, 2, 5, 3, 5, 4,
-    0, 3, 4,
-    0, 4, 5, 0, 5, 1,
-    1, 5, 2
-  ];
+  const vertices = [-w, 0, -d, w, 0, -d, w, 0, d, -w, 0, d, -w, height, d, w, height, d];
+  const indices = [0, 1, 2, 0, 2, 3, 3, 2, 5, 3, 5, 4, 0, 3, 4, 0, 4, 5, 0, 5, 1, 1, 5, 2];
   return closedFlatGeometry(vertices, indices);
 }
 
 function prismGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
   const w = width / 2;
   const d = depth / 2;
-  const vertices = [
-    -w, 0, -d,
-    w, 0, -d,
-    0, height, -d,
-    -w, 0, d,
-    w, 0, d,
-    0, height, d
-  ];
-  const indices = [
-    0, 2, 1,
-    3, 4, 5,
-    0, 1, 4, 0, 4, 3,
-    1, 2, 5, 1, 5, 4,
-    0, 3, 5, 0, 5, 2
-  ];
+  const vertices = [-w, 0, -d, w, 0, -d, 0, height, -d, -w, 0, d, w, 0, d, 0, height, d];
+  const indices = [0, 2, 1, 3, 4, 5, 0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 0, 3, 5, 0, 5, 2];
   return closedFlatGeometry(vertices, indices);
 }
 
@@ -193,21 +186,8 @@ function stairsGeometry(width: number, height: number, depth: number, steps: num
 function roofGeometry(width: number, height: number, depth: number): THREE.BufferGeometry {
   const w = width / 2;
   const d = depth / 2;
-  const vertices = [
-    -w, 0, -d,
-    w, 0, -d,
-    w, 0, d,
-    -w, 0, d,
-    0, height, -d,
-    0, height, d
-  ];
-  const indices = [
-    0, 4, 1,
-    3, 2, 5,
-    0, 3, 5, 0, 5, 4,
-    1, 4, 5, 1, 5, 2,
-    0, 1, 2, 0, 2, 3
-  ];
+  const vertices = [-w, 0, -d, w, 0, -d, w, 0, d, -w, 0, d, 0, height, -d, 0, height, d];
+  const indices = [0, 4, 1, 3, 2, 5, 0, 3, 5, 0, 5, 4, 1, 4, 5, 1, 5, 2, 0, 1, 2, 0, 2, 3];
   return closedFlatGeometry(vertices, indices);
 }
 
