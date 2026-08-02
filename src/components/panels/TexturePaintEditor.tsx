@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { PaintTextureData } from '../../types/editor';
 import {
+  atlasIslandAtPixel,
+  atlasPixelRegion,
+  type SurfaceUvAtlas
+} from '../../geometry/uvAtlas';
+import {
   DEFAULT_PAINT_SIZE,
   createFilledImageData,
   floodFill,
@@ -20,6 +25,7 @@ interface TexturePaintEditorProps {
   baseColor: string;
   texture?: PaintTextureData;
   palette: string[];
+  atlas: SurfaceUvAtlas;
   onCommit: (texture: PaintTextureData | undefined) => void;
 }
 
@@ -62,7 +68,7 @@ function linePoints(from: [number, number], to: [number, number]): Array<[number
   return points;
 }
 
-export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCommit }: TexturePaintEditorProps) {
+export function TexturePaintEditor({ objectId, baseColor, texture, palette, atlas, onCommit }: TexturePaintEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<[number, number] | null>(null);
@@ -177,7 +183,15 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     }
 
     if (tool === 'fill') {
-      floodFill(image, point[0], point[1], hexToRgba(paintColor));
+      const islandIndex = atlasIslandAtPixel(atlas, image.width, image.height, point[0], point[1]);
+      floodFill(
+        image,
+        point[0],
+        point[1],
+        hexToRgba(paintColor),
+        0,
+        atlasPixelRegion(atlas, islandIndex, image.width, image.height)
+      );
     } else {
       const color = tool === 'eraser' ? hexToRgba('#000000', 0) : hexToRgba(paintColor);
       linePoints(previous ?? point, point).forEach(([x, y]) => paintBrush(image, x, y, brushSize, color));
@@ -211,7 +225,12 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
   const continuePaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drawingRef.current || (tool !== 'brush' && tool !== 'eraser')) return;
     const point = canvasPoint(event.currentTarget, event.clientX, event.clientY);
-    applyAt(point, lastPointRef.current ?? point);
+    const previous = lastPointRef.current;
+    const currentIsland = atlasIslandAtPixel(atlas, event.currentTarget.width, event.currentTarget.height, point[0], point[1]);
+    const previousIsland = previous
+      ? atlasIslandAtPixel(atlas, event.currentTarget.width, event.currentTarget.height, previous[0], previous[1])
+      : currentIsland;
+    applyAt(point, currentIsland === previousIsland ? (previous ?? point) : point);
     lastPointRef.current = point;
   };
 
@@ -252,6 +271,9 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
     onCommit(undefined);
     refreshControls((value) => value + 1);
   };
+
+  const shownWidth = texture?.width ?? DEFAULT_PAINT_SIZE;
+  const shownHeight = texture?.height ?? DEFAULT_PAINT_SIZE;
 
   return (
     <div style={{ display: 'grid', gap: 8 }}>
@@ -330,7 +352,7 @@ export function TexturePaintEditor({ objectId, baseColor, texture, palette, onCo
         <button type="button" disabled={futureRef.current.length === 0} onClick={redo}>Wiederholen</button>
         <button type="button" className="danger" disabled={!texture} onClick={clearTexture}>Bemalung entfernen</button>
       </div>
-      <small>32×32-Pixeltextur · 2D-Ansicht für Feinkorrekturen</small>
+      <small>{shownWidth}×{shownHeight}-Pixeltextur · {atlas.islands.length} getrennte Fläche{atlas.islands.length === 1 ? '' : 'n'}</small>
     </div>
   );
 }
