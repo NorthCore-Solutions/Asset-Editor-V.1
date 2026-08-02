@@ -146,6 +146,10 @@ function planeKey(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, triangle
   return `${quantize(normal.x)}:${quantize(normal.y)}:${quantize(normal.z)}:${quantize(distance)}`;
 }
 
+function vectorAt(position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, vertex: number): THREE.Vector3 {
+  return new THREE.Vector3(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
+}
+
 function projectPoint(position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, vertex: number, normal: THREE.Vector3): [number, number] {
   const x = position.getX(vertex);
   const y = position.getY(vertex);
@@ -166,9 +170,9 @@ function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
 
   const groups = new Map<string, number[]>();
   for (let start = 0, triangle = 0; start + 2 < position.count; start += 3, triangle += 1) {
-    const a = new THREE.Vector3().fromBufferAttribute(position, start);
-    const b = new THREE.Vector3().fromBufferAttribute(position, start + 1);
-    const c = new THREE.Vector3().fromBufferAttribute(position, start + 2);
+    const a = vectorAt(position, start);
+    const b = vectorAt(position, start + 1);
+    const c = vectorAt(position, start + 2);
     const key = planeKey(a, b, c, triangle);
     const vertices = groups.get(key) ?? [];
     vertices.push(start, start + 1, start + 2);
@@ -180,9 +184,9 @@ function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   const uv = new Float32Array(position.count * 2);
 
   islands.forEach((vertices, islandIndex) => {
-    const a = new THREE.Vector3().fromBufferAttribute(position, vertices[0]);
-    const b = new THREE.Vector3().fromBufferAttribute(position, vertices[1]);
-    const c = new THREE.Vector3().fromBufferAttribute(position, vertices[2]);
+    const a = vectorAt(position, vertices[0]);
+    const b = vectorAt(position, vertices[1]);
+    const c = vectorAt(position, vertices[2]);
     const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
     const projected = vertices.map((vertex) => ({ vertex, point: projectPoint(position, vertex, normal) }));
     const minU = Math.min(...projected.map((entry) => entry.point[0]));
@@ -219,7 +223,6 @@ export function applySurfaceUvAtlas(geometry: THREE.BufferGeometry, type: Primit
     || type === 'chimney'
     || type === 'cylinder'
     || type === 'cone'
-    || type === 'pyramid'
     || type === 'column'
     || type === 'hemisphere'
   ) {
