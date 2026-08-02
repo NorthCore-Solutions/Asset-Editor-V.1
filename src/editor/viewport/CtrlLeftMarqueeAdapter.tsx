@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export function CtrlLeftMarqueeAdapter() {
+  const activePointerId = useRef<number | null>(null);
+
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button !== 0 || !event.ctrlKey) return;
@@ -8,6 +10,8 @@ export function CtrlLeftMarqueeAdapter() {
       const target = event.target instanceof Element ? event.target : null;
       const viewport = target?.closest<HTMLElement>('.viewport');
       if (!viewport) return;
+
+      activePointerId.current = event.pointerId;
 
       const syntheticEvent = new PointerEvent('pointerdown', {
         bubbles: true,
@@ -37,8 +41,36 @@ export function CtrlLeftMarqueeAdapter() {
       event.stopImmediatePropagation();
     };
 
+    const protectActiveMarquee = (event: PointerEvent) => {
+      if (activePointerId.current !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const finishActiveMarquee = (event: PointerEvent) => {
+      if (activePointerId.current !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      activePointerId.current = null;
+    };
+
+    const cancelActiveMarquee = () => {
+      activePointerId.current = null;
+    };
+
     window.addEventListener('pointerdown', handlePointerDown, true);
-    return () => window.removeEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('pointermove', protectActiveMarquee, true);
+    window.addEventListener('pointerup', finishActiveMarquee, true);
+    window.addEventListener('pointercancel', finishActiveMarquee, true);
+    window.addEventListener('blur', cancelActiveMarquee);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('pointermove', protectActiveMarquee, true);
+      window.removeEventListener('pointerup', finishActiveMarquee, true);
+      window.removeEventListener('pointercancel', finishActiveMarquee, true);
+      window.removeEventListener('blur', cancelActiveMarquee);
+    };
   }, []);
 
   return null;
