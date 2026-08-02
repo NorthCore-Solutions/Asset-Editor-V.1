@@ -156,6 +156,9 @@ function SceneMesh({
   const selected = selectedId === object.id;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => () => {
+    if (controls) controls.enabled = true;
+  }, [controls]);
 
   const removeReleaseListeners = () => {
     window.removeEventListener('pointerup', stopTransform, true);
@@ -195,16 +198,6 @@ function SceneMesh({
     window.addEventListener('pointercancel', stopTransform, true);
     window.addEventListener('blur', stopTransform, true);
   };
-
-  useEffect(() => () => {
-    removeReleaseListeners();
-    if (draggingRef.current) {
-      commitMeshTransform();
-      endTransaction();
-      onTransformDraggingChange(false);
-    }
-    if (controls) controls.enabled = true;
-  });
 
   const mesh = (
     <mesh
