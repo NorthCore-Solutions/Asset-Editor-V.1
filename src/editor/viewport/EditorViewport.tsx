@@ -237,7 +237,7 @@ function ScaleHandle({
 
     handle.position.copy(mesh.localToWorld(localPoint));
     handle.quaternion.copy(mesh.quaternion);
-    handle.scale.setScalar(Math.max(0.12, Math.min(0.34, distance * 0.022)));
+    handle.scale.setScalar(Math.max(0.1, Math.min(0.28, distance * 0.018)));
   });
 
   return (
@@ -246,11 +246,11 @@ function ScaleHandle({
       renderOrder={1000}
       onPointerDown={(event) => onPointerDown(axis, side, event)}
     >
-      <octahedronGeometry args={[0.72, 0]} />
+      <boxGeometry args={[0.72, 0.72, 0.72]} />
       <meshBasicMaterial
         color={color}
         transparent
-        opacity={0.92}
+        opacity={0.96}
         depthTest={false}
         depthWrite={false}
         toneMapped={false}
@@ -287,8 +287,8 @@ function CornerScaleHandle({
     localPoint.z += sides[2] * marginWorld / Math.max(0.0001, Math.abs(mesh.scale.z));
 
     handle.position.copy(mesh.localToWorld(localPoint));
-    handle.quaternion.copy(mesh.quaternion);
-    handle.scale.setScalar(Math.max(0.1, Math.min(0.28, distance * 0.019)));
+    handle.quaternion.copy(camera.quaternion);
+    handle.scale.setScalar(Math.max(0.14, Math.min(0.36, distance * 0.024)));
   });
 
   return (
@@ -297,11 +297,12 @@ function CornerScaleHandle({
       renderOrder={1001}
       onPointerDown={(event) => onPointerDown(sides, event)}
     >
-      <octahedronGeometry args={[0.72, 0]} />
+      <planeGeometry args={[1.05, 1.05]} />
       <meshBasicMaterial
         color="#ffff00"
         transparent
-        opacity={0.9}
+        opacity={0.48}
+        side={THREE.DoubleSide}
         depthTest={false}
         depthWrite={false}
         toneMapped={false}
