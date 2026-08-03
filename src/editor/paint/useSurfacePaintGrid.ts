@@ -213,8 +213,16 @@ export function useSurfacePaint(
   const textureVisible = active || Boolean(paintTexture);
 
   const ensureCurrentLayers = (): boolean => {
-    if (surface.layers.length === 0) return false;
     const currentMetrics = metricsRef.current;
+
+    if (surface.layers.length === 0) {
+      if (paintTexture) return false;
+      surface.layers = resizeSurfaceCanvases([], currentMetrics, object.material.color);
+      renderAtlas(surface, atlas, currentMetrics, object.material.color);
+      setTextureReady(true);
+      return true;
+    }
+
     const needsResize = surface.layers.length !== currentMetrics.length
       || currentMetrics.some((metric, index) => {
         const layer = surface.layers[index];
