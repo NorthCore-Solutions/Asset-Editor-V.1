@@ -7,6 +7,17 @@ interface StrokeSample {
 
 const MAX_AXIS_JUMP_RATIO = 0.45;
 const PIXELS_PER_SCREEN_PIXEL = 16;
+const MIN_AXIS_ALLOWANCE = 4;
+const EXTRA_MOTION_ALLOWANCE = 4;
+
+function coordinateDistance(left: StrokeCoordinate, right: StrokeCoordinate): number {
+  return Math.hypot(right[0] - left[0], right[1] - left[1]);
+}
+
+function axisJumpLimit(surfaceSize: number, brushSize: number): number {
+  const brushAllowance = Math.max(MIN_AXIS_ALLOWANCE, Math.round(brushSize) * 2);
+  return Math.max(brushAllowance, Math.max(1, surfaceSize) * MAX_AXIS_JUMP_RATIO);
+}
 
 export function shouldConnectStroke(
   previous: StrokeSample | null,
@@ -19,22 +30,15 @@ export function shouldConnectStroke(
 
   const pixelDeltaX = Math.abs(current.pixel[0] - previous.pixel[0]);
   const pixelDeltaY = Math.abs(current.pixel[1] - previous.pixel[1]);
-  const safeWidth = Math.max(1, surfaceWidth);
-  const safeHeight = Math.max(1, surfaceHeight);
-  const axisAllowance = Math.max(4, Math.round(brushSize) * 2);
+  if (pixelDeltaX > axisJumpLimit(surfaceWidth, brushSize)) return false;
+  if (pixelDeltaY > axisJumpLimit(surfaceHeight, brushSize)) return false;
 
-  if (pixelDeltaX > Math.max(axisAllowance, safeWidth * MAX_AXIS_JUMP_RATIO)) return false;
-  if (pixelDeltaY > Math.max(axisAllowance, safeHeight * MAX_AXIS_JUMP_RATIO)) return false;
-
-  const pixelDistance = Math.hypot(pixelDeltaX, pixelDeltaY);
-  const clientDistance = Math.hypot(
-    current.client[0] - previous.client[0],
-    current.client[1] - previous.client[1]
-  );
+  const brushAllowance = Math.max(MIN_AXIS_ALLOWANCE, Math.round(brushSize) * 2);
+  const clientDistance = coordinateDistance(previous.client, current.client);
   const motionAllowance = Math.max(
-    axisAllowance + 4,
-    clientDistance * PIXELS_PER_SCREEN_PIXEL + axisAllowance
+    brushAllowance + EXTRA_MOTION_ALLOWANCE,
+    clientDistance * PIXELS_PER_SCREEN_PIXEL + brushAllowance
   );
 
-  return pixelDistance <= motionAllowance;
+  return coordinateDistance(previous.pixel, current.pixel) <= motionAllowance;
 }
