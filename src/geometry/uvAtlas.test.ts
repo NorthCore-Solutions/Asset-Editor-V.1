@@ -52,7 +52,7 @@ describe('Oberflächen-UV-Atlas', () => {
 
     expect(atlas.mode).toBe('native');
     expect(atlas.islands).toHaveLength(1);
-    expect(atlas.islands[0].label).toBe('Oberfläche');
+    expect(atlas.islands[0]?.label).toBe('Oberfläche');
     geometry.dispose();
   });
 });
