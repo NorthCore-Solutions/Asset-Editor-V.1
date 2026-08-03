@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { CameraView, PaintTextureData } from '../../types/editor';
-import { atlasPixelRegion, type SurfaceUvAtlas } from '../../geometry/uvAtlas';
 import {
-  DEFAULT_PAINT_SIZE,
-  createFilledImageData,
+  atlasIslandAtPixel,
+  atlasPixelRegion,
+  type SurfaceUvAtlas
+} from '../../geometry/uvAtlas';
+import {
+  cloneSurfaceCanvas,
+  composeSurfaceAtlasCanvas,
+  copySurfaceCanvas,
+  createPaintTextureData,
+  loadSurfaceCanvases,
+  resizeSurfaceCanvases,
+  surfaceDimensionsKey,
+  type SurfaceRasterMetric
+} from '../../editor/paint/surfacePaintGrid';
+import {
   floodFill,
   hexToRgba,
   paintBrush,
@@ -23,9 +35,17 @@ interface TexturePaintEditorProps {
   baseColor: string;
   texture?: PaintTextureData;
   atlas: SurfaceUvAtlas;
+  metrics: SurfaceRasterMetric[];
   onCommit: (texture: PaintTextureData | undefined) => void;
   onPaintModeChange?: (enabled: boolean) => void;
 }
+
+interface PaintPoint {
+  islandIndex: number;
+  point: [number, number];
+}
+
+type LayerSnapshot = ImageData[];
 
 const TOOLS: Array<{ tool: PaintTool; label: string }> = [
   { tool: 'brush', label: 'Pinsel' },
@@ -33,9 +53,6 @@ const TOOLS: Array<{ tool: PaintTool; label: string }> = [
   { tool: 'fill', label: 'Füllen' },
   { tool: 'eyedropper', label: 'Pipette' }
 ];
-
-const cloneImage = (image: ImageData): ImageData =>
-  new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
 
 function surfaceDisplayLabel(index: number, label: string): string {
   const numberedLabel = `Fläche ${index + 1}`;
@@ -82,21 +99,46 @@ function linePoints(from: [number, number], to: [number, number]): Array<[number
   return points;
 }
 
+function snapshotLayers(layers: HTMLCanvasElement[]): LayerSnapshot {
+  return layers.map((layer) => {
+    const context = layer.getContext('2d', { willReadFrequently: true });
+    if (!context) return new ImageData(layer.width, layer.height);
+    return context.getImageData(0, 0, layer.width, layer.height);
+  });
+}
+
+function canvasesFromSnapshot(snapshot: LayerSnapshot): HTMLCanvasElement[] {
+  return snapshot.map((image) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (context) {
+      context.imageSmoothingEnabled = false;
+      context.putImageData(image, 0, 0);
+    }
+    return canvas;
+  });
+}
+
 export function TexturePaintEditor({
   objectId,
   baseColor,
   texture,
   atlas,
+  metrics,
   onCommit,
   onPaintModeChange
 }: TexturePaintEditorProps) {
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-  const atlasCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const layersRef = useRef<HTMLCanvasElement[]>([]);
   const drawingRef = useRef(false);
+  const activeIslandRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
-  const historyRef = useRef<ImageData[]>([]);
-  const futureRef = useRef<ImageData[]>([]);
+  const historyRef = useRef<LayerSnapshot[]>([]);
+  const futureRef = useRef<LayerSnapshot[]>([]);
   const loadedKeyRef = useRef('');
+  const loadRequestRef = useRef(0);
   const [tool, setTool] = useState<PaintTool>('brush');
   const [paintColor, setPaintColor] = useState(baseColor);
   const [brushSize, setBrushSize] = useState(1);
@@ -104,103 +146,41 @@ export function TexturePaintEditor({
   const [selectedIsland, setSelectedIsland] = useState(-1);
   const [copyTargetIsland, setCopyTargetIsland] = useState(-1);
   const [, refreshControls] = useState(0);
-
-  const ensureAtlasCanvas = (): HTMLCanvasElement => {
-    if (!atlasCanvasRef.current) atlasCanvasRef.current = document.createElement('canvas');
-    return atlasCanvasRef.current;
-  };
-
-  const atlasContext = (): CanvasRenderingContext2D | null =>
-    ensureAtlasCanvas().getContext('2d', { willReadFrequently: true });
+  const dimensionsKey = surfaceDimensionsKey(metrics);
 
   const renderSelectedSurface = (islandIndex = selectedIsland): void => {
-    const atlasCanvas = atlasCanvasRef.current;
     const previewCanvas = previewCanvasRef.current;
     const previewContext = previewCanvas?.getContext('2d', { willReadFrequently: true });
-    if (!atlasCanvas || !previewCanvas || !previewContext || atlasCanvas.width <= 0 || atlasCanvas.height <= 0) return;
-
-    if (islandIndex < 0) {
-      previewCanvas.width = atlasCanvas.width;
-      previewCanvas.height = atlasCanvas.height;
-      previewContext.imageSmoothingEnabled = false;
-      previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-      previewContext.drawImage(atlasCanvas, 0, 0);
-      return;
-    }
-
-    const region = atlasPixelRegion(atlas, islandIndex, atlasCanvas.width, atlasCanvas.height);
-    const width = Math.max(1, region.maxX - region.minX + 1);
-    const height = Math.max(1, region.maxY - region.minY + 1);
-    previewCanvas.width = width;
-    previewCanvas.height = height;
+    if (!previewCanvas || !previewContext || layersRef.current.length === 0) return;
     previewContext.imageSmoothingEnabled = false;
-    previewContext.clearRect(0, 0, width, height);
-    previewContext.drawImage(atlasCanvas, region.minX, region.minY, width, height, 0, 0, width, height);
-  };
-
-  const syncPreviewToAtlas = (islandIndex = selectedIsland): void => {
-    const atlasCanvas = atlasCanvasRef.current;
-    const previewCanvas = previewCanvasRef.current;
-    const context = atlasContext();
-    if (!atlasCanvas || !previewCanvas || !context || previewCanvas.width <= 0 || previewCanvas.height <= 0) return;
-
-    context.imageSmoothingEnabled = false;
 
     if (islandIndex < 0) {
-      context.clearRect(0, 0, atlasCanvas.width, atlasCanvas.height);
-      context.drawImage(
-        previewCanvas,
-        0,
-        0,
-        previewCanvas.width,
-        previewCanvas.height,
-        0,
-        0,
-        atlasCanvas.width,
-        atlasCanvas.height
-      );
+      const overview = composeSurfaceAtlasCanvas(layersRef.current, atlas, metrics, baseColor);
+      previewCanvas.width = overview.width;
+      previewCanvas.height = overview.height;
+      previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      previewContext.drawImage(overview, 0, 0);
       return;
     }
 
-    const region = atlasPixelRegion(atlas, islandIndex, atlasCanvas.width, atlasCanvas.height);
-    const width = Math.max(1, region.maxX - region.minX + 1);
-    const height = Math.max(1, region.maxY - region.minY + 1);
-    context.clearRect(region.minX, region.minY, width, height);
-    context.drawImage(previewCanvas, 0, 0, previewCanvas.width, previewCanvas.height, region.minX, region.minY, width, height);
+    const layer = layersRef.current[islandIndex];
+    if (!layer) return;
+    previewCanvas.width = layer.width;
+    previewCanvas.height = layer.height;
+    previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    previewContext.drawImage(layer, 0, 0);
   };
 
-  const readAtlas = (): ImageData | null => {
-    const canvas = atlasCanvasRef.current;
-    const context = atlasContext();
-    return canvas && context && canvas.width > 0 && canvas.height > 0
-      ? context.getImageData(0, 0, canvas.width, canvas.height)
-      : null;
-  };
-
-  const writeAtlas = (image: ImageData): void => {
-    const canvas = ensureAtlasCanvas();
-    const context = atlasContext();
-    if (!context) return;
-    if (canvas.width !== image.width || canvas.height !== image.height) {
-      canvas.width = image.width;
-      canvas.height = image.height;
-    }
-    context.putImageData(image, 0, 0);
-    renderSelectedSurface();
-  };
-
-  const commitAtlas = (): void => {
-    const canvas = atlasCanvasRef.current;
-    if (!canvas || canvas.width <= 0 || canvas.height <= 0) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    loadedKeyRef.current = `${objectId}:${dataUrl}:${atlas.signature}`;
-    onCommit({ dataUrl, width: canvas.width, height: canvas.height, pixelated: true });
+  const commitLayers = (): void => {
+    if (layersRef.current.length === 0) return;
+    const data = createPaintTextureData(layersRef.current, atlas, metrics, baseColor);
+    loadedKeyRef.current = `${objectId}:${data.dataUrl}:${atlas.signature}:${dimensionsKey}`;
+    onCommit(data);
   };
 
   const pushHistory = (): void => {
-    const current = readAtlas();
-    if (!current) return;
-    historyRef.current = [...historyRef.current.slice(-29), cloneImage(current)];
+    if (layersRef.current.length === 0) return;
+    historyRef.current = [...historyRef.current.slice(-29), snapshotLayers(layersRef.current)];
     futureRef.current = [];
     refreshControls((value) => value + 1);
   };
@@ -213,7 +193,10 @@ export function TexturePaintEditor({
     setSelectedIsland(Math.min(Math.max(-1, settings.islandIndex), Math.max(0, atlas.islands.length - 1)));
   }), [atlas.islands.length]);
 
-  useEffect(() => () => setSurfacePaintSettings({ enabled: false }), []);
+  useEffect(() => () => {
+    loadRequestRef.current += 1;
+    setSurfacePaintSettings({ enabled: false });
+  }, []);
 
   useEffect(() => {
     const clamped = Math.min(Math.max(-1, selectedIsland), Math.max(0, atlas.islands.length - 1));
@@ -223,7 +206,7 @@ export function TexturePaintEditor({
       return;
     }
     renderSelectedSurface(clamped);
-  }, [atlas.signature, selectedIsland]);
+  }, [atlas.signature, selectedIsland, dimensionsKey]);
 
   useEffect(() => {
     setCopyTargetIsland((current) => current >= atlas.islands.length ? -1 : current);
@@ -263,43 +246,86 @@ export function TexturePaintEditor({
   };
 
   useEffect(() => {
-    const canvas = ensureAtlasCanvas();
-    const context = atlasContext();
-    if (!context) return;
-
-    const key = `${objectId}:${texture?.dataUrl ?? baseColor}:${atlas.signature}`;
+    const key = `${objectId}:${texture?.dataUrl ?? baseColor}:${atlas.signature}:${dimensionsKey}`;
     if (loadedKeyRef.current === key) return;
-    loadedKeyRef.current = key;
-    historyRef.current = [];
-    futureRef.current = [];
-    refreshControls((value) => value + 1);
+    const requestId = ++loadRequestRef.current;
 
-    if (!texture) {
-      canvas.width = DEFAULT_PAINT_SIZE;
-      canvas.height = DEFAULT_PAINT_SIZE;
-      context.putImageData(createFilledImageData(canvas.width, canvas.height, hexToRgba(baseColor)), 0, 0);
-      changeColor(baseColor);
-      renderSelectedSurface();
-      return;
+    void loadSurfaceCanvases(texture, atlas, metrics, baseColor)
+      .then((layers) => {
+        if (loadRequestRef.current !== requestId) return;
+        layersRef.current = layers;
+        loadedKeyRef.current = key;
+        historyRef.current = [];
+        futureRef.current = [];
+        renderSelectedSurface();
+        refreshControls((value) => value + 1);
+
+        const storedGrid = texture?.surfaceGrid;
+        const needsMigration = Boolean(texture) && (
+          !storedGrid
+          || storedGrid.atlasSignature !== atlas.signature
+          || storedGrid.surfaces.length !== metrics.length
+          || storedGrid.surfaces.some((stored, index) => {
+            const metric = metrics[index];
+            return !metric || stored.width !== metric.width || stored.height !== metric.height;
+          })
+        );
+        if (needsMigration) commitLayers();
+      })
+      .catch(() => undefined);
+  }, [atlas.signature, baseColor, dimensionsKey, objectId, texture?.dataUrl, texture?.height, texture?.width]);
+
+  useEffect(() => {
+    if (layersRef.current.length === 0) return;
+    const resized = resizeSurfaceCanvases(layersRef.current, metrics, baseColor);
+    const changed = resized.some((layer, index) => {
+      const previous = layersRef.current[index];
+      return !previous || previous.width !== layer.width || previous.height !== layer.height;
+    });
+    layersRef.current = resized;
+    renderSelectedSurface();
+    if (texture && changed) commitLayers();
+  }, [dimensionsKey]);
+
+  const resolvePaintPoint = (event: ReactPointerEvent<HTMLCanvasElement>): PaintPoint | null => {
+    const preview = event.currentTarget;
+    const [previewX, previewY] = canvasPoint(preview, event.clientX, event.clientY);
+
+    if (selectedIsland >= 0) {
+      const layer = layersRef.current[selectedIsland];
+      if (!layer) return null;
+      return {
+        islandIndex: selectedIsland,
+        point: [
+          Math.max(0, Math.min(layer.width - 1, previewX)),
+          Math.max(0, Math.min(layer.height - 1, previewY))
+        ]
+      };
     }
 
-    const image = new Image();
-    image.onload = () => {
-      canvas.width = texture.width;
-      canvas.height = texture.height;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.imageSmoothingEnabled = false;
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      renderSelectedSurface();
-    };
-    image.src = texture.dataUrl;
-  }, [atlas.signature, baseColor, objectId, texture?.dataUrl, texture?.height, texture?.width]);
+    const islandIndex = atlasIslandAtPixel(atlas, preview.width, preview.height, previewX, previewY);
+    const layer = layersRef.current[islandIndex];
+    if (!layer) return null;
+    const region = atlasPixelRegion(atlas, islandIndex, preview.width, preview.height);
+    const regionWidth = Math.max(1, region.maxX - region.minX + 1);
+    const regionHeight = Math.max(1, region.maxY - region.minY + 1);
+    const localX = (previewX - region.minX) / regionWidth;
+    const localY = (previewY - region.minY) / regionHeight;
 
-  const applyAt = (point: [number, number], previous?: [number, number]): void => {
-    const canvas = previewCanvasRef.current;
-    const context = canvas?.getContext('2d', { willReadFrequently: true });
-    if (!canvas || !context) return;
-    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    return {
+      islandIndex,
+      point: [
+        Math.max(0, Math.min(layer.width - 1, Math.floor(localX * layer.width))),
+        Math.max(0, Math.min(layer.height - 1, Math.floor(localY * layer.height)))
+      ]
+    };
+  };
+
+  const applyAt = (islandIndex: number, point: [number, number], previous?: [number, number]): void => {
+    const layer = layersRef.current[islandIndex];
+    const context = layer?.getContext('2d', { willReadFrequently: true });
+    if (!layer || !context) return;
+    const image = context.getImageData(0, 0, layer.width, layer.height);
 
     if (tool === 'eyedropper') {
       const sampled = samplePixel(image, point[0], point[1]);
@@ -315,101 +341,94 @@ export function TexturePaintEditor({
     }
 
     context.putImageData(image, 0, 0);
+    renderSelectedSurface();
   };
 
   const startPaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     event.preventDefault();
-    const point = canvasPoint(event.currentTarget, event.clientX, event.clientY);
+    const hit = resolvePaintPoint(event);
+    if (!hit) return;
 
     if (tool === 'eyedropper') {
-      applyAt(point);
+      applyAt(hit.islandIndex, hit.point);
       return;
     }
 
     pushHistory();
-    applyAt(point);
+    applyAt(hit.islandIndex, hit.point);
 
     if (tool === 'fill') {
-      syncPreviewToAtlas();
-      commitAtlas();
+      commitLayers();
       return;
     }
 
     drawingRef.current = true;
-    lastPointRef.current = point;
+    activeIslandRef.current = hit.islandIndex;
+    lastPointRef.current = hit.point;
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const continuePaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drawingRef.current || (tool !== 'brush' && tool !== 'eraser')) return;
-    const point = canvasPoint(event.currentTarget, event.clientX, event.clientY);
-    applyAt(point, lastPointRef.current ?? point);
-    lastPointRef.current = point;
+    const hit = resolvePaintPoint(event);
+    if (!hit) {
+      activeIslandRef.current = null;
+      lastPointRef.current = null;
+      return;
+    }
+    const sameIsland = activeIslandRef.current === hit.islandIndex;
+    applyAt(hit.islandIndex, hit.point, sameIsland ? lastPointRef.current ?? hit.point : hit.point);
+    activeIslandRef.current = hit.islandIndex;
+    lastPointRef.current = hit.point;
   };
 
   const finishPaint = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
+    activeIslandRef.current = null;
     lastPointRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    syncPreviewToAtlas();
-    commitAtlas();
+    commitLayers();
   };
 
   const copySelectedSurface = (): void => {
-    const atlasCanvas = atlasCanvasRef.current;
-    const previewCanvas = previewCanvasRef.current;
-    const context = atlasContext();
-    if (!atlasCanvas || !previewCanvas || !context || selectedIsland < 0) return;
-
+    const source = layersRef.current[selectedIsland];
+    if (!source || selectedIsland < 0) return;
     const targetIndices = copyTargetIsland < 0
       ? atlas.islands.map((_, index) => index).filter((index) => index !== selectedIsland)
       : [copyTargetIsland];
     if (targetIndices.length === 0 || targetIndices.includes(selectedIsland)) return;
 
-    syncPreviewToAtlas();
     pushHistory();
-
-    const sourceCanvas = document.createElement('canvas');
-    sourceCanvas.width = previewCanvas.width;
-    sourceCanvas.height = previewCanvas.height;
-    const sourceContext = sourceCanvas.getContext('2d');
-    if (!sourceContext) return;
-    sourceContext.imageSmoothingEnabled = false;
-    sourceContext.drawImage(previewCanvas, 0, 0);
-
-    context.imageSmoothingEnabled = false;
-    targetIndices.forEach((islandIndex) => {
-      const target = atlasPixelRegion(atlas, islandIndex, atlasCanvas.width, atlasCanvas.height);
-      const width = Math.max(1, target.maxX - target.minX + 1);
-      const height = Math.max(1, target.maxY - target.minY + 1);
-      context.clearRect(target.minX, target.minY, width, height);
-      context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, target.minX, target.minY, width, height);
+    const next = layersRef.current.map(cloneSurfaceCanvas);
+    targetIndices.forEach((targetIndex) => {
+      const metric = metrics[targetIndex];
+      if (metric) next[targetIndex] = copySurfaceCanvas(source, metric);
     });
-
+    layersRef.current = next;
     renderSelectedSurface();
-    commitAtlas();
+    commitLayers();
   };
 
   const undo = (): void => {
     const previous = historyRef.current.at(-1);
-    const current = readAtlas();
-    if (!previous || !current) return;
+    if (!previous || layersRef.current.length === 0) return;
     historyRef.current = historyRef.current.slice(0, -1);
-    futureRef.current = [cloneImage(current), ...futureRef.current].slice(0, 30);
-    writeAtlas(previous);
-    commitAtlas();
+    futureRef.current = [snapshotLayers(layersRef.current), ...futureRef.current].slice(0, 30);
+    layersRef.current = canvasesFromSnapshot(previous);
+    renderSelectedSurface();
+    commitLayers();
     refreshControls((value) => value + 1);
   };
 
   const redo = (): void => {
     const next = futureRef.current[0];
-    const current = readAtlas();
-    if (!next || !current) return;
-    historyRef.current = [...historyRef.current.slice(-29), cloneImage(current)];
+    if (!next || layersRef.current.length === 0) return;
+    historyRef.current = [...historyRef.current.slice(-29), snapshotLayers(layersRef.current)];
     futureRef.current = futureRef.current.slice(1);
-    writeAtlas(next);
-    commitAtlas();
+    layersRef.current = canvasesFromSnapshot(next);
+    renderSelectedSurface();
+    commitLayers();
     refreshControls((value) => value + 1);
   };
 
@@ -417,6 +436,7 @@ export function TexturePaintEditor({
     historyRef.current = [];
     futureRef.current = [];
     loadedKeyRef.current = '';
+    layersRef.current = [];
     onCommit(undefined);
     refreshControls((value) => value + 1);
   };
