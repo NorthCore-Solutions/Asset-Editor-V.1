@@ -89,7 +89,7 @@ function configureTexture(texture: THREE.CanvasTexture): void {
   texture.needsUpdate = true;
 }
 
-function copySourceToDisplay(surface: PaintSurface): void {
+export function copySourceToDisplay(surface: PaintSurface): void {
   const image = surface.context.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
   surface.displayContext.putImageData(image, 0, 0);
   surface.texture.needsUpdate = true;
