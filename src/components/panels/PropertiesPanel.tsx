@@ -26,18 +26,20 @@ function hexRgb(color: string): [number, number, number] {
   ];
 }
 
-function recolorTextureBackground(
-  texture: PaintTextureData,
+function recolorDataUrl(
+  dataUrl: string,
+  width: number,
+  height: number,
   previousColor: string,
   nextColor: string
-): Promise<PaintTextureData> {
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image();
 
     image.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = texture.width;
-      canvas.height = texture.height;
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
       const context = canvas.getContext('2d', { willReadFrequently: true });
       if (!context) {
         reject(new Error('2D-Kontext für Grundfarbenänderung nicht verfügbar.'));
@@ -64,15 +66,49 @@ function recolorTextureBackground(
       }
 
       context.putImageData(pixels, 0, 0);
-      resolve({
-        ...texture,
-        dataUrl: canvas.toDataURL('image/png')
-      });
+      resolve(canvas.toDataURL('image/png'));
     };
 
     image.onerror = () => reject(new Error('Bemalung konnte für die Grundfarbenänderung nicht geladen werden.'));
-    image.src = texture.dataUrl;
+    image.src = dataUrl;
   });
+}
+
+async function recolorTextureBackground(
+  texture: PaintTextureData,
+  previousColor: string,
+  nextColor: string
+): Promise<PaintTextureData> {
+  const surfaceGrid = texture.surfaceGrid;
+  const displayPromise = recolorDataUrl(
+    texture.dataUrl,
+    texture.width,
+    texture.height,
+    previousColor,
+    nextColor
+  );
+  const sourcePromise = surfaceGrid?.sourceDataUrl && surfaceGrid.sourceWidth && surfaceGrid.sourceHeight
+    ? recolorDataUrl(
+        surfaceGrid.sourceDataUrl,
+        surfaceGrid.sourceWidth,
+        surfaceGrid.sourceHeight,
+        previousColor,
+        nextColor
+      )
+    : Promise.resolve(undefined);
+  const [dataUrl, sourceDataUrl] = await Promise.all([displayPromise, sourcePromise]);
+
+  return {
+    ...texture,
+    dataUrl,
+    surfaceGrid: surfaceGrid
+      ? {
+          ...surfaceGrid,
+          baseColor: nextColor.toUpperCase(),
+          ...(sourceDataUrl ? { sourceDataUrl } : {})
+        }
+      : undefined
+  };
 }
 
 function VectorEditor({ label, value, unit, onChange }: { label: string; value: Vec3; unit?: 'deg'; onChange: (value: Vec3) => void }) {
@@ -190,15 +226,20 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
     const sourceDataUrl = paintTexture?.dataUrl;
     const requestId = ++recolorRequestRef.current;
 
-    setMaterial({ color: normalized });
-    if (!paintTexture || previousColor.toUpperCase() === normalized) return;
+    if (!paintTexture || previousColor.toUpperCase() === normalized) {
+      setMaterial({ color: normalized });
+      return;
+    }
 
     void recolorTextureBackground(paintTexture, previousColor, normalized)
       .then((updatedTexture) => {
         const currentObject = useEditorStore.getState().objects.find((item) => item.id === object.id);
         const currentDataUrl = currentObject?.material.paintTexture?.dataUrl;
         if (recolorRequestRef.current !== requestId || currentDataUrl !== sourceDataUrl) return;
-        updateMaterial(object.id, { paintTexture: updatedTexture }, false);
+        updateMaterial(object.id, {
+          color: normalized,
+          paintTexture: updatedTexture
+        });
       })
       .catch(() => undefined);
   };
@@ -211,7 +252,16 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
 
   const commitPaintTexture = (paintTexture: PaintTextureData | undefined): void => {
     recolorRequestRef.current += 1;
-    setMaterial({ paintTexture });
+    const normalizedTexture = paintTexture?.surfaceGrid
+      ? {
+          ...paintTexture,
+          surfaceGrid: {
+            ...paintTexture.surfaceGrid,
+            baseColor: object.material.color.toUpperCase()
+          }
+        }
+      : paintTexture;
+    setMaterial({ paintTexture: normalizedTexture });
   };
 
   return (
