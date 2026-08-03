@@ -154,6 +154,7 @@ export function TexturePaintEditor({
   const [tool, setTool] = useState<PaintTool>('brush');
   const [paintColor, setPaintColor] = useState(baseColor);
   const [brushSize, setBrushSize] = useState(1);
+  const [eraseAll, setEraseAll] = useState(false);
   const [surfaceEnabled, setSurfaceEnabled] = useState(false);
   const [selectedIsland, setSelectedIsland] = useState(-1);
   const [copyTargetIsland, setCopyTargetIsland] = useState(-1);
@@ -214,6 +215,7 @@ export function TexturePaintEditor({
     setTool(settings.tool);
     setPaintColor(settings.color);
     setBrushSize(settings.brushSize);
+    setEraseAll(settings.eraseAll);
     setSelectedIsland(Math.min(Math.max(-1, settings.islandIndex), Math.max(0, atlas.islands.length - 1)));
   }), [atlas.islands.length]);
 
@@ -250,6 +252,11 @@ export function TexturePaintEditor({
   const changeBrushSize = (nextSize: number): void => {
     setBrushSize(nextSize);
     setSurfacePaintSettings({ brushSize: nextSize });
+  };
+
+  const changeEraseAll = (nextEraseAll: boolean): void => {
+    setEraseAll(nextEraseAll);
+    setSurfacePaintSettings({ eraseAll: nextEraseAll });
   };
 
   const changeIsland = (nextIsland: number): void => {
@@ -380,7 +387,11 @@ export function TexturePaintEditor({
     if (tool === 'fill') {
       floodFill(image, point[0], point[1], hexToRgba(paintColor));
     } else {
-      const color = tool === 'eraser' ? hexToRgba('#000000', 0) : hexToRgba(paintColor);
+      const color = tool === 'eraser'
+        ? eraseAll
+          ? hexToRgba('#000000', 0)
+          : hexToRgba(baseColor)
+        : hexToRgba(paintColor);
       linePoints(previous ?? point, point).forEach(([x, y]) => paintBrush(image, x, y, brushSize, color));
     }
 
@@ -525,6 +536,17 @@ export function TexturePaintEditor({
           <input type="range" min={1} max={8} step={1} value={brushSize} onChange={(event) => changeBrushSize(Number(event.target.value))} />
           <span>{brushSize}px</span>
         </div>
+      )}
+
+      {tool === 'eraser' && (
+        <label className="paint-eraser-all" title="Vollständig transparent radieren">
+          <input
+            type="checkbox"
+            checked={eraseAll}
+            onChange={(event) => changeEraseAll(event.target.checked)}
+          />
+          <span>Alles</span>
+        </label>
       )}
 
       <div className="paint-surface-block">
