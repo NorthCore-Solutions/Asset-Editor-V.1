@@ -472,7 +472,9 @@ export function useSurfacePaint(
       floodFill(image, currentPoint[0], currentPoint[1], hexToRgba(settings.color));
     } else {
       const color = settings.tool === 'eraser'
-        ? hexToRgba('#000000', 0)
+        ? settings.eraseAll
+          ? hexToRgba('#000000', 0)
+          : hexToRgba(object.material.color)
         : hexToRgba(settings.color);
       const points = currentPrevious ? linePoints(currentPrevious, currentPoint) : [currentPoint];
       points.forEach(([x, y]) => paintBrush(image, x, y, settings.brushSize, color));
