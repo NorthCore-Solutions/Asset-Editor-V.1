@@ -103,13 +103,15 @@ function renderAtlas(
   baseColor: string
 ): void {
   const composed = composeSurfaceAtlasCanvas(surface.layers, atlas, metrics, baseColor);
-  if (surface.canvas.width !== composed.width || surface.canvas.height !== composed.height) {
+  const sizeChanged = surface.canvas.width !== composed.width || surface.canvas.height !== composed.height;
+  if (sizeChanged) {
     surface.canvas.width = composed.width;
     surface.canvas.height = composed.height;
     surface.context.imageSmoothingEnabled = false;
   }
   surface.context.clearRect(0, 0, surface.canvas.width, surface.canvas.height);
   surface.context.drawImage(composed, 0, 0);
+  if (sizeChanged) surface.texture.dispose();
   surface.texture.needsUpdate = true;
 }
 
