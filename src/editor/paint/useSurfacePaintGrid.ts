@@ -246,7 +246,7 @@ export function useSurfacePaint(
     const needsResize = surface.layers.length !== currentMetrics.length
       || currentMetrics.some((metric, index) => {
         const layer = surface.layers[index];
-        return !layer || layer.width !== metric.width || layer.height !== metric.height;
+        return !layer || layer.width < metric.width || layer.height < metric.height;
       });
 
     if (needsResize) {
@@ -411,6 +411,8 @@ export function useSurfacePaint(
             || currentGrid.surfaces.some((stored, index) => {
               const metric = metricsRef.current[index];
               return !metric
+                || !stored.sourceWidth
+                || !stored.sourceHeight
                 || stored.width !== metric.width
                 || stored.height !== metric.height
                 || Math.abs(stored.coverageU - metric.coverageU) > 0.000001
@@ -480,7 +482,7 @@ export function useSurfacePaint(
 
   const hitFromEvent = (event: ThreeEvent<PointerEvent>): PaintHit | null => {
     if (!event.uv || !(event.object instanceof THREE.Mesh)) return null;
-    return surfacePointFromUv(atlas, metricsRef.current, event.uv);
+    return surfacePointFromUv(atlas, metricsRef.current, event.uv, surface.layers);
   };
 
   const releasePointer = (event: ThreeEvent<PointerEvent>): void => {
