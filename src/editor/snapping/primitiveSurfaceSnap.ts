@@ -112,7 +112,7 @@ const detectScaleInteraction = (source: SceneObjectData, objects: SceneObjectDat
     source.scale[2] - storedSource.scale[2]
   ];
   const changedAxes: ChangedScaleAxis[] = AXES
-    .map((axis, index): ChangedScaleAxis => ({ axis, delta: scaleDeltas[index] }))
+    .map((axis, index): ChangedScaleAxis => ({ axis, delta: scaleDeltas[index] ?? 0 }))
     .filter((entry) => Math.abs(entry.delta) > 0.000001)
     .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
 
