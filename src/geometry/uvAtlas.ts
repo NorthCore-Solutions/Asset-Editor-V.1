@@ -34,6 +34,14 @@ const BOX_TYPES = new Set<PrimitiveType>([
   'box', 'cuboid', 'wall', 'floor', 'flatRoof', 'door', 'window', 'chimney'
 ]);
 
+const FULL_SURFACE_ISLAND: SurfaceUvIsland = {
+  label: 'Oberfläche',
+  uMin: 0,
+  uMax: 1,
+  vMin: 0,
+  vMax: 1
+};
+
 export const FULL_SURFACE_UV_ATLAS: SurfaceUvAtlas = {
   version: 1,
   mode: 'native',
@@ -41,7 +49,7 @@ export const FULL_SURFACE_UV_ATLAS: SurfaceUvAtlas = {
   rows: 1,
   padding: 0,
   signature: 'native:1:1x1',
-  islands: [{ label: 'Oberfläche', uMin: 0, uMax: 1, vMin: 0, vMax: 1 }]
+  islands: [FULL_SURFACE_ISLAND]
 };
 
 function uniqueLabels(labels: string[]): string[] {
@@ -96,7 +104,7 @@ function atlasGrid(count: number, mode: SurfaceUvAtlas['mode'], labels = default
     const padU = cellWidth * CELL_PADDING;
     const padV = cellHeight * CELL_PADDING;
     islands.push({
-      label: resolvedLabels[index],
+      label: resolvedLabels[index] ?? `Fläche ${index + 1}`,
       uMin: column * cellWidth + padU,
       uMax: (column + 1) * cellWidth - padU,
       vMin: 1 - (row + 1) * cellHeight + padV,
@@ -163,6 +171,9 @@ function groupedAtlas(geometry: THREE.BufferGeometry, type: PrimitiveType): THRE
   }
 
   groups.forEach((group, islandIndex) => {
+    const island = atlas.islands[islandIndex];
+    if (!island) return;
+
     const start = Math.max(0, group.start);
     const end = Math.min(position.count, group.start + group.count);
     let minU = Number.POSITIVE_INFINITY;
@@ -179,7 +190,6 @@ function groupedAtlas(geometry: THREE.BufferGeometry, type: PrimitiveType): THRE
 
     const sourceWidth = Math.max(maxU - minU, 0.000001);
     const sourceHeight = Math.max(maxV - minV, 0.000001);
-    const island = atlas.islands[islandIndex];
 
     for (let vertex = start; vertex < end; vertex += 1) {
       const normalizedU = (sourceUv.getX(vertex) - minU) / sourceWidth;
@@ -248,9 +258,9 @@ function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   }
 
   const surfaces = [...groups.values()].map((vertices) => {
-    const a = vectorAt(position, vertices[0]);
-    const b = vectorAt(position, vertices[1]);
-    const c = vectorAt(position, vertices[2]);
+    const a = vectorAt(position, vertices[0]!);
+    const b = vectorAt(position, vertices[1]!);
+    const c = vectorAt(position, vertices[2]!);
     const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
     return { vertices, normal };
   });
@@ -262,6 +272,9 @@ function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   const uv = new Float32Array(position.count * 2);
 
   surfaces.forEach(({ vertices, normal }, islandIndex) => {
+    const island = atlas.islands[islandIndex];
+    if (!island) return;
+
     const projected = vertices.map((vertex) => ({ vertex, point: projectPoint(position, vertex, normal) }));
     const minU = Math.min(...projected.map((entry) => entry.point[0]));
     const maxU = Math.max(...projected.map((entry) => entry.point[0]));
@@ -269,7 +282,6 @@ function planarAtlas(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
     const maxV = Math.max(...projected.map((entry) => entry.point[1]));
     const width = Math.max(maxU - minU, 0.000001);
     const height = Math.max(maxV - minV, 0.000001);
-    const island = atlas.islands[islandIndex];
 
     projected.forEach(({ vertex, point }) => {
       uv[vertex * 2] = THREE.MathUtils.lerp(island.uMin, island.uMax, (point[0] - minU) / width);
@@ -332,7 +344,8 @@ export function atlasIslandAtPixel(atlas: SurfaceUvAtlas, width: number, height:
 }
 
 export function atlasPixelRegion(atlas: SurfaceUvAtlas, islandIndex: number, width: number, height: number): AtlasPixelRegion {
-  const island = atlas.islands[Math.max(0, Math.min(atlas.islands.length - 1, islandIndex))] ?? FULL_SURFACE_UV_ATLAS.islands[0];
+  const clampedIndex = Math.max(0, Math.min(atlas.islands.length - 1, islandIndex));
+  const island = atlas.islands[clampedIndex] ?? FULL_SURFACE_ISLAND;
   return {
     minX: Math.max(0, Math.min(width - 1, Math.floor(island.uMin * width))),
     maxX: Math.max(0, Math.min(width - 1, Math.ceil(island.uMax * width) - 1)),
