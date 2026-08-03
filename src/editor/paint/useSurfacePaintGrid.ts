@@ -29,6 +29,8 @@ import {
 } from './surfacePaintSession';
 import { shouldConnectStroke, type StrokeCoordinate } from './strokeContinuity';
 
+const SCALE_RENDER_SETTLE_MS = 110;
+
 interface PaintSurface {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
@@ -217,6 +219,7 @@ export function useSurfacePaint(
   const requestedDataUrlRef = useRef<string | null | undefined>(undefined);
   const loadRequestRef = useRef(0);
   const persistTimeoutRef = useRef<number | null>(null);
+  const resizeTimeoutRef = useRef<number | null>(null);
   const editRevisionRef = useRef(0);
   const activePointerRef = useRef<number | null>(null);
   const activeIslandRef = useRef<number | null>(null);
@@ -237,6 +240,11 @@ export function useSurfacePaint(
 
   const ensureCurrentLayers = (): boolean => {
     const currentMetrics = metricsRef.current;
+
+    if (resizeTimeoutRef.current !== null) {
+      window.clearTimeout(resizeTimeoutRef.current);
+      resizeTimeoutRef.current = null;
+    }
 
     if (surface.layers.length === 0) {
       if (paintTexture) return false;
@@ -365,6 +373,7 @@ export function useSurfacePaint(
   useEffect(() => () => {
     loadRequestRef.current += 1;
     if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
+    if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
     lastClientPointRef.current = null;
     if (activePointerRef.current !== null) {
       activePointerRef.current = null;
@@ -382,6 +391,10 @@ export function useSurfacePaint(
     if (externalTextureUpdate && persistTimeoutRef.current !== null) {
       window.clearTimeout(persistTimeoutRef.current);
       persistTimeoutRef.current = null;
+    }
+    if (externalTextureUpdate && resizeTimeoutRef.current !== null) {
+      window.clearTimeout(resizeTimeoutRef.current);
+      resizeTimeoutRef.current = null;
     }
 
     if (surface.layers.length > 0 && loadedDataUrlRef.current === dataUrl) return;
@@ -431,19 +444,31 @@ export function useSurfacePaint(
 
   useEffect(() => {
     if (surface.layers.length === 0) return;
-    surface.layers = resizeSurfaceCanvases(surface.layers, metrics, object.material.color);
-    refreshAtlas();
+    if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
 
-    if (!paintTexture) return;
-    if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
-    const sourceDataUrl = paintTexture.dataUrl;
-    persistTimeoutRef.current = window.setTimeout(() => {
-      persistTimeoutRef.current = null;
+    const sourceDataUrl = paintTexture?.dataUrl ?? null;
+    resizeTimeoutRef.current = window.setTimeout(() => {
+      resizeTimeoutRef.current = null;
+      surface.layers = resizeSurfaceCanvases(
+        surface.layers,
+        metricsRef.current,
+        object.material.color
+      );
+      refreshAtlas();
+
+      if (!sourceDataUrl) return;
       const currentObject = useEditorStore.getState().objects.find((item) => item.id === object.id);
       if (currentObject?.material.paintTexture?.dataUrl !== sourceDataUrl) return;
       persist();
-    }, 140);
-  }, [atlas, metricsKey, object.material.color, surface]);
+    }, SCALE_RENDER_SETTLE_MS);
+
+    return () => {
+      if (resizeTimeoutRef.current !== null) {
+        window.clearTimeout(resizeTimeoutRef.current);
+        resizeTimeoutRef.current = null;
+      }
+    };
+  }, [atlas, metricsKey, object.id, object.material.color, paintTexture?.dataUrl, surface]);
 
   const paintAt = (islandIndex: number, point: [number, number], previous: [number, number] | null): boolean => {
     if (!ensureCurrentLayers()) return false;
