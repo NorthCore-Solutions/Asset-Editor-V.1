@@ -306,22 +306,31 @@ export async function loadSurfaceCanvases(
     return metrics.map((metric) => createFilledSurfaceCanvas(metric.width, metric.height, baseColor));
   }
 
-  const image = await loadImage(texture.dataUrl);
   const storedGrid = texture.surfaceGrid;
   const compatibleGrid = storedGrid?.version === 1
     && storedGrid.atlasSignature === atlas.signature
     && storedGrid.surfaces.length === atlas.islands.length;
+  const sourceDataUrl = compatibleGrid && storedGrid.sourceDataUrl
+    ? storedGrid.sourceDataUrl
+    : texture.dataUrl;
+  const sourceWidth = compatibleGrid && storedGrid.sourceWidth
+    ? storedGrid.sourceWidth
+    : texture.width;
+  const sourceHeight = compatibleGrid && storedGrid.sourceHeight
+    ? storedGrid.sourceHeight
+    : texture.height;
+  const image = await loadImage(sourceDataUrl);
 
   return metrics.map((metric, index) => {
-    const region = atlasPixelRegion(atlas, index, texture.width, texture.height);
+    const region = atlasPixelRegion(atlas, index, sourceWidth, sourceHeight);
     const regionWidth = Math.max(1, region.maxX - region.minX + 1);
     const regionHeight = Math.max(1, region.maxY - region.minY + 1);
     const stored = compatibleGrid ? storedGrid.surfaces[index] : undefined;
-    const sourceWidth = Math.max(1, stored?.width ?? metric.width);
-    const sourceHeight = Math.max(1, stored?.height ?? metric.height);
+    const storedWidth = Math.max(1, stored?.width ?? metric.width);
+    const storedHeight = Math.max(1, stored?.height ?? metric.height);
     const extracted = document.createElement('canvas');
-    extracted.width = sourceWidth;
-    extracted.height = sourceHeight;
+    extracted.width = storedWidth;
+    extracted.height = storedHeight;
     const extractedContext = canvasContext(extracted);
     extractedContext.drawImage(
       image,
@@ -331,8 +340,8 @@ export async function loadSurfaceCanvases(
       regionHeight,
       0,
       0,
-      sourceWidth,
-      sourceHeight
+      storedWidth,
+      storedHeight
     );
     return resizeSurfaceCanvas(extracted, metric, baseColor);
   });
@@ -403,7 +412,13 @@ export function createPaintTextureData(
   metrics: SurfaceRasterMetric[],
   baseColor: string
 ): PaintTextureData {
-  const canvas = composeSurfaceAtlasCanvas(surfaces, atlas, metrics, baseColor);
+  const displayCanvas = composeSurfaceAtlasCanvas(surfaces, atlas, metrics, baseColor);
+  const sourceMetrics = metrics.map((metric) => ({
+    ...metric,
+    coverageU: 1,
+    coverageV: 1
+  }));
+  const sourceCanvas = composeSurfaceAtlasCanvas(surfaces, atlas, sourceMetrics, baseColor);
   const surfaceGrid: PaintSurfaceGridData = {
     version: 1,
     atlasSignature: atlas.signature,
@@ -414,13 +429,16 @@ export function createPaintTextureData(
       height,
       coverageU,
       coverageV
-    }))
+    })),
+    sourceDataUrl: sourceCanvas.toDataURL('image/png'),
+    sourceWidth: sourceCanvas.width,
+    sourceHeight: sourceCanvas.height
   };
 
   return {
-    dataUrl: canvas.toDataURL('image/png'),
-    width: canvas.width,
-    height: canvas.height,
+    dataUrl: displayCanvas.toDataURL('image/png'),
+    width: displayCanvas.width,
+    height: displayCanvas.height,
     pixelated: true,
     surfaceGrid
   };
