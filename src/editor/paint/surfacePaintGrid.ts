@@ -91,7 +91,11 @@ function fallbackExtent(
 }
 
 function metricDimension(worldLength: number): { pixels: number; coverage: number } {
-  const rawPixels = Math.max(EPSILON, worldLength) * PAINT_PIXELS_PER_WORLD_UNIT;
+  const calculatedPixels = Math.max(EPSILON, worldLength) * PAINT_PIXELS_PER_WORLD_UNIT;
+  const nearestInteger = Math.round(calculatedPixels);
+  const rawPixels = Math.abs(calculatedPixels - nearestInteger) <= EPSILON
+    ? nearestInteger
+    : calculatedPixels;
   const unclampedPixels = Math.max(1, Math.ceil(rawPixels));
   const pixels = Math.min(MAX_SURFACE_PIXELS, unclampedPixels);
   return {
