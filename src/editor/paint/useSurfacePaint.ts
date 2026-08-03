@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEditorStore } from '../../store/editorStore';
@@ -9,6 +9,11 @@ import {
   getSurfaceUvAtlas,
   type SurfaceUvAtlas
 } from '../../geometry/uvAtlas';
+import {
+  getSurfaceTileRepeats,
+  repeatUvInsideIsland,
+  type SurfaceTileRepeat
+} from '../../geometry/surfaceTileGrid';
 import {
   DEFAULT_PAINT_SIZE,
   createFilledImageData,
@@ -28,12 +33,15 @@ import {
 interface PaintSurface {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
+  displayCanvas: HTMLCanvasElement;
+  displayContext: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
 }
 
 interface PaintHit {
   point: [number, number];
   islandIndex: number;
+  tileKey: string;
   atlas: SurfaceUvAtlas;
 }
 
@@ -81,51 +89,126 @@ function configureTexture(texture: THREE.CanvasTexture): void {
   texture.needsUpdate = true;
 }
 
+function copySourceToDisplay(surface: PaintSurface): void {
+  const image = surface.context.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
+  surface.displayContext.putImageData(image, 0, 0);
+  surface.texture.needsUpdate = true;
+}
+
 function fillSurface(surface: PaintSurface, color: string): void {
-  surface.context.putImageData(
-    createFilledImageData(surface.canvas.width, surface.canvas.height, hexToRgba(color)),
-    0,
-    0
-  );
+  const image = createFilledImageData(surface.canvas.width, surface.canvas.height, hexToRgba(color));
+  surface.context.putImageData(image, 0, 0);
+  surface.displayContext.putImageData(image, 0, 0);
   surface.texture.needsUpdate = true;
 }
 
 function createSurface(color: string): PaintSurface {
   const canvas = document.createElement('canvas');
+  const displayCanvas = document.createElement('canvas');
   canvas.width = DEFAULT_PAINT_SIZE;
   canvas.height = DEFAULT_PAINT_SIZE;
+  displayCanvas.width = DEFAULT_PAINT_SIZE;
+  displayCanvas.height = DEFAULT_PAINT_SIZE;
   const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) throw new Error('2D-Kontext für Oberflächenbemalung nicht verfügbar.');
+  const displayContext = displayCanvas.getContext('2d', { willReadFrequently: true });
+  if (!context || !displayContext) throw new Error('2D-Kontext für Oberflächenbemalung nicht verfügbar.');
   context.imageSmoothingEnabled = false;
+  displayContext.imageSmoothingEnabled = false;
 
-  const texture = new THREE.CanvasTexture(canvas);
+  const texture = new THREE.CanvasTexture(displayCanvas);
   configureTexture(texture);
-  const surface = { canvas, context, texture };
+  const surface = { canvas, context, displayCanvas, displayContext, texture };
   fillSurface(surface, color);
   return surface;
 }
 
 function resizeSurface(surface: PaintSurface, width: number, height: number): void {
-  if (surface.canvas.width === width && surface.canvas.height === height) return;
+  if (
+    surface.canvas.width === width
+    && surface.canvas.height === height
+    && surface.displayCanvas.width === width
+    && surface.displayCanvas.height === height
+  ) return;
+
   surface.canvas.width = width;
   surface.canvas.height = height;
+  surface.displayCanvas.width = width;
+  surface.displayCanvas.height = height;
   surface.context.imageSmoothingEnabled = false;
+  surface.displayContext.imageSmoothingEnabled = false;
   surface.texture.needsUpdate = true;
 }
 
-function paintHitFromEvent(surface: PaintSurface, event: ThreeEvent<PointerEvent>): PaintHit | null {
+function renderTiledSurface(
+  surface: PaintSurface,
+  atlas: SurfaceUvAtlas,
+  repeats: SurfaceTileRepeat[]
+): void {
+  const width = surface.canvas.width;
+  const height = surface.canvas.height;
+  if (width <= 0 || height <= 0) return;
+
+  const source = surface.context.getImageData(0, 0, width, height);
+  const output = new ImageData(new Uint8ClampedArray(source.data), width, height);
+
+  atlas.islands.forEach((_, islandIndex) => {
+    const region = atlasPixelRegion(atlas, islandIndex, width, height);
+    const regionWidth = Math.max(1, region.maxX - region.minX + 1);
+    const regionHeight = Math.max(1, region.maxY - region.minY + 1);
+    const repeat = repeats[islandIndex] ?? { u: 1, v: 1 };
+
+    for (let y = region.minY; y <= region.maxY; y += 1) {
+      const localY = (y - region.minY + 0.5) / regionHeight;
+      const repeatedY = localY * repeat.v - Math.floor(localY * repeat.v);
+      const sourceY = Math.min(region.maxY, region.minY + Math.floor(repeatedY * regionHeight));
+
+      for (let x = region.minX; x <= region.maxX; x += 1) {
+        const localX = (x - region.minX + 0.5) / regionWidth;
+        const repeatedX = localX * repeat.u - Math.floor(localX * repeat.u);
+        const sourceX = Math.min(region.maxX, region.minX + Math.floor(repeatedX * regionWidth));
+        const sourceOffset = (sourceY * width + sourceX) * 4;
+        const targetOffset = (y * width + x) * 4;
+        output.data[targetOffset] = source.data[sourceOffset];
+        output.data[targetOffset + 1] = source.data[sourceOffset + 1];
+        output.data[targetOffset + 2] = source.data[sourceOffset + 2];
+        output.data[targetOffset + 3] = source.data[sourceOffset + 3];
+      }
+    }
+  });
+
+  surface.displayContext.putImageData(output, 0, 0);
+  surface.texture.needsUpdate = true;
+}
+
+function paintHitFromEvent(
+  surface: PaintSurface,
+  event: ThreeEvent<PointerEvent>,
+  atlas: SurfaceUvAtlas,
+  repeats: SurfaceTileRepeat[]
+): PaintHit | null {
   if (!event.uv || !(event.object instanceof THREE.Mesh)) return null;
-  const geometry = event.object.geometry;
-  const atlas = getSurfaceUvAtlas(geometry);
   const islandIndex = atlasIslandAtUv(atlas, event.uv);
-  const u = THREE.MathUtils.clamp(event.uv.x, 0, 0.999999);
-  const v = THREE.MathUtils.clamp(event.uv.y, 0, 0.999999);
+  const island = atlas.islands[islandIndex];
+  if (!island) return null;
+
+  const repeat = repeats[islandIndex] ?? { u: 1, v: 1 };
+  const islandWidth = Math.max(0.000001, island.uMax - island.uMin);
+  const islandHeight = Math.max(0.000001, island.vMax - island.vMin);
+  const localU = THREE.MathUtils.clamp((event.uv.x - island.uMin) / islandWidth, 0, 0.999999);
+  const localV = THREE.MathUtils.clamp((event.uv.y - island.vMin) / islandHeight, 0, 0.999999);
+  const tileU = Math.floor(localU * repeat.u);
+  const tileV = Math.floor(localV * repeat.v);
+  const repeatedUv = repeatUvInsideIsland(atlas, islandIndex, event.uv, repeat);
+  const u = THREE.MathUtils.clamp(repeatedUv.x, 0, 0.999999);
+  const v = THREE.MathUtils.clamp(repeatedUv.y, 0, 0.999999);
+
   return {
     point: [
       Math.max(0, Math.min(surface.canvas.width - 1, Math.floor(u * surface.canvas.width))),
       Math.max(0, Math.min(surface.canvas.height - 1, Math.floor((1 - v) * surface.canvas.height)))
     ],
     islandIndex,
+    tileKey: `${islandIndex}:${tileU}:${tileV}`,
     atlas
   };
 }
@@ -201,7 +284,8 @@ export function useSurfacePaintSettings(): SurfacePaintSettings {
 export function useSurfacePaint(
   object: SceneObjectData,
   selected: boolean,
-  settings: SurfacePaintSettings
+  settings: SurfacePaintSettings,
+  geometry: THREE.BufferGeometry
 ): SurfacePaintBinding {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
@@ -209,10 +293,18 @@ export function useSurfacePaint(
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const [surface] = useState<PaintSurface>(() => createSurface(object.material.color));
+  const atlas = useMemo(() => getSurfaceUvAtlas(geometry), [geometry]);
+  const tileRepeats = useMemo(
+    () => getSurfaceTileRepeats(geometry, object.scale),
+    [geometry, object.scale[0], object.scale[1], object.scale[2]]
+  );
+  const tileRepeatsRef = useRef<SurfaceTileRepeat[]>(tileRepeats);
+  tileRepeatsRef.current = tileRepeats;
   const loadedDataUrlRef = useRef<string | null>(null);
   const requestedDataUrlRef = useRef<string | null>(null);
   const activePointerRef = useRef<number | null>(null);
   const activeIslandRef = useRef<number | null>(null);
+  const activeTileRef = useRef<string | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const changedRef = useRef(false);
   const wasActiveRef = useRef(false);
@@ -221,6 +313,10 @@ export function useSurfacePaint(
   const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
+
+  useEffect(() => {
+    renderTiledSurface(surface, atlas, tileRepeats);
+  }, [atlas, surface, tileRepeats]);
 
   useEffect(() => {
     if (settings.cameraRequestId === handledCameraRequestRef.current || !controls) return;
@@ -308,6 +404,7 @@ export function useSurfacePaint(
     if (activePointerRef.current !== null) {
       activePointerRef.current = null;
       activeIslandRef.current = null;
+      activeTileRef.current = null;
       endTransaction();
     }
     surface.texture.dispose();
@@ -319,6 +416,7 @@ export function useSurfacePaint(
       loadedDataUrlRef.current = null;
       resizeSurface(surface, DEFAULT_PAINT_SIZE, DEFAULT_PAINT_SIZE);
       fillSurface(surface, object.material.color);
+      renderTiledSurface(surface, atlas, tileRepeatsRef.current);
       return;
     }
 
@@ -334,7 +432,7 @@ export function useSurfacePaint(
       surface.context.drawImage(image, 0, 0, surface.canvas.width, surface.canvas.height);
       loadedDataUrlRef.current = paintTexture.dataUrl;
       requestedDataUrlRef.current = null;
-      surface.texture.needsUpdate = true;
+      renderTiledSurface(surface, atlas, tileRepeatsRef.current);
     };
 
     image.onerror = () => {
@@ -342,7 +440,7 @@ export function useSurfacePaint(
     };
 
     image.src = paintTexture.dataUrl;
-  }, [object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
+  }, [atlas, object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
 
   const persist = (): void => {
     const dataUrl = surface.canvas.toDataURL('image/png');
@@ -361,7 +459,7 @@ export function useSurfacePaint(
   const paintAt = (
     point: [number, number],
     previous: [number, number] | null,
-    atlas: SurfaceUvAtlas,
+    currentAtlas: SurfaceUvAtlas,
     islandIndex: number
   ): boolean => {
     const image = surface.context.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
@@ -379,7 +477,7 @@ export function useSurfacePaint(
         point[1],
         hexToRgba(settings.color),
         0,
-        atlasPixelRegion(atlas, islandIndex, image.width, image.height)
+        atlasPixelRegion(currentAtlas, islandIndex, image.width, image.height)
       );
     } else {
       const color = settings.tool === 'eraser'
@@ -390,7 +488,7 @@ export function useSurfacePaint(
     }
 
     surface.context.putImageData(image, 0, 0);
-    surface.texture.needsUpdate = true;
+    renderTiledSurface(surface, currentAtlas, tileRepeatsRef.current);
     return true;
   };
 
@@ -404,6 +502,7 @@ export function useSurfacePaint(
     blockEvent(event);
     activePointerRef.current = null;
     activeIslandRef.current = null;
+    activeTileRef.current = null;
     lastPointRef.current = null;
     if (changedRef.current) persist();
     changedRef.current = false;
@@ -417,7 +516,7 @@ export function useSurfacePaint(
     onPointerDown: (event) => {
       if (!active || event.button !== 0) return;
       blockEvent(event);
-      const hit = paintHitFromEvent(surface, event);
+      const hit = paintHitFromEvent(surface, event, atlas, tileRepeatsRef.current);
       if (!hit) return;
       setSurfacePaintSettings({ islandIndex: hit.islandIndex });
 
@@ -436,6 +535,7 @@ export function useSurfacePaint(
 
       activePointerRef.current = event.pointerId;
       activeIslandRef.current = hit.islandIndex;
+      activeTileRef.current = hit.tileKey;
       lastPointRef.current = hit.point;
       changedRef.current = changed;
       const target = event.target as CapturableTarget;
@@ -444,22 +544,25 @@ export function useSurfacePaint(
     onPointerMove: (event) => {
       if (activePointerRef.current !== event.pointerId) return;
       blockEvent(event);
-      const hit = paintHitFromEvent(surface, event);
+      const hit = paintHitFromEvent(surface, event, atlas, tileRepeatsRef.current);
       if (!hit) {
         activeIslandRef.current = null;
+        activeTileRef.current = null;
         lastPointRef.current = null;
         return;
       }
 
       const sameIsland = activeIslandRef.current === hit.islandIndex;
+      const sameTile = sameIsland && activeTileRef.current === hit.tileKey;
       if (!sameIsland) setSurfacePaintSettings({ islandIndex: hit.islandIndex });
       changedRef.current = paintAt(
         hit.point,
-        sameIsland ? lastPointRef.current : null,
+        sameTile ? lastPointRef.current : null,
         hit.atlas,
         hit.islandIndex
       ) || changedRef.current;
       activeIslandRef.current = hit.islandIndex;
+      activeTileRef.current = hit.tileKey;
       lastPointRef.current = hit.point;
     },
     onPointerUp: finishStroke,
