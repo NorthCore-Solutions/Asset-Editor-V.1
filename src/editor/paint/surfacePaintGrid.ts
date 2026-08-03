@@ -11,6 +11,7 @@ import {
   type SurfaceUvAtlas
 } from '../../geometry/uvAtlas';
 import { createFilledImageData, hexToRgba } from './pixelPaint';
+import { isPrimaryPointerActive } from './primaryPointerState';
 
 export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
 const MAX_SURFACE_PIXELS = 384;
@@ -41,6 +42,8 @@ interface SurfaceAccumulator {
   height: number;
   weight: number;
 }
+
+const rasterMetricsCache = new WeakMap<THREE.BufferGeometry, SurfaceRasterMetric[]>();
 
 function vertexIndex(geometry: THREE.BufferGeometry, triangleOffset: number): number {
   return geometry.index?.getX(triangleOffset) ?? triangleOffset;
@@ -119,6 +122,9 @@ export function getSurfaceRasterMetrics(
   scaleValue: Vec3,
   atlas: SurfaceUvAtlas
 ): SurfaceRasterMetric[] {
+  const cachedMetrics = rasterMetricsCache.get(geometry);
+  if (cachedMetrics && isPrimaryPointerActive()) return cachedMetrics;
+
   const position = geometry.getAttribute('position');
   const uv = geometry.getAttribute('uv');
   const scale = new THREE.Vector3(
@@ -189,7 +195,7 @@ export function getSurfaceRasterMetrics(
     }
   }
 
-  return atlas.islands.map((island, index) => {
+  const metrics = atlas.islands.map((island, index) => {
     const accumulator = accumulators[index];
     const fallback = fallbackExtent(island.label, worldSize);
     const worldWidth = accumulator && accumulator.weight > EPSILON
@@ -211,6 +217,9 @@ export function getSurfaceRasterMetrics(
       worldHeight
     };
   });
+
+  rasterMetricsCache.set(geometry, metrics);
+  return metrics;
 }
 
 function bottomAnchored(label: string): boolean {
