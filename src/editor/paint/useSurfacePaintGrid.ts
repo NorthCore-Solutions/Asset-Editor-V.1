@@ -211,7 +211,21 @@ export function useSurfacePaint(
   const textureVisible = active || Boolean(paintTexture);
 
   const persist = (): void => {
-    const data = createPaintTextureData(surface.layers, atlas, metricsRef.current, object.material.color);
+    const created = createPaintTextureData(
+      surface.layers,
+      atlas,
+      metricsRef.current,
+      object.material.color
+    );
+    const data = created.surfaceGrid
+      ? {
+          ...created,
+          surfaceGrid: {
+            ...created.surfaceGrid,
+            baseColor: object.material.color.toUpperCase()
+          }
+        }
+      : created;
     loadedDataUrlRef.current = data.dataUrl;
     requestedDataUrlRef.current = null;
     updateMaterial(object.id, { paintTexture: data }, false);
@@ -328,10 +342,18 @@ export function useSurfacePaint(
           const currentGrid = paintTexture.surfaceGrid;
           const needsMigration = !currentGrid
             || currentGrid.atlasSignature !== atlas.signature
+            || currentGrid.baseColor?.toUpperCase() !== object.material.color.toUpperCase()
+            || !currentGrid.sourceDataUrl
+            || !currentGrid.sourceWidth
+            || !currentGrid.sourceHeight
             || currentGrid.surfaces.length !== metricsRef.current.length
             || currentGrid.surfaces.some((stored, index) => {
               const metric = metricsRef.current[index];
-              return !metric || stored.width !== metric.width || stored.height !== metric.height;
+              return !metric
+                || stored.width !== metric.width
+                || stored.height !== metric.height
+                || Math.abs(stored.coverageU - metric.coverageU) > 0.000001
+                || Math.abs(stored.coverageV - metric.coverageV) > 0.000001;
             });
           if (needsMigration) persist();
         }
