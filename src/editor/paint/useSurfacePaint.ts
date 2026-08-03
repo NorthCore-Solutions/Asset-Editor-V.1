@@ -23,6 +23,7 @@ import {
   rgbaToHex,
   samplePixel
 } from './pixelPaint';
+import { configurePaintTextureTiling } from './paintTextureTilingRuntime';
 import {
   getSurfacePaintSettings,
   setSurfacePaintSettings,
@@ -33,8 +34,6 @@ import {
 interface PaintSurface {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
-  displayCanvas: HTMLCanvasElement;
-  displayContext: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
 }
 
@@ -89,94 +88,35 @@ function configureTexture(texture: THREE.CanvasTexture): void {
   texture.needsUpdate = true;
 }
 
-export function copySourceToDisplay(surface: PaintSurface): void {
-  const image = surface.context.getImageData(0, 0, surface.canvas.width, surface.canvas.height);
-  surface.displayContext.putImageData(image, 0, 0);
-  surface.texture.needsUpdate = true;
-}
-
 function fillSurface(surface: PaintSurface, color: string): void {
-  const image = createFilledImageData(surface.canvas.width, surface.canvas.height, hexToRgba(color));
-  surface.context.putImageData(image, 0, 0);
-  surface.displayContext.putImageData(image, 0, 0);
+  surface.context.putImageData(
+    createFilledImageData(surface.canvas.width, surface.canvas.height, hexToRgba(color)),
+    0,
+    0
+  );
   surface.texture.needsUpdate = true;
 }
 
 function createSurface(color: string): PaintSurface {
   const canvas = document.createElement('canvas');
-  const displayCanvas = document.createElement('canvas');
   canvas.width = DEFAULT_PAINT_SIZE;
   canvas.height = DEFAULT_PAINT_SIZE;
-  displayCanvas.width = DEFAULT_PAINT_SIZE;
-  displayCanvas.height = DEFAULT_PAINT_SIZE;
   const context = canvas.getContext('2d', { willReadFrequently: true });
-  const displayContext = displayCanvas.getContext('2d', { willReadFrequently: true });
-  if (!context || !displayContext) throw new Error('2D-Kontext für Oberflächenbemalung nicht verfügbar.');
+  if (!context) throw new Error('2D-Kontext für Oberflächenbemalung nicht verfügbar.');
   context.imageSmoothingEnabled = false;
-  displayContext.imageSmoothingEnabled = false;
 
-  const texture = new THREE.CanvasTexture(displayCanvas);
+  const texture = new THREE.CanvasTexture(canvas);
   configureTexture(texture);
-  const surface = { canvas, context, displayCanvas, displayContext, texture };
+  const surface = { canvas, context, texture };
   fillSurface(surface, color);
   return surface;
 }
 
 function resizeSurface(surface: PaintSurface, width: number, height: number): void {
-  if (
-    surface.canvas.width === width
-    && surface.canvas.height === height
-    && surface.displayCanvas.width === width
-    && surface.displayCanvas.height === height
-  ) return;
-
+  if (surface.canvas.width === width && surface.canvas.height === height) return;
   surface.canvas.width = width;
   surface.canvas.height = height;
-  surface.displayCanvas.width = width;
-  surface.displayCanvas.height = height;
   surface.context.imageSmoothingEnabled = false;
-  surface.displayContext.imageSmoothingEnabled = false;
-  surface.texture.needsUpdate = true;
-}
-
-function renderTiledSurface(
-  surface: PaintSurface,
-  atlas: SurfaceUvAtlas,
-  repeats: SurfaceTileRepeat[]
-): void {
-  const width = surface.canvas.width;
-  const height = surface.canvas.height;
-  if (width <= 0 || height <= 0) return;
-
-  const source = surface.context.getImageData(0, 0, width, height);
-  const output = new ImageData(new Uint8ClampedArray(source.data), width, height);
-
-  atlas.islands.forEach((_, islandIndex) => {
-    const region = atlasPixelRegion(atlas, islandIndex, width, height);
-    const regionWidth = Math.max(1, region.maxX - region.minX + 1);
-    const regionHeight = Math.max(1, region.maxY - region.minY + 1);
-    const repeat = repeats[islandIndex] ?? { u: 1, v: 1 };
-
-    for (let y = region.minY; y <= region.maxY; y += 1) {
-      const localY = (y - region.minY + 0.5) / regionHeight;
-      const repeatedY = localY * repeat.v - Math.floor(localY * repeat.v);
-      const sourceY = Math.min(region.maxY, region.minY + Math.floor(repeatedY * regionHeight));
-
-      for (let x = region.minX; x <= region.maxX; x += 1) {
-        const localX = (x - region.minX + 0.5) / regionWidth;
-        const repeatedX = localX * repeat.u - Math.floor(localX * repeat.u);
-        const sourceX = Math.min(region.maxX, region.minX + Math.floor(repeatedX * regionWidth));
-        const sourceOffset = (sourceY * width + sourceX) * 4;
-        const targetOffset = (y * width + x) * 4;
-        output.data[targetOffset] = source.data[sourceOffset];
-        output.data[targetOffset + 1] = source.data[sourceOffset + 1];
-        output.data[targetOffset + 2] = source.data[sourceOffset + 2];
-        output.data[targetOffset + 3] = source.data[sourceOffset + 3];
-      }
-    }
-  });
-
-  surface.displayContext.putImageData(output, 0, 0);
   surface.texture.needsUpdate = true;
 }
 
@@ -300,6 +240,8 @@ export function useSurfacePaint(
   );
   const tileRepeatsRef = useRef<SurfaceTileRepeat[]>(tileRepeats);
   tileRepeatsRef.current = tileRepeats;
+  configurePaintTextureTiling(surface.texture, atlas, tileRepeats);
+
   const loadedDataUrlRef = useRef<string | null>(null);
   const requestedDataUrlRef = useRef<string | null>(null);
   const activePointerRef = useRef<number | null>(null);
@@ -313,10 +255,6 @@ export function useSurfacePaint(
   const paintTexture = object.material.paintTexture;
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
-
-  useEffect(() => {
-    renderTiledSurface(surface, atlas, tileRepeats);
-  }, [atlas, surface, tileRepeats]);
 
   useEffect(() => {
     if (settings.cameraRequestId === handledCameraRequestRef.current || !controls) return;
@@ -416,11 +354,14 @@ export function useSurfacePaint(
       loadedDataUrlRef.current = null;
       resizeSurface(surface, DEFAULT_PAINT_SIZE, DEFAULT_PAINT_SIZE);
       fillSurface(surface, object.material.color);
-      renderTiledSurface(surface, atlas, tileRepeatsRef.current);
       return;
     }
 
-    if (loadedDataUrlRef.current === paintTexture.dataUrl || requestedDataUrlRef.current === paintTexture.dataUrl) return;
+    if (
+      loadedDataUrlRef.current === paintTexture.dataUrl
+      || requestedDataUrlRef.current === paintTexture.dataUrl
+    ) return;
+
     requestedDataUrlRef.current = paintTexture.dataUrl;
     const image = new Image();
 
@@ -432,7 +373,7 @@ export function useSurfacePaint(
       surface.context.drawImage(image, 0, 0, surface.canvas.width, surface.canvas.height);
       loadedDataUrlRef.current = paintTexture.dataUrl;
       requestedDataUrlRef.current = null;
-      renderTiledSurface(surface, atlas, tileRepeatsRef.current);
+      surface.texture.needsUpdate = true;
     };
 
     image.onerror = () => {
@@ -440,7 +381,7 @@ export function useSurfacePaint(
     };
 
     image.src = paintTexture.dataUrl;
-  }, [atlas, object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
+  }, [object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
 
   const persist = (): void => {
     const dataUrl = surface.canvas.toDataURL('image/png');
@@ -488,7 +429,7 @@ export function useSurfacePaint(
     }
 
     surface.context.putImageData(image, 0, 0);
-    renderTiledSurface(surface, currentAtlas, tileRepeatsRef.current);
+    surface.texture.needsUpdate = true;
     return true;
   };
 
