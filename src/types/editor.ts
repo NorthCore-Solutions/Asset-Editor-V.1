@@ -19,6 +19,9 @@ export interface PaintSurfaceGridData {
   atlasSignature: string;
   pixelsPerWorldUnit: number;
   surfaces: PaintSurfaceGridLayerData[];
+  sourceDataUrl?: string;
+  sourceWidth?: number;
+  sourceHeight?: number;
 }
 
 export interface PaintTextureData {
