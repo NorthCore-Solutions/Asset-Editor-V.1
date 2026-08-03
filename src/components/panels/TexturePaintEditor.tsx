@@ -13,6 +13,8 @@ import {
   loadSurfaceCanvases,
   resizeSurfaceCanvases,
   surfaceDimensionsKey,
+  surfaceMetricsKey,
+  surfaceUvWindow,
   type SurfaceRasterMetric
 } from '../../editor/paint/surfacePaintGrid';
 import {
@@ -147,6 +149,7 @@ export function TexturePaintEditor({
   const [copyTargetIsland, setCopyTargetIsland] = useState(-1);
   const [, refreshControls] = useState(0);
   const dimensionsKey = surfaceDimensionsKey(metrics);
+  const metricsKey = surfaceMetricsKey(metrics);
 
   const renderSelectedSurface = (islandIndex = selectedIsland): void => {
     const previewCanvas = previewCanvasRef.current;
@@ -173,7 +176,16 @@ export function TexturePaintEditor({
 
   const commitLayers = (): void => {
     if (layersRef.current.length === 0) return;
-    const data = createPaintTextureData(layersRef.current, atlas, metrics, baseColor);
+    const created = createPaintTextureData(layersRef.current, atlas, metrics, baseColor);
+    const data: PaintTextureData = created.surfaceGrid
+      ? {
+          ...created,
+          surfaceGrid: {
+            ...created.surfaceGrid,
+            baseColor: baseColor.toUpperCase()
+          }
+        }
+      : created;
     loadedKeyRef.current = `${objectId}:${data.dataUrl}:${atlas.signature}:${dimensionsKey}`;
     onCommit(data);
   };
@@ -206,7 +218,7 @@ export function TexturePaintEditor({
       return;
     }
     renderSelectedSurface(clamped);
-  }, [atlas.signature, selectedIsland, dimensionsKey]);
+  }, [atlas.signature, selectedIsland, metricsKey]);
 
   useEffect(() => {
     setCopyTargetIsland((current) => current >= atlas.islands.length ? -1 : current);
@@ -264,10 +276,18 @@ export function TexturePaintEditor({
         const needsMigration = Boolean(texture) && (
           !storedGrid
           || storedGrid.atlasSignature !== atlas.signature
+          || storedGrid.baseColor?.toUpperCase() !== baseColor.toUpperCase()
+          || !storedGrid.sourceDataUrl
+          || !storedGrid.sourceWidth
+          || !storedGrid.sourceHeight
           || storedGrid.surfaces.length !== metrics.length
           || storedGrid.surfaces.some((stored, index) => {
             const metric = metrics[index];
-            return !metric || stored.width !== metric.width || stored.height !== metric.height;
+            return !metric
+              || stored.width !== metric.width
+              || stored.height !== metric.height
+              || Math.abs(stored.coverageU - metric.coverageU) > 0.000001
+              || Math.abs(stored.coverageV - metric.coverageV) > 0.000001;
           })
         );
         if (needsMigration) commitLayers();
@@ -285,7 +305,7 @@ export function TexturePaintEditor({
     layersRef.current = resized;
     renderSelectedSurface();
     if (texture && changed) commitLayers();
-  }, [dimensionsKey]);
+  }, [metricsKey]);
 
   const resolvePaintPoint = (event: ReactPointerEvent<HTMLCanvasElement>): PaintPoint | null => {
     const preview = event.currentTarget;
@@ -305,18 +325,29 @@ export function TexturePaintEditor({
 
     const islandIndex = atlasIslandAtPixel(atlas, preview.width, preview.height, previewX, previewY);
     const layer = layersRef.current[islandIndex];
-    if (!layer) return null;
+    const metric = metrics[islandIndex];
+    if (!layer || !metric) return null;
     const region = atlasPixelRegion(atlas, islandIndex, preview.width, preview.height);
+    if (
+      previewX < region.minX
+      || previewX > region.maxX
+      || previewY < region.minY
+      || previewY > region.maxY
+    ) return null;
+
     const regionWidth = Math.max(1, region.maxX - region.minX + 1);
     const regionHeight = Math.max(1, region.maxY - region.minY + 1);
-    const localX = (previewX - region.minX) / regionWidth;
-    const localY = (previewY - region.minY) / regionHeight;
+    const localX = Math.max(0, Math.min(0.999999, (previewX - region.minX + 0.5) / regionWidth));
+    const localY = Math.max(0, Math.min(0.999999, (previewY - region.minY + 0.5) / regionHeight));
+    const window = surfaceUvWindow(metric);
+    const sampleX = (window.offsetU + localX * window.scaleU) * layer.width;
+    const sampleY = (1 - window.offsetV - window.scaleV + localY * window.scaleV) * layer.height;
 
     return {
       islandIndex,
       point: [
-        Math.max(0, Math.min(layer.width - 1, Math.floor(localX * layer.width))),
-        Math.max(0, Math.min(layer.height - 1, Math.floor(localY * layer.height)))
+        Math.max(0, Math.min(layer.width - 1, Math.floor(sampleX))),
+        Math.max(0, Math.min(layer.height - 1, Math.floor(sampleY)))
       ]
     };
   };
