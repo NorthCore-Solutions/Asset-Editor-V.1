@@ -247,8 +247,6 @@ function addUnionMeshes(
   const evaluator = new Evaluator();
   evaluator.attributes = ['position', 'normal'];
   evaluator.useGroups = true;
-  evaluator.consolidateGroups = true;
-  evaluator.removeUnusedMaterials = true;
 
   let result: Brush | null = null;
 
@@ -266,10 +264,12 @@ function addUnionMeshes(
       continue;
     }
 
-    const nextResult = evaluator.evaluate(result, brush, ADDITION);
+    const nextResult: Brush = evaluator.evaluate(result, brush, ADDITION);
     nextResult.updateMatrixWorld(true);
     resources.geometries.add(nextResult.geometry);
-    const resultMaterials = Array.isArray(nextResult.material) ? nextResult.material : [nextResult.material];
+    const resultMaterials: THREE.Material[] = Array.isArray(nextResult.material)
+      ? nextResult.material
+      : [nextResult.material];
     resultMaterials.forEach((resultMaterial) => resources.materials.add(resultMaterial));
     result = nextResult;
   }
