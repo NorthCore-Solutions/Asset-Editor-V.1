@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../materials/presets';
 import { createGeometry } from '../../geometry/factory';
 import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
+import { getSurfaceRasterMetrics } from '../../editor/paint/surfacePaintGrid';
 import { setSurfacePaintSettings, subscribeSurfacePaint } from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, PaintTextureData, Vec3 } from '../../types/editor';
@@ -134,13 +135,34 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
     setPaintColor(settings.color);
   }), []);
 
-  const paintAtlas = useMemo(() => {
-    if (!object) return FULL_SURFACE_UV_ATLAS;
+  const paintSurface = useMemo(() => {
+    if (!object) {
+      return {
+        atlas: FULL_SURFACE_UV_ATLAS,
+        metrics: [{
+          label: 'Oberfläche',
+          width: 32,
+          height: 32,
+          coverageU: 1,
+          coverageV: 1,
+          worldWidth: 1,
+          worldHeight: 1
+        }]
+      };
+    }
+
     const geometry = createGeometry({ type: object.type, geometry: object.geometry });
     const atlas = getSurfaceUvAtlas(geometry);
+    const metrics = getSurfaceRasterMetrics(geometry, object.scale, atlas);
     geometry.dispose();
-    return atlas;
-  }, [object?.geometry, object?.type]);
+    return { atlas, metrics };
+  }, [
+    object?.geometry,
+    object?.type,
+    object?.scale[0],
+    object?.scale[1],
+    object?.scale[2]
+  ]);
 
   if (collapsed) {
     return <aside className="panel right-panel panel-collapsed"><PropertiesHeader collapsed onToggle={onToggle} /></aside>;
@@ -247,7 +269,8 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
             objectId={object.id}
             baseColor={object.material.color}
             texture={object.material.paintTexture}
-            atlas={paintAtlas}
+            atlas={paintSurface.atlas}
+            metrics={paintSurface.metrics}
             onCommit={commitPaintTexture}
             onPaintModeChange={(enabled) => {
               if (enabled) setColorTarget('paint');
