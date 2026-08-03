@@ -29,6 +29,13 @@ export interface SurfaceUvWindow {
   scaleV: number;
 }
 
+export interface SurfaceCanvasRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface SurfaceAccumulator {
   width: number;
   height: number;
@@ -255,14 +262,54 @@ export function cloneSurfaceCanvas(source: HTMLCanvasElement): HTMLCanvasElement
   return canvas;
 }
 
+export function surfaceCanvasRegion(
+  surface: HTMLCanvasElement,
+  metric: PaintSurfaceGridLayerData
+): SurfaceCanvasRegion {
+  const width = Math.max(1, Math.min(metric.width, surface.width));
+  const height = Math.max(1, Math.min(metric.height, surface.height));
+  return {
+    x: Math.max(0, Math.floor((surface.width - width) / 2)),
+    y: bottomAnchored(metric.label)
+      ? Math.max(0, surface.height - height)
+      : Math.max(0, Math.floor((surface.height - height) / 2)),
+    width,
+    height
+  };
+}
+
+export function createVisibleSurfaceCanvas(
+  source: HTMLCanvasElement,
+  metric: PaintSurfaceGridLayerData
+): HTMLCanvasElement {
+  const region = surfaceCanvasRegion(source, metric);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, metric.width);
+  canvas.height = Math.max(1, metric.height);
+  canvasContext(canvas).drawImage(
+    source,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  return canvas;
+}
+
 export function resizeSurfaceCanvas(
   source: HTMLCanvasElement,
   metric: PaintSurfaceGridLayerData,
   baseColor: string
 ): HTMLCanvasElement {
-  if (source.width === metric.width && source.height === metric.height) return cloneSurfaceCanvas(source);
+  const targetWidth = Math.max(source.width, metric.width);
+  const targetHeight = Math.max(source.height, metric.height);
+  if (source.width === targetWidth && source.height === targetHeight) return cloneSurfaceCanvas(source);
 
-  const target = createFilledSurfaceCanvas(metric.width, metric.height, baseColor);
+  const target = createFilledSurfaceCanvas(targetWidth, targetHeight, baseColor);
   const sourceContext = canvasContext(source);
   const targetContext = canvasContext(target);
   const sourcePixels = sourceContext.getImageData(0, 0, source.width, source.height);
@@ -336,8 +383,8 @@ export async function loadSurfaceCanvases(
     const regionWidth = Math.max(1, region.maxX - region.minX + 1);
     const regionHeight = Math.max(1, region.maxY - region.minY + 1);
     const stored = compatibleGrid ? storedGrid.surfaces[index] : undefined;
-    const storedWidth = Math.max(1, stored?.width ?? metric.width);
-    const storedHeight = Math.max(1, stored?.height ?? metric.height);
+    const storedWidth = Math.max(1, stored?.sourceWidth ?? stored?.width ?? metric.width);
+    const storedHeight = Math.max(1, stored?.sourceHeight ?? stored?.height ?? metric.height);
     const extracted = document.createElement('canvas');
     extracted.width = storedWidth;
     extracted.height = storedHeight;
@@ -394,11 +441,12 @@ export function composeSurfaceAtlasCanvas(
     const region = atlasPixelRegion(atlas, index, canvas.width, canvas.height);
     const targetWidth = Math.max(1, region.maxX - region.minX + 1);
     const targetHeight = Math.max(1, region.maxY - region.minY + 1);
+    const visible = surfaceCanvasRegion(surface, metric);
     const window = surfaceUvWindow(metric);
-    const sourceX = window.offsetU * surface.width;
-    const sourceY = (1 - window.offsetV - window.scaleV) * surface.height;
-    const sourceWidth = Math.max(EPSILON, window.scaleU * surface.width);
-    const sourceHeight = Math.max(EPSILON, window.scaleV * surface.height);
+    const sourceX = visible.x + window.offsetU * visible.width;
+    const sourceY = visible.y + (1 - window.offsetV - window.scaleV) * visible.height;
+    const sourceWidth = Math.max(EPSILON, window.scaleU * visible.width);
+    const sourceHeight = Math.max(EPSILON, window.scaleV * visible.height);
 
     context.drawImage(
       surface,
@@ -423,8 +471,10 @@ export function createPaintTextureData(
   baseColor: string
 ): PaintTextureData {
   const displayCanvas = composeSurfaceAtlasCanvas(surfaces, atlas, metrics, baseColor);
-  const sourceMetrics = metrics.map((metric) => ({
+  const sourceMetrics = metrics.map((metric, index) => ({
     ...metric,
+    width: surfaces[index]?.width ?? metric.width,
+    height: surfaces[index]?.height ?? metric.height,
     coverageU: 1,
     coverageV: 1
   }));
@@ -434,12 +484,14 @@ export function createPaintTextureData(
     atlasSignature: atlas.signature,
     pixelsPerWorldUnit: PAINT_PIXELS_PER_WORLD_UNIT,
     baseColor: baseColor.toUpperCase(),
-    surfaces: metrics.map(({ label, width, height, coverageU, coverageV }) => ({
+    surfaces: metrics.map(({ label, width, height, coverageU, coverageV }, index) => ({
       label,
       width,
       height,
       coverageU,
-      coverageV
+      coverageV,
+      sourceWidth: surfaces[index]?.width ?? width,
+      sourceHeight: surfaces[index]?.height ?? height
     })),
     sourceDataUrl: sourceCanvas.toDataURL('image/png'),
     sourceWidth: sourceCanvas.width,
@@ -457,20 +509,35 @@ export function createPaintTextureData(
 
 export function copySurfaceCanvas(
   source: HTMLCanvasElement,
-  targetMetric: SurfaceRasterMetric
+  targetMetric: SurfaceRasterMetric,
+  sourceMetric?: SurfaceRasterMetric
 ): HTMLCanvasElement {
   const target = document.createElement('canvas');
   target.width = targetMetric.width;
   target.height = targetMetric.height;
   const context = canvasContext(target);
-  context.drawImage(source, 0, 0, source.width, source.height, 0, 0, target.width, target.height);
+  const region = sourceMetric
+    ? surfaceCanvasRegion(source, sourceMetric)
+    : { x: 0, y: 0, width: source.width, height: source.height };
+  context.drawImage(
+    source,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    target.width,
+    target.height
+  );
   return target;
 }
 
 export function surfacePointFromUv(
   atlas: SurfaceUvAtlas,
   metrics: SurfaceRasterMetric[],
-  uv: THREE.Vector2
+  uv: THREE.Vector2,
+  surfaces?: HTMLCanvasElement[]
 ): { islandIndex: number; point: [number, number] } | null {
   const islandIndex = atlasIslandAtUv(atlas, uv);
   const island = atlas.islands[islandIndex];
@@ -484,12 +551,16 @@ export function surfacePointFromUv(
   const window = surfaceUvWindow(metric);
   const sampleU = window.offsetU + localU * window.scaleU;
   const sampleV = window.offsetV + localV * window.scaleV;
+  const surface = surfaces?.[islandIndex];
+  const visible = surface
+    ? surfaceCanvasRegion(surface, metric)
+    : { x: 0, y: 0, width: metric.width, height: metric.height };
 
   return {
     islandIndex,
     point: [
-      Math.max(0, Math.min(metric.width - 1, Math.floor(sampleU * metric.width))),
-      Math.max(0, Math.min(metric.height - 1, Math.floor((1 - sampleV) * metric.height)))
+      visible.x + Math.max(0, Math.min(visible.width - 1, Math.floor(sampleU * visible.width))),
+      visible.y + Math.max(0, Math.min(visible.height - 1, Math.floor((1 - sampleV) * visible.height)))
     ]
   };
 }
