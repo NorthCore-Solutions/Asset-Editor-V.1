@@ -11,7 +11,7 @@ import {
   type SurfaceUvAtlas
 } from '../../geometry/uvAtlas';
 import { createFilledImageData, hexToRgba } from './pixelPaint';
-import { isPrimaryPointerActive } from './primaryPointerState';
+import { isPrimaryPointerActive, subscribePrimaryPointer } from './primaryPointerState';
 
 export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
 const MAX_SURFACE_PIXELS = 384;
@@ -44,6 +44,14 @@ interface SurfaceAccumulator {
 }
 
 const rasterMetricsCache = new WeakMap<THREE.BufferGeometry, SurfaceRasterMetric[]>();
+const pendingMetricRefreshes = new Map<THREE.BufferGeometry, () => void>();
+
+subscribePrimaryPointer((active) => {
+  if (active || pendingMetricRefreshes.size === 0) return;
+  const refreshes = [...pendingMetricRefreshes.values()];
+  pendingMetricRefreshes.clear();
+  refreshes.forEach((refresh) => refresh());
+});
 
 function vertexIndex(geometry: THREE.BufferGeometry, triangleOffset: number): number {
   return geometry.index?.getX(triangleOffset) ?? triangleOffset;
@@ -123,7 +131,16 @@ export function getSurfaceRasterMetrics(
   atlas: SurfaceUvAtlas
 ): SurfaceRasterMetric[] {
   const cachedMetrics = rasterMetricsCache.get(geometry);
-  if (cachedMetrics && isPrimaryPointerActive()) return cachedMetrics;
+  if (cachedMetrics && isPrimaryPointerActive()) {
+    const scaleSnapshot: Vec3 = [scaleValue[0], scaleValue[1], scaleValue[2]];
+    pendingMetricRefreshes.set(geometry, () => {
+      rasterMetricsCache.delete(geometry);
+      const refreshedMetrics = getSurfaceRasterMetrics(geometry, scaleSnapshot, atlas);
+      cachedMetrics.splice(0, cachedMetrics.length, ...refreshedMetrics);
+      rasterMetricsCache.set(geometry, cachedMetrics);
+    });
+    return cachedMetrics;
+  }
 
   const position = geometry.getAttribute('position');
   const uv = geometry.getAttribute('uv');
