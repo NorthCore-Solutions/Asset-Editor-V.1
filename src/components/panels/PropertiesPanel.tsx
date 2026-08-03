@@ -54,10 +54,14 @@ function recolorDataUrl(
       const tolerance = 3;
 
       for (let offset = 0; offset < pixels.data.length; offset += 4) {
-        const matchesBackground = pixels.data[offset + 3] > 0
-          && Math.abs(pixels.data[offset] - previous[0]) <= tolerance
-          && Math.abs(pixels.data[offset + 1] - previous[1]) <= tolerance
-          && Math.abs(pixels.data[offset + 2] - previous[2]) <= tolerance;
+        const red = pixels.data[offset] ?? 0;
+        const green = pixels.data[offset + 1] ?? 0;
+        const blue = pixels.data[offset + 2] ?? 0;
+        const alpha = pixels.data[offset + 3] ?? 0;
+        const matchesBackground = alpha > 0
+          && Math.abs(red - previous[0]) <= tolerance
+          && Math.abs(green - previous[1]) <= tolerance
+          && Math.abs(blue - previous[2]) <= tolerance;
         if (!matchesBackground) continue;
 
         pixels.data[offset] = next[0];
