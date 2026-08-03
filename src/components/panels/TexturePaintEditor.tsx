@@ -10,8 +10,10 @@ import {
   composeSurfaceAtlasCanvas,
   copySurfaceCanvas,
   createPaintTextureData,
+  createVisibleSurfaceCanvas,
   loadSurfaceCanvases,
   resizeSurfaceCanvases,
+  surfaceCanvasRegion,
   surfaceDimensionsKey,
   surfaceMetricsKey,
   surfaceUvWindow,
@@ -167,11 +169,13 @@ export function TexturePaintEditor({
     }
 
     const layer = layersRef.current[islandIndex];
-    if (!layer) return;
-    previewCanvas.width = layer.width;
-    previewCanvas.height = layer.height;
+    const metric = metrics[islandIndex];
+    if (!layer || !metric) return;
+    const visible = createVisibleSurfaceCanvas(layer, metric);
+    previewCanvas.width = visible.width;
+    previewCanvas.height = visible.height;
     previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    previewContext.drawImage(layer, 0, 0);
+    previewContext.drawImage(visible, 0, 0);
   };
 
   const commitLayers = (): void => {
@@ -284,6 +288,8 @@ export function TexturePaintEditor({
           || storedGrid.surfaces.some((stored, index) => {
             const metric = metrics[index];
             return !metric
+              || !stored.sourceWidth
+              || !stored.sourceHeight
               || stored.width !== metric.width
               || stored.height !== metric.height
               || Math.abs(stored.coverageU - metric.coverageU) > 0.000001
@@ -297,14 +303,9 @@ export function TexturePaintEditor({
 
   useEffect(() => {
     if (layersRef.current.length === 0) return;
-    const resized = resizeSurfaceCanvases(layersRef.current, metrics, baseColor);
-    const changed = resized.some((layer, index) => {
-      const previous = layersRef.current[index];
-      return !previous || previous.width !== layer.width || previous.height !== layer.height;
-    });
-    layersRef.current = resized;
+    layersRef.current = resizeSurfaceCanvases(layersRef.current, metrics, baseColor);
     renderSelectedSurface();
-    if (texture && changed) commitLayers();
+    if (texture) commitLayers();
   }, [metricsKey]);
 
   const resolvePaintPoint = (event: ReactPointerEvent<HTMLCanvasElement>): PaintPoint | null => {
@@ -313,12 +314,14 @@ export function TexturePaintEditor({
 
     if (selectedIsland >= 0) {
       const layer = layersRef.current[selectedIsland];
-      if (!layer) return null;
+      const metric = metrics[selectedIsland];
+      if (!layer || !metric) return null;
+      const visible = surfaceCanvasRegion(layer, metric);
       return {
         islandIndex: selectedIsland,
         point: [
-          Math.max(0, Math.min(layer.width - 1, previewX)),
-          Math.max(0, Math.min(layer.height - 1, previewY))
+          visible.x + Math.max(0, Math.min(visible.width - 1, previewX)),
+          visible.y + Math.max(0, Math.min(visible.height - 1, previewY))
         ]
       };
     }
@@ -340,8 +343,9 @@ export function TexturePaintEditor({
     const localX = Math.max(0, Math.min(0.999999, (previewX - region.minX + 0.5) / regionWidth));
     const localY = Math.max(0, Math.min(0.999999, (previewY - region.minY + 0.5) / regionHeight));
     const window = surfaceUvWindow(metric);
-    const sampleX = (window.offsetU + localX * window.scaleU) * layer.width;
-    const sampleY = (1 - window.offsetV - window.scaleV + localY * window.scaleV) * layer.height;
+    const visible = surfaceCanvasRegion(layer, metric);
+    const sampleX = visible.x + (window.offsetU + localX * window.scaleU) * visible.width;
+    const sampleY = visible.y + (1 - window.offsetV - window.scaleV + localY * window.scaleV) * visible.height;
 
     return {
       islandIndex,
@@ -424,7 +428,8 @@ export function TexturePaintEditor({
 
   const copySelectedSurface = (): void => {
     const source = layersRef.current[selectedIsland];
-    if (!source || selectedIsland < 0) return;
+    const sourceMetric = metrics[selectedIsland];
+    if (!source || !sourceMetric || selectedIsland < 0) return;
     const targetIndices = copyTargetIsland < 0
       ? atlas.islands.map((_, index) => index).filter((index) => index !== selectedIsland)
       : [copyTargetIsland];
@@ -434,7 +439,7 @@ export function TexturePaintEditor({
     const next = layersRef.current.map(cloneSurfaceCanvas);
     targetIndices.forEach((targetIndex) => {
       const metric = metrics[targetIndex];
-      if (metric) next[targetIndex] = copySurfaceCanvas(source, metric);
+      if (metric) next[targetIndex] = copySurfaceCanvas(source, metric, sourceMetric);
     });
     layersRef.current = next;
     renderSelectedSurface();
