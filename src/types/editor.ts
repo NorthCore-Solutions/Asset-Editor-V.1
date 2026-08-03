@@ -6,11 +6,27 @@ export type Vec3 = [number, number, number];
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 export type CameraView = 'perspective' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'focus';
 
+export interface PaintSurfaceGridLayerData {
+  label: string;
+  width: number;
+  height: number;
+  coverageU: number;
+  coverageV: number;
+}
+
+export interface PaintSurfaceGridData {
+  version: 1;
+  atlasSignature: string;
+  pixelsPerWorldUnit: number;
+  surfaces: PaintSurfaceGridLayerData[];
+}
+
 export interface PaintTextureData {
   dataUrl: string;
   width: number;
   height: number;
   pixelated: boolean;
+  surfaceGrid?: PaintSurfaceGridData;
 }
 
 export interface MaterialData {
