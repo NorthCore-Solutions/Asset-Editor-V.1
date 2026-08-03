@@ -6,6 +6,7 @@ export interface SurfacePaintSettings {
   tool: PaintTool;
   color: string;
   brushSize: number;
+  eraseAll: boolean;
   islandIndex: number;
   cameraView: CameraView | null;
   cameraRequestId: number;
@@ -18,6 +19,7 @@ let settings: SurfacePaintSettings = {
   tool: 'brush',
   color: '#AEB8BE',
   brushSize: 1,
+  eraseAll: false,
   islandIndex: -1,
   cameraView: null,
   cameraRequestId: 0
