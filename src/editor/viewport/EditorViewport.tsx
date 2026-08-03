@@ -54,7 +54,9 @@ interface CenterScaleDragState {
   kind: 'center';
   pointerId: number;
   startPointer: THREE.Vector2;
+  anchorLocal: THREE.Vector3;
   startPosition: THREE.Vector3;
+  startQuaternion: THREE.Quaternion;
   startScale: THREE.Vector3;
   pixelsPerFactor: number;
 }
@@ -528,8 +530,14 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
       if (snap.enabled && snap.scale > 0) {
         factor = Math.max(0.02, Math.round(factor / snap.scale) * snap.scale);
       }
-      mesh.scale.copy(drag.startScale).multiplyScalar(factor);
-      mesh.position.copy(drag.startPosition);
+      const nextScale = drag.startScale.clone().multiplyScalar(factor);
+      mesh.scale.copy(nextScale);
+      const localOffset = new THREE.Vector3(
+        drag.anchorLocal.x * (drag.startScale.x - nextScale.x),
+        drag.anchorLocal.y * (drag.startScale.y - nextScale.y),
+        drag.anchorLocal.z * (drag.startScale.z - nextScale.z)
+      ).applyQuaternion(drag.startQuaternion);
+      mesh.position.copy(drag.startPosition).add(localOffset);
       mesh.updateMatrixWorld();
       onSnapTargetChange(null);
       syncTransform();
@@ -624,11 +632,15 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
     event.stopPropagation();
     event.nativeEvent.preventDefault();
     event.nativeEvent.stopImmediatePropagation();
+    const anchorLocal = bounds.getCenter(new THREE.Vector3());
+    anchorLocal.y = bounds.min.y;
     dragRef.current = {
       kind: 'center',
       pointerId: event.pointerId,
       startPointer: new THREE.Vector2(event.clientX, event.clientY),
+      anchorLocal,
       startPosition: mesh.position.clone(),
+      startQuaternion: mesh.quaternion.clone(),
       startScale: mesh.scale.clone(),
       pixelsPerFactor: 140
     };
@@ -793,7 +805,7 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
   const geometry = useMemo(() => createGeometry({ type: object.type, geometry: object.geometry }), [object.geometry, object.type]);
   const selected = selectedIds.includes(object.id);
   const singleSelection = selected && selectedIds.length === 1;
-  const paint = useSurfacePaint(object, singleSelection, paintSettings);
+  const paint = useSurfacePaint(object, singleSelection, paintSettings, geometry);
   const snapToolActive = tool === 'translate' || tool === 'scale';
   const showSnapPattern = !paintSettings.enabled && snap.surface && snapToolActive && isFormType(object.type) && !singleSelection && object.visible;
 
