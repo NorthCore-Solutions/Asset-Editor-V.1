@@ -15,6 +15,7 @@ import { createFilledImageData, hexToRgba } from './pixelPaint';
 export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
 const MAX_SURFACE_PIXELS = 384;
 const EPSILON = 0.000001;
+const INTEGER_PIXEL_TOLERANCE = 0.0001;
 
 export interface SurfaceRasterMetric extends PaintSurfaceGridLayerData {
   worldWidth: number;
@@ -93,7 +94,7 @@ function fallbackExtent(
 function metricDimension(worldLength: number): { pixels: number; coverage: number } {
   const calculatedPixels = Math.max(EPSILON, worldLength) * PAINT_PIXELS_PER_WORLD_UNIT;
   const nearestInteger = Math.round(calculatedPixels);
-  const rawPixels = Math.abs(calculatedPixels - nearestInteger) <= EPSILON
+  const rawPixels = Math.abs(calculatedPixels - nearestInteger) <= INTEGER_PIXEL_TOLERANCE
     ? nearestInteger
     : calculatedPixels;
   const unclampedPixels = Math.max(1, Math.ceil(rawPixels));
