@@ -27,6 +27,7 @@ import {
   subscribeSurfacePaint,
   type SurfacePaintSettings
 } from './surfacePaintSession';
+import { shouldConnectStroke, type StrokeCoordinate } from './strokeContinuity';
 
 interface PaintSurface {
   canvas: HTMLCanvasElement;
@@ -220,6 +221,7 @@ export function useSurfacePaint(
   const activePointerRef = useRef<number | null>(null);
   const activeIslandRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
+  const lastClientPointRef = useRef<StrokeCoordinate | null>(null);
   const changedRef = useRef(false);
   const wasActiveRef = useRef(false);
   const handledCameraRequestRef = useRef(settings.cameraRequestId);
@@ -363,6 +365,7 @@ export function useSurfacePaint(
   useEffect(() => () => {
     loadRequestRef.current += 1;
     if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
+    lastClientPointRef.current = null;
     if (activePointerRef.current !== null) {
       activePointerRef.current = null;
       activeIslandRef.current = null;
@@ -496,6 +499,7 @@ export function useSurfacePaint(
     activePointerRef.current = null;
     activeIslandRef.current = null;
     lastPointRef.current = null;
+    lastClientPointRef.current = null;
     if (changedRef.current) persist();
     changedRef.current = false;
     releasePointer(event);
@@ -534,29 +538,51 @@ export function useSurfacePaint(
       activePointerRef.current = event.pointerId;
       activeIslandRef.current = hit.islandIndex;
       lastPointRef.current = hit.point;
+      lastClientPointRef.current = [event.clientX, event.clientY];
       changedRef.current = changed;
       const target = event.target as CapturableTarget;
       target.setPointerCapture?.(event.pointerId);
     },
     onPointerMove: (event) => {
       if (activePointerRef.current !== event.pointerId) return;
+      if ((event.buttons & 1) === 0) {
+        finishStroke(event);
+        return;
+      }
       blockEvent(event);
       const hit = hitFromEvent(event);
       if (!hit) {
         activeIslandRef.current = null;
         lastPointRef.current = null;
+        lastClientPointRef.current = null;
         return;
       }
 
       const sameIsland = activeIslandRef.current === hit.islandIndex;
+      const currentClient: StrokeCoordinate = [event.clientX, event.clientY];
+      const metric = metricsRef.current[hit.islandIndex];
+      const previousSample = sameIsland && lastPointRef.current && lastClientPointRef.current
+        ? { pixel: lastPointRef.current, client: lastClientPointRef.current }
+        : null;
+      const connectPrevious = metric
+        ? shouldConnectStroke(
+            previousSample,
+            { pixel: hit.point, client: currentClient },
+            metric.width,
+            metric.height,
+            settings.brushSize
+          )
+        : false;
+
       if (!sameIsland) setSurfacePaintSettings({ islandIndex: hit.islandIndex });
       changedRef.current = paintAt(
         hit.islandIndex,
         hit.point,
-        sameIsland ? lastPointRef.current : null
+        connectPrevious ? lastPointRef.current : null
       ) || changedRef.current;
       activeIslandRef.current = hit.islandIndex;
       lastPointRef.current = hit.point;
+      lastClientPointRef.current = currentClient;
     },
     onPointerUp: finishStroke,
     onPointerCancel: finishStroke
