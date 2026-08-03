@@ -38,10 +38,10 @@ function pixelOffset(image: ImageData, x: number, y: number): number {
 function readPixel(image: ImageData, x: number, y: number): RgbaColor {
   const offset = pixelOffset(image, x, y);
   return {
-    r: image.data[offset],
-    g: image.data[offset + 1],
-    b: image.data[offset + 2],
-    a: image.data[offset + 3]
+    r: image.data[offset] ?? 0,
+    g: image.data[offset + 1] ?? 0,
+    b: image.data[offset + 2] ?? 0,
+    a: image.data[offset + 3] ?? 0
   };
 }
 
