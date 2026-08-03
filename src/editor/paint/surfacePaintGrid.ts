@@ -224,6 +224,10 @@ function bottomAnchored(label: string): boolean {
     || direction === 'Schräge';
 }
 
+function centeredOffset(containerSize: number, contentSize: number): number {
+  return Math.max(0, Math.floor(containerSize / 2) - Math.floor(contentSize / 2));
+}
+
 export function surfaceUvWindow(metric: PaintSurfaceGridLayerData): SurfaceUvWindow {
   const scaleU = THREE.MathUtils.clamp(metric.coverageU, EPSILON, 1);
   const scaleV = THREE.MathUtils.clamp(metric.coverageV, EPSILON, 1);
@@ -269,10 +273,10 @@ export function surfaceCanvasRegion(
   const width = Math.max(1, Math.min(metric.width, surface.width));
   const height = Math.max(1, Math.min(metric.height, surface.height));
   return {
-    x: Math.max(0, Math.floor((surface.width - width) / 2)),
+    x: centeredOffset(surface.width, width),
     y: bottomAnchored(metric.label)
       ? Math.max(0, surface.height - height)
-      : Math.max(0, Math.floor((surface.height - height) / 2)),
+      : centeredOffset(surface.height, height),
     width,
     height
   };
@@ -314,10 +318,10 @@ export function resizeSurfaceCanvas(
   const targetContext = canvasContext(target);
   const sourcePixels = sourceContext.getImageData(0, 0, source.width, source.height);
   const targetPixels = targetContext.getImageData(0, 0, target.width, target.height);
-  const offsetX = Math.floor((target.width - source.width) / 2);
+  const offsetX = centeredOffset(target.width, source.width);
   const offsetY = bottomAnchored(metric.label)
     ? target.height - source.height
-    : Math.floor((target.height - source.height) / 2);
+    : centeredOffset(target.height, source.height);
 
   for (let sourceY = 0; sourceY < source.height; sourceY += 1) {
     const targetY = sourceY + offsetY;
