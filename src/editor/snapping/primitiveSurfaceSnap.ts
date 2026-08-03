@@ -30,6 +30,11 @@ interface ScaleInteraction {
   direction: THREE.Vector3 | null;
 }
 
+interface ChangedScaleAxis {
+  axis: Axis;
+  delta: number;
+}
+
 const axisValue = (vector: THREE.Vector3, axis: Axis): number => vector[axis];
 const setAxisValue = (vector: THREE.Vector3, axis: Axis, value: number): void => {
   vector[axis] = value;
@@ -101,13 +106,18 @@ const detectScaleInteraction = (source: SceneObjectData, objects: SceneObjectDat
   const storedSource = objects.find((object) => object.id === source.id);
   if (!storedSource) return { active: false, direction: null };
 
-  const scaleDeltas = source.scale.map((value, index) => value - storedSource.scale[index]);
-  const changedAxes = AXES
-    .map((axis, index) => ({ axis, delta: scaleDeltas[index] }))
+  const scaleDeltas: Vec3 = [
+    source.scale[0] - storedSource.scale[0],
+    source.scale[1] - storedSource.scale[1],
+    source.scale[2] - storedSource.scale[2]
+  ];
+  const changedAxes: ChangedScaleAxis[] = AXES
+    .map((axis, index): ChangedScaleAxis => ({ axis, delta: scaleDeltas[index] }))
     .filter((entry) => Math.abs(entry.delta) > 0.000001)
     .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
 
-  if (changedAxes.length === 0) return { active: false, direction: null };
+  const [dominant, secondary] = changedAxes;
+  if (!dominant) return { active: false, direction: null };
 
   const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...source.rotation));
   const positionDelta = new THREE.Vector3(
@@ -116,8 +126,7 @@ const detectScaleInteraction = (source: SceneObjectData, objects: SceneObjectDat
     source.position[2] - storedSource.position[2]
   );
 
-  if (changedAxes.length === 1 || Math.abs(changedAxes[0].delta) > Math.abs(changedAxes[1].delta) * 1.8) {
-    const dominant = changedAxes[0];
+  if (!secondary || Math.abs(dominant.delta) > Math.abs(secondary.delta) * 1.8) {
     const worldAxis = localAxisVector(dominant.axis).applyQuaternion(quaternion).normalize();
     const positionAlongAxis = positionDelta.dot(worldAxis);
     const side = Math.abs(positionAlongAxis) > 0.000001
@@ -136,7 +145,7 @@ const detectScaleInteraction = (source: SceneObjectData, objects: SceneObjectDat
     return { active: true, direction };
   }
 
-  const fallback = localAxisVector(changedAxes[0].axis).applyQuaternion(quaternion).normalize();
+  const fallback = localAxisVector(dominant.axis).applyQuaternion(quaternion).normalize();
   return { active: true, direction: fallback };
 };
 
