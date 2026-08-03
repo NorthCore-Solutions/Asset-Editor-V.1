@@ -12,6 +12,8 @@ export interface PaintSurfaceGridLayerData {
   height: number;
   coverageU: number;
   coverageV: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
 }
 
 export interface PaintSurfaceGridData {
