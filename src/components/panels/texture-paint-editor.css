@@ -32,6 +32,22 @@
   grid-template-columns: 78px minmax(0, 1fr) 38px;
 }
 
+.paint-eraser-all {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: max-content;
+  color: var(--silver);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.paint-eraser-all input {
+  margin: 0;
+  accent-color: #68a47d;
+}
+
 .paint-surface-block {
   display: grid;
   gap: 6px;
