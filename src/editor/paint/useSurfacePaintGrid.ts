@@ -84,6 +84,12 @@ function configureTexture(texture: THREE.CanvasTexture): void {
   texture.needsUpdate = true;
 }
 
+function createCanvasTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(canvas);
+  configureTexture(texture);
+  return texture;
+}
+
 function createSurface(): PaintSurface {
   const canvas = document.createElement('canvas');
   canvas.width = 1;
@@ -91,9 +97,7 @@ function createSurface(): PaintSurface {
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) throw new Error('2D-Kontext für Oberflächenbemalung nicht verfügbar.');
   context.imageSmoothingEnabled = false;
-  const texture = new THREE.CanvasTexture(canvas);
-  configureTexture(texture);
-  return { canvas, context, texture, layers: [] };
+  return { canvas, context, texture: createCanvasTexture(canvas), layers: [] };
 }
 
 function renderAtlas(
@@ -101,18 +105,28 @@ function renderAtlas(
   atlas: SurfaceUvAtlas,
   metrics: SurfaceRasterMetric[],
   baseColor: string
-): void {
+): boolean {
   const composed = composeSurfaceAtlasCanvas(surface.layers, atlas, metrics, baseColor);
   const sizeChanged = surface.canvas.width !== composed.width || surface.canvas.height !== composed.height;
+
   if (sizeChanged) {
     surface.canvas.width = composed.width;
     surface.canvas.height = composed.height;
     surface.context.imageSmoothingEnabled = false;
   }
+
   surface.context.clearRect(0, 0, surface.canvas.width, surface.canvas.height);
   surface.context.drawImage(composed, 0, 0);
-  if (sizeChanged) surface.texture.dispose();
+
+  if (sizeChanged) {
+    const previousTexture = surface.texture;
+    surface.texture = createCanvasTexture(surface.canvas);
+    previousTexture.dispose();
+    return true;
+  }
+
   surface.texture.needsUpdate = true;
+  return false;
 }
 
 function linePoints(from: [number, number], to: [number, number]): Array<[number, number]> {
@@ -188,7 +202,7 @@ export function useSurfacePaint(
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const [surface] = useState<PaintSurface>(createSurface);
-  const [textureReady, setTextureReady] = useState(false);
+  const [visibleTexture, setVisibleTexture] = useState<THREE.CanvasTexture | null>(null);
   const atlas = useMemo(() => getSurfaceUvAtlas(geometry), [geometry]);
   const metrics = useMemo(
     () => getSurfaceRasterMetrics(geometry, object.scale, atlas),
@@ -214,14 +228,18 @@ export function useSurfacePaint(
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
 
+  const refreshAtlas = (): void => {
+    renderAtlas(surface, atlas, metricsRef.current, object.material.color);
+    setVisibleTexture(surface.texture);
+  };
+
   const ensureCurrentLayers = (): boolean => {
     const currentMetrics = metricsRef.current;
 
     if (surface.layers.length === 0) {
       if (paintTexture) return false;
       surface.layers = resizeSurfaceCanvases([], currentMetrics, object.material.color);
-      renderAtlas(surface, atlas, currentMetrics, object.material.color);
-      setTextureReady(true);
+      refreshAtlas();
       return true;
     }
 
@@ -233,8 +251,7 @@ export function useSurfacePaint(
 
     if (needsResize) {
       surface.layers = resizeSurfaceCanvases(surface.layers, currentMetrics, object.material.color);
-      renderAtlas(surface, atlas, currentMetrics, object.material.color);
-      setTextureReady(true);
+      refreshAtlas();
     }
 
     return true;
@@ -370,7 +387,6 @@ export function useSurfacePaint(
     const requestId = ++loadRequestRef.current;
     const editRevision = editRevisionRef.current;
     requestedDataUrlRef.current = dataUrl;
-    if (surface.layers.length === 0) setTextureReady(false);
     void loadSurfaceCanvases(paintTexture, atlas, metricsRef.current, object.material.color)
       .then((layers) => {
         if (loadRequestRef.current !== requestId) return;
@@ -379,10 +395,9 @@ export function useSurfacePaint(
           return;
         }
         surface.layers = layers;
-        renderAtlas(surface, atlas, metricsRef.current, object.material.color);
+        refreshAtlas();
         requestedDataUrlRef.current = null;
         loadedDataUrlRef.current = dataUrl;
-        setTextureReady(true);
 
         if (paintTexture) {
           const currentGrid = paintTexture.surfaceGrid;
@@ -405,18 +420,14 @@ export function useSurfacePaint(
         }
       })
       .catch(() => {
-        if (loadRequestRef.current === requestId) {
-          requestedDataUrlRef.current = null;
-          setTextureReady(surface.layers.length > 0);
-        }
+        if (loadRequestRef.current === requestId) requestedDataUrlRef.current = null;
       });
   }, [atlas, object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
 
   useEffect(() => {
     if (surface.layers.length === 0) return;
     surface.layers = resizeSurfaceCanvases(surface.layers, metrics, object.material.color);
-    renderAtlas(surface, atlas, metrics, object.material.color);
-    setTextureReady(true);
+    refreshAtlas();
 
     if (!paintTexture) return;
     if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
@@ -463,7 +474,7 @@ export function useSurfacePaint(
     }
 
     context.putImageData(image, 0, 0);
-    renderAtlas(surface, atlas, metricsRef.current, object.material.color);
+    refreshAtlas();
     return true;
   };
 
@@ -491,7 +502,7 @@ export function useSurfacePaint(
 
   return {
     active,
-    texture: textureVisible && textureReady ? surface.texture : null,
+    texture: textureVisible ? visibleTexture : null,
     onPointerDown: (event) => {
       if (!active || event.button !== 0) return;
       blockEvent(event);
