@@ -310,13 +310,18 @@ export async function loadSurfaceCanvases(
   const compatibleGrid = storedGrid?.version === 1
     && storedGrid.atlasSignature === atlas.signature
     && storedGrid.surfaces.length === atlas.islands.length;
-  const sourceDataUrl = compatibleGrid && storedGrid.sourceDataUrl
+  const compatibleSource = compatibleGrid
+    && storedGrid.baseColor?.toUpperCase() === baseColor.toUpperCase()
+    && Boolean(storedGrid.sourceDataUrl)
+    && Boolean(storedGrid.sourceWidth)
+    && Boolean(storedGrid.sourceHeight);
+  const sourceDataUrl = compatibleSource && storedGrid.sourceDataUrl
     ? storedGrid.sourceDataUrl
     : texture.dataUrl;
-  const sourceWidth = compatibleGrid && storedGrid.sourceWidth
+  const sourceWidth = compatibleSource && storedGrid.sourceWidth
     ? storedGrid.sourceWidth
     : texture.width;
-  const sourceHeight = compatibleGrid && storedGrid.sourceHeight
+  const sourceHeight = compatibleSource && storedGrid.sourceHeight
     ? storedGrid.sourceHeight
     : texture.height;
   const image = await loadImage(sourceDataUrl);
@@ -423,6 +428,7 @@ export function createPaintTextureData(
     version: 1,
     atlasSignature: atlas.signature,
     pixelsPerWorldUnit: PAINT_PIXELS_PER_WORLD_UNIT,
+    baseColor: baseColor.toUpperCase(),
     surfaces: metrics.map(({ label, width, height, coverageU, coverageV }) => ({
       label,
       width,
