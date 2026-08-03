@@ -17,6 +17,15 @@ export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
 const MAX_SURFACE_PIXELS = 384;
 const EPSILON = 0.000001;
 const INTEGER_PIXEL_TOLERANCE = 0.0001;
+const BOTTOM_ANCHORED_DIRECTIONS = new Set([
+  'Vorne',
+  'Hinten',
+  'Links',
+  'Rechts',
+  'Mantel',
+  'Rundung',
+  'Schräge'
+]);
 
 export interface SurfaceRasterMetric extends PaintSurfaceGridLayerData {
   worldWidth: number;
@@ -43,14 +52,26 @@ interface SurfaceAccumulator {
   weight: number;
 }
 
+interface PendingMetricRefresh {
+  scale: Vec3;
+  atlas: SurfaceUvAtlas;
+  target: SurfaceRasterMetric[];
+}
+
 const rasterMetricsCache = new WeakMap<THREE.BufferGeometry, SurfaceRasterMetric[]>();
-const pendingMetricRefreshes = new Map<THREE.BufferGeometry, () => void>();
+const pendingMetricRefreshes = new Map<THREE.BufferGeometry, PendingMetricRefresh>();
 
 subscribePrimaryPointer((active) => {
   if (active || pendingMetricRefreshes.size === 0) return;
-  const refreshes = [...pendingMetricRefreshes.values()];
+
+  const refreshes = [...pendingMetricRefreshes.entries()];
   pendingMetricRefreshes.clear();
-  refreshes.forEach((refresh) => refresh());
+
+  refreshes.forEach(([geometry, pending]) => {
+    const refreshed = calculateSurfaceRasterMetrics(geometry, pending.scale, pending.atlas);
+    pending.target.splice(0, pending.target.length, ...refreshed);
+    rasterMetricsCache.set(geometry, pending.target);
+  });
 });
 
 function vertexIndex(geometry: THREE.BufferGeometry, triangleOffset: number): number {
@@ -91,22 +112,30 @@ function scaledVector(vector: THREE.Vector3, scale: THREE.Vector3): THREE.Vector
   );
 }
 
+function surfaceDirection(label: string): string {
+  return label.replace(/\s+\d+$/u, '');
+}
+
 function fallbackExtent(
   label: string,
   worldSize: THREE.Vector3
 ): { width: number; height: number } {
-  const direction = label.replace(/\s+\d+$/u, '');
-  if (direction === 'Vorne' || direction === 'Hinten') {
-    return { width: worldSize.x, height: worldSize.y };
+  switch (surfaceDirection(label)) {
+    case 'Vorne':
+    case 'Hinten':
+      return { width: worldSize.x, height: worldSize.y };
+    case 'Links':
+    case 'Rechts':
+      return { width: worldSize.z, height: worldSize.y };
+    case 'Oben':
+    case 'Unten':
+      return { width: worldSize.x, height: worldSize.z };
+    default: {
+      const sorted = [worldSize.x, worldSize.y, worldSize.z]
+        .sort((left, right) => right - left);
+      return { width: sorted[0] ?? 1, height: sorted[1] ?? sorted[0] ?? 1 };
+    }
   }
-  if (direction === 'Links' || direction === 'Rechts') {
-    return { width: worldSize.z, height: worldSize.y };
-  }
-  if (direction === 'Oben' || direction === 'Unten') {
-    return { width: worldSize.x, height: worldSize.z };
-  }
-  const sorted = [worldSize.x, worldSize.y, worldSize.z].sort((left, right) => right - left);
-  return { width: sorted[0] ?? 1, height: sorted[1] ?? sorted[0] ?? 1 };
 }
 
 function metricDimension(worldLength: number): { pixels: number; coverage: number } {
@@ -125,23 +154,11 @@ function metricDimension(worldLength: number): { pixels: number; coverage: numbe
   };
 }
 
-export function getSurfaceRasterMetrics(
+function calculateSurfaceRasterMetrics(
   geometry: THREE.BufferGeometry,
   scaleValue: Vec3,
   atlas: SurfaceUvAtlas
 ): SurfaceRasterMetric[] {
-  const cachedMetrics = rasterMetricsCache.get(geometry);
-  if (cachedMetrics && isPrimaryPointerActive()) {
-    const scaleSnapshot: Vec3 = [scaleValue[0], scaleValue[1], scaleValue[2]];
-    pendingMetricRefreshes.set(geometry, () => {
-      rasterMetricsCache.delete(geometry);
-      const refreshedMetrics = getSurfaceRasterMetrics(geometry, scaleSnapshot, atlas);
-      cachedMetrics.splice(0, cachedMetrics.length, ...refreshedMetrics);
-      rasterMetricsCache.set(geometry, cachedMetrics);
-    });
-    return cachedMetrics;
-  }
-
   const position = geometry.getAttribute('position');
   const uv = geometry.getAttribute('uv');
   const scale = new THREE.Vector3(
@@ -212,7 +229,7 @@ export function getSurfaceRasterMetrics(
     }
   }
 
-  const metrics = atlas.islands.map((island, index) => {
+  return atlas.islands.map((island, index) => {
     const accumulator = accumulators[index];
     const fallback = fallbackExtent(island.label, worldSize);
     const worldWidth = accumulator && accumulator.weight > EPSILON
@@ -234,20 +251,30 @@ export function getSurfaceRasterMetrics(
       worldHeight
     };
   });
+}
 
+export function getSurfaceRasterMetrics(
+  geometry: THREE.BufferGeometry,
+  scaleValue: Vec3,
+  atlas: SurfaceUvAtlas
+): SurfaceRasterMetric[] {
+  const cachedMetrics = rasterMetricsCache.get(geometry);
+  if (cachedMetrics && isPrimaryPointerActive()) {
+    pendingMetricRefreshes.set(geometry, {
+      scale: [scaleValue[0], scaleValue[1], scaleValue[2]],
+      atlas,
+      target: cachedMetrics
+    });
+    return cachedMetrics;
+  }
+
+  const metrics = calculateSurfaceRasterMetrics(geometry, scaleValue, atlas);
   rasterMetricsCache.set(geometry, metrics);
   return metrics;
 }
 
 function bottomAnchored(label: string): boolean {
-  const direction = label.replace(/\s+\d+$/u, '');
-  return direction === 'Vorne'
-    || direction === 'Hinten'
-    || direction === 'Links'
-    || direction === 'Rechts'
-    || direction === 'Mantel'
-    || direction === 'Rundung'
-    || direction === 'Schräge';
+  return BOTTOM_ANCHORED_DIRECTIONS.has(surfaceDirection(label));
 }
 
 function centeredOffset(containerSize: number, contentSize: number): number {
