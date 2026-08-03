@@ -3,22 +3,32 @@ type PrimaryPointerListener = (active: boolean) => void;
 let primaryPointerActive = false;
 const listeners = new Set<PrimaryPointerListener>();
 
-function publish(active: boolean): void {
+function notifyListeners(): void {
+  listeners.forEach((listener) => listener(primaryPointerActive));
+}
+
+function setPrimaryPointerActive(active: boolean): void {
   if (primaryPointerActive === active) return;
   primaryPointerActive = active;
-  listeners.forEach((listener) => listener(active));
+  notifyListeners();
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('pointerdown', (event) => {
-    if (event.button === 0) publish(true);
-  }, true);
-
-  const release = () => publish(false);
-  window.addEventListener('pointerup', release, true);
-  window.addEventListener('pointercancel', release, true);
-  window.addEventListener('blur', release, true);
+function handlePointerDown(event: PointerEvent): void {
+  if (event.button === 0) setPrimaryPointerActive(true);
 }
+
+function releasePrimaryPointer(): void {
+  setPrimaryPointerActive(false);
+}
+
+function registerWindowListeners(): void {
+  window.addEventListener('pointerdown', handlePointerDown, true);
+  window.addEventListener('pointerup', releasePrimaryPointer, true);
+  window.addEventListener('pointercancel', releasePrimaryPointer, true);
+  window.addEventListener('blur', releasePrimaryPointer, true);
+}
+
+if (typeof window !== 'undefined') registerWindowListeners();
 
 export function isPrimaryPointerActive(): boolean {
   return primaryPointerActive;
