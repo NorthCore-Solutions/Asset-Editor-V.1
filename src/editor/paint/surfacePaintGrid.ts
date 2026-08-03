@@ -228,6 +228,41 @@ function centeredOffset(containerSize: number, contentSize: number): number {
   return Math.max(0, Math.floor(containerSize / 2) - Math.floor(contentSize / 2));
 }
 
+function centeredGrowthSize(currentSize: number, requiredSize: number): number {
+  if (requiredSize <= currentSize) return currentSize;
+  const requiredGrowth = requiredSize - currentSize;
+  return currentSize + (requiredGrowth % 2 === 0 ? requiredGrowth : requiredGrowth + 1);
+}
+
+function surfaceSampleRegion(
+  surface: HTMLCanvasElement,
+  metric: PaintSurfaceGridLayerData
+): SurfaceCanvasRegion {
+  const width = Math.max(
+    EPSILON,
+    Math.min(
+      surface.width,
+      metric.width * THREE.MathUtils.clamp(metric.coverageU, EPSILON, 1)
+    )
+  );
+  const height = Math.max(
+    EPSILON,
+    Math.min(
+      surface.height,
+      metric.height * THREE.MathUtils.clamp(metric.coverageV, EPSILON, 1)
+    )
+  );
+
+  return {
+    x: Math.max(0, (surface.width - width) / 2),
+    y: bottomAnchored(metric.label)
+      ? Math.max(0, surface.height - height)
+      : Math.max(0, (surface.height - height) / 2),
+    width,
+    height
+  };
+}
+
 export function surfaceUvWindow(metric: PaintSurfaceGridLayerData): SurfaceUvWindow {
   const scaleU = THREE.MathUtils.clamp(metric.coverageU, EPSILON, 1);
   const scaleV = THREE.MathUtils.clamp(metric.coverageV, EPSILON, 1);
@@ -309,8 +344,10 @@ export function resizeSurfaceCanvas(
   metric: PaintSurfaceGridLayerData,
   baseColor: string
 ): HTMLCanvasElement {
-  const targetWidth = Math.max(source.width, metric.width);
-  const targetHeight = Math.max(source.height, metric.height);
+  const targetWidth = centeredGrowthSize(source.width, metric.width);
+  const targetHeight = bottomAnchored(metric.label)
+    ? Math.max(source.height, metric.height)
+    : centeredGrowthSize(source.height, metric.height);
   if (source.width === targetWidth && source.height === targetHeight) return cloneSurfaceCanvas(source);
 
   const target = createFilledSurfaceCanvas(targetWidth, targetHeight, baseColor);
@@ -445,19 +482,14 @@ export function composeSurfaceAtlasCanvas(
     const region = atlasPixelRegion(atlas, index, canvas.width, canvas.height);
     const targetWidth = Math.max(1, region.maxX - region.minX + 1);
     const targetHeight = Math.max(1, region.maxY - region.minY + 1);
-    const visible = surfaceCanvasRegion(surface, metric);
-    const window = surfaceUvWindow(metric);
-    const sourceX = visible.x + window.offsetU * visible.width;
-    const sourceY = visible.y + (1 - window.offsetV - window.scaleV) * visible.height;
-    const sourceWidth = Math.max(EPSILON, window.scaleU * visible.width);
-    const sourceHeight = Math.max(EPSILON, window.scaleV * visible.height);
+    const sample = surfaceSampleRegion(surface, metric);
 
     context.drawImage(
       surface,
-      sourceX,
-      sourceY,
-      sourceWidth,
-      sourceHeight,
+      sample.x,
+      sample.y,
+      sample.width,
+      sample.height,
       region.minX,
       region.minY,
       targetWidth,
@@ -521,7 +553,7 @@ export function copySurfaceCanvas(
   target.height = targetMetric.height;
   const context = canvasContext(target);
   const region = sourceMetric
-    ? surfaceCanvasRegion(source, sourceMetric)
+    ? surfaceSampleRegion(source, sourceMetric)
     : { x: 0, y: 0, width: source.width, height: source.height };
   context.drawImage(
     source,
@@ -552,19 +584,27 @@ export function surfacePointFromUv(
   const islandHeight = Math.max(EPSILON, island.vMax - island.vMin);
   const localU = THREE.MathUtils.clamp((uv.x - island.uMin) / islandWidth, 0, 0.999999);
   const localV = THREE.MathUtils.clamp((uv.y - island.vMin) / islandHeight, 0, 0.999999);
-  const window = surfaceUvWindow(metric);
-  const sampleU = window.offsetU + localU * window.scaleU;
-  const sampleV = window.offsetV + localV * window.scaleV;
   const surface = surfaces?.[islandIndex];
-  const visible = surface
-    ? surfaceCanvasRegion(surface, metric)
-    : { x: 0, y: 0, width: metric.width, height: metric.height };
+  const sample = surface
+    ? surfaceSampleRegion(surface, metric)
+    : {
+        x: 0,
+        y: 0,
+        width: metric.width * THREE.MathUtils.clamp(metric.coverageU, EPSILON, 1),
+        height: metric.height * THREE.MathUtils.clamp(metric.coverageV, EPSILON, 1)
+      };
 
   return {
     islandIndex,
     point: [
-      visible.x + Math.max(0, Math.min(visible.width - 1, Math.floor(sampleU * visible.width))),
-      visible.y + Math.max(0, Math.min(visible.height - 1, Math.floor((1 - sampleV) * visible.height)))
+      Math.max(0, Math.min(
+        (surface?.width ?? metric.width) - 1,
+        Math.floor(sample.x + localU * sample.width)
+      )),
+      Math.max(0, Math.min(
+        (surface?.height ?? metric.height) - 1,
+        Math.floor(sample.y + (1 - localV) * sample.height)
+      ))
     ]
   };
 }
