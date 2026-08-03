@@ -276,10 +276,10 @@ export function resizeSurfaceCanvas(
       if (targetX < 0 || targetX >= target.width) continue;
       const sourceOffset = (sourceY * source.width + sourceX) * 4;
       const targetOffset = (targetY * target.width + targetX) * 4;
-      targetPixels.data[targetOffset] = sourcePixels.data[sourceOffset];
-      targetPixels.data[targetOffset + 1] = sourcePixels.data[sourceOffset + 1];
-      targetPixels.data[targetOffset + 2] = sourcePixels.data[sourceOffset + 2];
-      targetPixels.data[targetOffset + 3] = sourcePixels.data[sourceOffset + 3];
+      targetPixels.data[targetOffset] = sourcePixels.data[sourceOffset] ?? 0;
+      targetPixels.data[targetOffset + 1] = sourcePixels.data[sourceOffset + 1] ?? 0;
+      targetPixels.data[targetOffset + 2] = sourcePixels.data[sourceOffset + 2] ?? 0;
+      targetPixels.data[targetOffset + 3] = sourcePixels.data[sourceOffset + 3] ?? 0;
     }
   }
 
@@ -373,9 +373,25 @@ export function composeSurfaceAtlasCanvas(
     const surface = surfaces[index]
       ?? createFilledSurfaceCanvas(metric.width, metric.height, baseColor);
     const region = atlasPixelRegion(atlas, index, canvas.width, canvas.height);
-    const width = Math.max(1, region.maxX - region.minX + 1);
-    const height = Math.max(1, region.maxY - region.minY + 1);
-    context.drawImage(surface, 0, 0, surface.width, surface.height, region.minX, region.minY, width, height);
+    const targetWidth = Math.max(1, region.maxX - region.minX + 1);
+    const targetHeight = Math.max(1, region.maxY - region.minY + 1);
+    const window = surfaceUvWindow(metric);
+    const sourceX = window.offsetU * surface.width;
+    const sourceY = (1 - window.offsetV - window.scaleV) * surface.height;
+    const sourceWidth = Math.max(EPSILON, window.scaleU * surface.width);
+    const sourceHeight = Math.max(EPSILON, window.scaleV * surface.height);
+
+    context.drawImage(
+      surface,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      region.minX,
+      region.minY,
+      targetWidth,
+      targetHeight
+    );
   });
 
   return canvas;
