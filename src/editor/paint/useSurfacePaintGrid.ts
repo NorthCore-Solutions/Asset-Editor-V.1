@@ -186,6 +186,7 @@ export function useSurfacePaint(
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const [surface] = useState<PaintSurface>(createSurface);
+  const [textureReady, setTextureReady] = useState(false);
   const atlas = useMemo(() => getSurfaceUvAtlas(geometry), [geometry]);
   const metrics = useMemo(
     () => getSurfaceRasterMetrics(geometry, object.scale, atlas),
@@ -330,6 +331,7 @@ export function useSurfacePaint(
 
     const requestId = ++loadRequestRef.current;
     requestedDataUrlRef.current = dataUrl;
+    setTextureReady(false);
     void loadSurfaceCanvases(paintTexture, atlas, metricsRef.current, object.material.color)
       .then((layers) => {
         if (loadRequestRef.current !== requestId) return;
@@ -337,6 +339,7 @@ export function useSurfacePaint(
         renderAtlas(surface, atlas, metricsRef.current, object.material.color);
         requestedDataUrlRef.current = null;
         loadedDataUrlRef.current = dataUrl;
+        setTextureReady(true);
 
         if (paintTexture) {
           const currentGrid = paintTexture.surfaceGrid;
@@ -359,7 +362,10 @@ export function useSurfacePaint(
         }
       })
       .catch(() => {
-        if (loadRequestRef.current === requestId) requestedDataUrlRef.current = null;
+        if (loadRequestRef.current === requestId) {
+          requestedDataUrlRef.current = null;
+          setTextureReady(false);
+        }
       });
   }, [atlas, object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
 
@@ -367,6 +373,7 @@ export function useSurfacePaint(
     if (surface.layers.length === 0) return;
     surface.layers = resizeSurfaceCanvases(surface.layers, metrics, object.material.color);
     renderAtlas(surface, atlas, metrics, object.material.color);
+    setTextureReady(true);
 
     if (!paintTexture) return;
     if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
@@ -427,7 +434,7 @@ export function useSurfacePaint(
 
   return {
     active,
-    texture: textureVisible ? surface.texture : null,
+    texture: textureVisible && textureReady ? surface.texture : null,
     onPointerDown: (event) => {
       if (!active || event.button !== 0) return;
       blockEvent(event);
