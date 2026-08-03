@@ -200,6 +200,7 @@ export function useSurfacePaint(
   const requestedDataUrlRef = useRef<string | null | undefined>(undefined);
   const loadRequestRef = useRef(0);
   const persistTimeoutRef = useRef<number | null>(null);
+  const editRevisionRef = useRef(0);
   const activePointerRef = useRef<number | null>(null);
   const activeIslandRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
@@ -211,7 +212,26 @@ export function useSurfacePaint(
   const active = settings.enabled && selected && object.visible && !object.locked;
   const textureVisible = active || Boolean(paintTexture);
 
+  const ensureCurrentLayers = (): boolean => {
+    if (surface.layers.length === 0) return false;
+    const currentMetrics = metricsRef.current;
+    const needsResize = surface.layers.length !== currentMetrics.length
+      || currentMetrics.some((metric, index) => {
+        const layer = surface.layers[index];
+        return !layer || layer.width !== metric.width || layer.height !== metric.height;
+      });
+
+    if (needsResize) {
+      surface.layers = resizeSurfaceCanvases(surface.layers, currentMetrics, object.material.color);
+      renderAtlas(surface, atlas, currentMetrics, object.material.color);
+      setTextureReady(true);
+    }
+
+    return true;
+  };
+
   const persist = (): void => {
+    if (!ensureCurrentLayers()) return;
     const created = createPaintTextureData(
       surface.layers,
       atlas,
@@ -338,11 +358,16 @@ export function useSurfacePaint(
     if (requestedDataUrlRef.current === dataUrl) return;
 
     const requestId = ++loadRequestRef.current;
+    const editRevision = editRevisionRef.current;
     requestedDataUrlRef.current = dataUrl;
     if (surface.layers.length === 0) setTextureReady(false);
     void loadSurfaceCanvases(paintTexture, atlas, metricsRef.current, object.material.color)
       .then((layers) => {
         if (loadRequestRef.current !== requestId) return;
+        if (editRevisionRef.current !== editRevision) {
+          requestedDataUrlRef.current = null;
+          return;
+        }
         surface.layers = layers;
         renderAtlas(surface, atlas, metricsRef.current, object.material.color);
         requestedDataUrlRef.current = null;
@@ -395,24 +420,35 @@ export function useSurfacePaint(
   }, [atlas, metricsKey, object.material.color, surface]);
 
   const paintAt = (islandIndex: number, point: [number, number], previous: [number, number] | null): boolean => {
+    if (!ensureCurrentLayers()) return false;
     const layer = surface.layers[islandIndex];
     const context = layer?.getContext('2d', { willReadFrequently: true });
     if (!layer || !context) return false;
+    const currentPoint: [number, number] = [
+      Math.max(0, Math.min(layer.width - 1, point[0])),
+      Math.max(0, Math.min(layer.height - 1, point[1]))
+    ];
+    const currentPrevious: [number, number] | null = previous
+      ? [
+          Math.max(0, Math.min(layer.width - 1, previous[0])),
+          Math.max(0, Math.min(layer.height - 1, previous[1]))
+        ]
+      : null;
     const image = context.getImageData(0, 0, layer.width, layer.height);
 
     if (settings.tool === 'eyedropper') {
-      const sampled = samplePixel(image, point[0], point[1]);
+      const sampled = samplePixel(image, currentPoint[0], currentPoint[1]);
       if (sampled.a > 0) setSurfacePaintSettings({ color: rgbaToHex(sampled) });
       return false;
     }
 
     if (settings.tool === 'fill') {
-      floodFill(image, point[0], point[1], hexToRgba(settings.color));
+      floodFill(image, currentPoint[0], currentPoint[1], hexToRgba(settings.color));
     } else {
       const color = settings.tool === 'eraser'
         ? hexToRgba('#000000', 0)
         : hexToRgba(settings.color);
-      const points = previous ? linePoints(previous, point) : [point];
+      const points = currentPrevious ? linePoints(currentPrevious, currentPoint) : [currentPoint];
       points.forEach(([x, y]) => paintBrush(image, x, y, settings.brushSize, color));
     }
 
@@ -455,6 +491,7 @@ export function useSurfacePaint(
         window.clearTimeout(persistTimeoutRef.current);
         persistTimeoutRef.current = null;
       }
+      if (!ensureCurrentLayers()) return;
       setSurfacePaintSettings({ islandIndex: hit.islandIndex });
 
       if (settings.tool === 'eyedropper') {
@@ -462,6 +499,7 @@ export function useSurfacePaint(
         return;
       }
 
+      editRevisionRef.current += 1;
       beginTransaction();
       const changed = paintAt(hit.islandIndex, hit.point, null);
       if (settings.tool === 'fill') {
