@@ -10,7 +10,7 @@ import {
   getSurfaceRasterMetrics,
   loadSurfaceCanvases,
   resizeSurfaceCanvases,
-  surfaceDimensionsKey,
+  surfaceMetricsKey,
   surfacePointFromUv,
   type SurfaceRasterMetric
 } from './surfacePaintGrid';
@@ -21,7 +21,6 @@ import {
   rgbaToHex,
   samplePixel
 } from './pixelPaint';
-import { configurePaintTextureGrid } from './paintTextureTilingRuntime';
 import {
   getSurfacePaintSettings,
   setSurfacePaintSettings,
@@ -194,12 +193,12 @@ export function useSurfacePaint(
   );
   const metricsRef = useRef(metrics);
   metricsRef.current = metrics;
-  const dimensionsKey = surfaceDimensionsKey(metrics);
-  configurePaintTextureGrid(surface.texture, atlas, metrics);
+  const metricsKey = surfaceMetricsKey(metrics);
 
-  const loadedDataUrlRef = useRef<string | null>(null);
-  const requestedDataUrlRef = useRef<string | null>(null);
+  const loadedDataUrlRef = useRef<string | null | undefined>(undefined);
+  const requestedDataUrlRef = useRef<string | null | undefined>(undefined);
   const loadRequestRef = useRef(0);
+  const persistTimeoutRef = useRef<number | null>(null);
   const activePointerRef = useRef<number | null>(null);
   const activeIslandRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
@@ -301,6 +300,7 @@ export function useSurfacePaint(
 
   useEffect(() => () => {
     loadRequestRef.current += 1;
+    if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
     if (activePointerRef.current !== null) {
       activePointerRef.current = null;
       activeIslandRef.current = null;
@@ -311,7 +311,8 @@ export function useSurfacePaint(
 
   useEffect(() => {
     const dataUrl = paintTexture?.dataUrl ?? null;
-    if (loadedDataUrlRef.current === dataUrl || requestedDataUrlRef.current === dataUrl) return;
+    if (surface.layers.length > 0 && loadedDataUrlRef.current === dataUrl) return;
+    if (requestedDataUrlRef.current === dataUrl) return;
 
     const requestId = ++loadRequestRef.current;
     requestedDataUrlRef.current = dataUrl;
@@ -342,15 +343,16 @@ export function useSurfacePaint(
 
   useEffect(() => {
     if (surface.layers.length === 0) return;
-    const resized = resizeSurfaceCanvases(surface.layers, metrics, object.material.color);
-    const changedDimensions = resized.some((layer, index) => {
-      const previous = surface.layers[index];
-      return !previous || previous.width !== layer.width || previous.height !== layer.height;
-    });
-    surface.layers = resized;
+    surface.layers = resizeSurfaceCanvases(surface.layers, metrics, object.material.color);
     renderAtlas(surface, atlas, metrics, object.material.color);
-    if (paintTexture && changedDimensions) persist();
-  }, [atlas, dimensionsKey, object.material.color, surface]);
+
+    if (!paintTexture) return;
+    if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
+    persistTimeoutRef.current = window.setTimeout(() => {
+      persistTimeoutRef.current = null;
+      persist();
+    }, 140);
+  }, [atlas, metricsKey, object.material.color, surface]);
 
   const paintAt = (islandIndex: number, point: [number, number], previous: [number, number] | null): boolean => {
     const layer = surface.layers[islandIndex];
