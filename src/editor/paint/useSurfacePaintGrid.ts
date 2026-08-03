@@ -326,12 +326,20 @@ export function useSurfacePaint(
 
   useEffect(() => {
     const dataUrl = paintTexture?.dataUrl ?? null;
+    const externalTextureUpdate = loadedDataUrlRef.current !== undefined
+      && loadedDataUrlRef.current !== dataUrl;
+
+    if (externalTextureUpdate && persistTimeoutRef.current !== null) {
+      window.clearTimeout(persistTimeoutRef.current);
+      persistTimeoutRef.current = null;
+    }
+
     if (surface.layers.length > 0 && loadedDataUrlRef.current === dataUrl) return;
     if (requestedDataUrlRef.current === dataUrl) return;
 
     const requestId = ++loadRequestRef.current;
     requestedDataUrlRef.current = dataUrl;
-    setTextureReady(false);
+    if (surface.layers.length === 0) setTextureReady(false);
     void loadSurfaceCanvases(paintTexture, atlas, metricsRef.current, object.material.color)
       .then((layers) => {
         if (loadRequestRef.current !== requestId) return;
@@ -364,7 +372,7 @@ export function useSurfacePaint(
       .catch(() => {
         if (loadRequestRef.current === requestId) {
           requestedDataUrlRef.current = null;
-          setTextureReady(false);
+          setTextureReady(surface.layers.length > 0);
         }
       });
   }, [atlas, object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
@@ -377,8 +385,11 @@ export function useSurfacePaint(
 
     if (!paintTexture) return;
     if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
+    const sourceDataUrl = paintTexture.dataUrl;
     persistTimeoutRef.current = window.setTimeout(() => {
       persistTimeoutRef.current = null;
+      const currentObject = useEditorStore.getState().objects.find((item) => item.id === object.id);
+      if (currentObject?.material.paintTexture?.dataUrl !== sourceDataUrl) return;
       persist();
     }, 140);
   }, [atlas, metricsKey, object.material.color, surface]);
@@ -440,6 +451,10 @@ export function useSurfacePaint(
       blockEvent(event);
       const hit = hitFromEvent(event);
       if (!hit) return;
+      if (persistTimeoutRef.current !== null) {
+        window.clearTimeout(persistTimeoutRef.current);
+        persistTimeoutRef.current = null;
+      }
       setSurfacePaintSettings({ islandIndex: hit.islandIndex });
 
       if (settings.tool === 'eyedropper') {
