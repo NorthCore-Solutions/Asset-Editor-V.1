@@ -1,30 +1,31 @@
 import * as THREE from 'three';
 import type { SurfaceUvAtlas, SurfaceUvIsland } from '../../geometry/uvAtlas';
-import type { SurfaceTileRepeat } from '../../geometry/surfaceTileGrid';
+import type { SurfaceRasterMetric } from './surfacePaintGrid';
+import { surfaceUvWindow } from './surfacePaintGrid';
 
-interface PaintTextureTilingData {
+interface PaintTextureGridData {
   signature: string;
   islands: SurfaceUvIsland[];
-  repeats: THREE.Vector2[];
+  windows: THREE.Vector4[];
 }
 
 type PaintTexture = THREE.Texture & {
   userData: Record<string, unknown> & {
-    northcorePaintTiling?: PaintTextureTilingData;
+    northcorePaintGrid?: PaintTextureGridData;
   };
 };
 
 type PatchedMaterialPrototype = THREE.MeshStandardMaterial & {
-  __northcorePaintTilingInstalled?: boolean;
+  __northcorePaintGridInstalled?: boolean;
 };
 
 type ShaderParameters = Parameters<THREE.Material['onBeforeCompile']>[0];
 type ShaderRenderer = Parameters<THREE.Material['onBeforeCompile']>[1];
 
-const DATA_KEY = 'northcorePaintTiling';
+const DATA_KEY = 'northcorePaintGrid';
 
 function uniformName(index: number): string {
-  return `ncPaintRepeat${index}`;
+  return `ncPaintWindow${index}`;
 }
 
 function glslFloat(value: number): string {
@@ -32,12 +33,12 @@ function glslFloat(value: number): string {
   return formatted.includes('.') ? formatted : `${formatted}.0`;
 }
 
-function tilingData(material: THREE.MeshStandardMaterial): PaintTextureTilingData | undefined {
+function gridData(material: THREE.MeshStandardMaterial): PaintTextureGridData | undefined {
   const texture = material.map as PaintTexture | null;
-  return texture?.userData[DATA_KEY] as PaintTextureTilingData | undefined;
+  return texture?.userData[DATA_KEY] as PaintTextureGridData | undefined;
 }
 
-function shaderBranches(data: PaintTextureTilingData): string {
+function shaderBranches(data: PaintTextureGridData): string {
   return data.islands.map((island, index) => {
     const prefix = index === 0 ? 'if' : 'else if';
     const width = island.uMax - island.uMin;
@@ -52,7 +53,8 @@ function shaderBranches(data: PaintTextureTilingData): string {
       vec2 ncIslandMin = vec2(${glslFloat(island.uMin)}, ${glslFloat(island.vMin)});
       vec2 ncIslandSize = vec2(${glslFloat(width)}, ${glslFloat(height)});
       vec2 ncLocalUv = clamp((ncPaintUv - ncIslandMin) / ncIslandSize, vec2(0.0), vec2(0.999999));
-      ncLocalUv = fract(ncLocalUv * ${uniformName(index)});
+      vec4 ncWindow = ${uniformName(index)};
+      ncLocalUv = ncWindow.xy + ncLocalUv * ncWindow.zw;
       ncPaintUv = ncIslandMin + ncLocalUv * ncIslandSize;
     }`;
   }).join('\n');
@@ -60,25 +62,23 @@ function shaderBranches(data: PaintTextureTilingData): string {
 
 const prototype = THREE.MeshStandardMaterial.prototype as PatchedMaterialPrototype;
 
-if (!prototype.__northcorePaintTilingInstalled) {
-  const originalOnBeforeCompile = prototype.onBeforeCompile;
+if (!prototype.__northcorePaintGridInstalled) {
   const originalProgramCacheKey = prototype.customProgramCacheKey;
 
-  prototype.onBeforeCompile = function onBeforeCompileWithPaintTiling(
+  prototype.onBeforeCompile = function onBeforeCompileWithPaintGrid(
     this: THREE.MeshStandardMaterial,
     shader: ShaderParameters,
-    renderer: ShaderRenderer
+    _renderer: ShaderRenderer
   ): void {
-    originalOnBeforeCompile.call(this, shader, renderer);
-    const data = tilingData(this);
+    const data = gridData(this);
     if (!data) return;
 
     const declarations = data.islands
-      .map((_, index) => `uniform vec2 ${uniformName(index)};`)
+      .map((_, index) => `uniform vec4 ${uniformName(index)};`)
       .join('\n');
 
-    data.repeats.forEach((repeat, index) => {
-      shader.uniforms[uniformName(index)] = { value: repeat };
+    data.windows.forEach((window, index) => {
+      shader.uniforms[uniformName(index)] = { value: window };
     });
 
     shader.fragmentShader = shader.fragmentShader
@@ -101,33 +101,36 @@ if (!prototype.__northcorePaintTilingInstalled) {
       );
   };
 
-  prototype.customProgramCacheKey = function paintTilingProgramCacheKey(
+  prototype.customProgramCacheKey = function paintGridProgramCacheKey(
     this: THREE.MeshStandardMaterial
   ): string {
     const originalKey = originalProgramCacheKey.call(this);
-    const data = tilingData(this);
-    return data ? `${originalKey}|northcore-paint:${data.signature}` : originalKey;
+    const data = gridData(this);
+    return data ? `${originalKey}|northcore-paint-grid:${data.signature}` : originalKey;
   };
 
-  prototype.__northcorePaintTilingInstalled = true;
+  prototype.__northcorePaintGridInstalled = true;
 }
 
-export function configurePaintTextureTiling(
+export function configurePaintTextureGrid(
   texture: THREE.Texture,
   atlas: SurfaceUvAtlas,
-  repeats: SurfaceTileRepeat[]
+  metrics: SurfaceRasterMetric[]
 ): void {
   const paintTexture = texture as PaintTexture;
-  const existing = paintTexture.userData[DATA_KEY] as PaintTextureTilingData | undefined;
+  const existing = paintTexture.userData[DATA_KEY] as PaintTextureGridData | undefined;
 
   if (
     existing
     && existing.signature === atlas.signature
-    && existing.repeats.length === atlas.islands.length
+    && existing.windows.length === atlas.islands.length
   ) {
-    existing.repeats.forEach((repeat, index) => {
-      const next = repeats[index] ?? { u: 1, v: 1 };
-      repeat.set(next.u, next.v);
+    existing.windows.forEach((window, index) => {
+      const metric = metrics[index];
+      const next = metric
+        ? surfaceUvWindow(metric)
+        : { offsetU: 0, offsetV: 0, scaleU: 1, scaleV: 1 };
+      window.set(next.offsetU, next.offsetV, next.scaleU, next.scaleV);
     });
     return;
   }
@@ -135,9 +138,12 @@ export function configurePaintTextureTiling(
   paintTexture.userData[DATA_KEY] = {
     signature: atlas.signature,
     islands: atlas.islands.map((island) => ({ ...island })),
-    repeats: atlas.islands.map((_, index) => {
-      const repeat = repeats[index] ?? { u: 1, v: 1 };
-      return new THREE.Vector2(repeat.u, repeat.v);
+    windows: atlas.islands.map((_, index) => {
+      const metric = metrics[index];
+      const window = metric
+        ? surfaceUvWindow(metric)
+        : { offsetU: 0, offsetV: 0, scaleU: 1, scaleV: 1 };
+      return new THREE.Vector4(window.offsetU, window.offsetV, window.scaleU, window.scaleV);
     })
   };
 }
