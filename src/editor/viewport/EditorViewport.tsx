@@ -653,7 +653,7 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
     event.nativeEvent.stopImmediatePropagation();
     const startQuaternion = mesh.quaternion.clone();
     const draggedLocal = cornerPoint(bounds, sides);
-    const oppositeSides: CornerSides = [-sides[0], -sides[1], -sides[2]];
+    const oppositeSides = [-sides[0], -sides[1], -sides[2]] as CornerSides;
     const anchorLocal = cornerPoint(bounds, oppositeSides);
     const scaledDiagonal = draggedLocal.clone().sub(anchorLocal).multiply(mesh.scale);
     const startDiagonalWorld = scaledDiagonal.length();
