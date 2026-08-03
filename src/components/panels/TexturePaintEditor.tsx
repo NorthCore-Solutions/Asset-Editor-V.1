@@ -82,6 +82,14 @@ function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number
   ];
 }
 
+function pointerInsideCanvas(canvas: HTMLCanvasElement, clientX: number, clientY: number): boolean {
+  const bounds = canvas.getBoundingClientRect();
+  return clientX >= bounds.left
+    && clientX <= bounds.right
+    && clientY >= bounds.top
+    && clientY <= bounds.bottom;
+}
+
 function linePoints(from: [number, number], to: [number, number]): Array<[number, number]> {
   const points: Array<[number, number]> = [];
   let [x0, y0] = from;
@@ -310,6 +318,7 @@ export function TexturePaintEditor({
 
   const resolvePaintPoint = (event: ReactPointerEvent<HTMLCanvasElement>): PaintPoint | null => {
     const preview = event.currentTarget;
+    if (!pointerInsideCanvas(preview, event.clientX, event.clientY)) return null;
     const [previewX, previewY] = canvasPoint(preview, event.clientX, event.clientY);
 
     if (selectedIsland >= 0) {
