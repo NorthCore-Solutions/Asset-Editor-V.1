@@ -18,6 +18,9 @@ type PatchedMaterialPrototype = THREE.MeshStandardMaterial & {
   __northcorePaintTilingInstalled?: boolean;
 };
 
+type ShaderParameters = Parameters<THREE.Material['onBeforeCompile']>[0];
+type ShaderRenderer = Parameters<THREE.Material['onBeforeCompile']>[1];
+
 const DATA_KEY = 'northcorePaintTiling';
 
 function uniformName(index: number): string {
@@ -63,8 +66,8 @@ if (!prototype.__northcorePaintTilingInstalled) {
 
   prototype.onBeforeCompile = function onBeforeCompileWithPaintTiling(
     this: THREE.MeshStandardMaterial,
-    shader: THREE.WebGLProgramParametersWithUniforms,
-    renderer: THREE.WebGLRenderer
+    shader: ShaderParameters,
+    renderer: ShaderRenderer
   ): void {
     originalOnBeforeCompile.call(this, shader, renderer);
     const data = tilingData(this);
