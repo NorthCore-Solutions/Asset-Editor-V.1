@@ -14,35 +14,57 @@ export interface SurfacePaintSettings {
 
 type SurfacePaintListener = (settings: SurfacePaintSettings) => void;
 
+const MIN_BRUSH_SIZE = 1;
+const MAX_BRUSH_SIZE = 8;
+const MIN_ISLAND_INDEX = -1;
+
 let settings: SurfacePaintSettings = {
   enabled: false,
   tool: 'brush',
   color: '#AEB8BE',
-  brushSize: 1,
+  brushSize: MIN_BRUSH_SIZE,
   eraseAll: false,
-  islandIndex: -1,
+  islandIndex: MIN_ISLAND_INDEX,
   cameraView: null,
   cameraRequestId: 0
 };
 
 const listeners = new Set<SurfacePaintListener>();
 
+function clampInteger(value: number, minimum: number, maximum?: number): number {
+  const rounded = Math.round(value);
+  return maximum === undefined
+    ? Math.max(minimum, rounded)
+    : Math.max(minimum, Math.min(maximum, rounded));
+}
+
+function normalizeSettings(
+  current: SurfacePaintSettings,
+  patch: Partial<SurfacePaintSettings>
+): SurfacePaintSettings {
+  return {
+    ...current,
+    ...patch,
+    brushSize: patch.brushSize === undefined
+      ? current.brushSize
+      : clampInteger(patch.brushSize, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE),
+    islandIndex: patch.islandIndex === undefined
+      ? current.islandIndex
+      : clampInteger(patch.islandIndex, MIN_ISLAND_INDEX)
+  };
+}
+
+function notifyListeners(): void {
+  listeners.forEach((listener) => listener(settings));
+}
+
 export function getSurfacePaintSettings(): SurfacePaintSettings {
   return settings;
 }
 
 export function setSurfacePaintSettings(patch: Partial<SurfacePaintSettings>): void {
-  settings = {
-    ...settings,
-    ...patch,
-    brushSize: patch.brushSize === undefined
-      ? settings.brushSize
-      : Math.max(1, Math.min(8, Math.round(patch.brushSize))),
-    islandIndex: patch.islandIndex === undefined
-      ? settings.islandIndex
-      : Math.max(-1, Math.round(patch.islandIndex))
-  };
-  listeners.forEach((listener) => listener(settings));
+  settings = normalizeSettings(settings, patch);
+  notifyListeners();
 }
 
 export function requestSurfaceCameraView(cameraView: CameraView): void {
