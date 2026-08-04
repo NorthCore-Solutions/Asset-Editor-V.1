@@ -3,9 +3,6 @@ import type { PrimitiveType } from '../types/editor';
 
 export const DEFAULT_EDGE_ROUNDNESS = 0;
 
-const ROUNDING_SEGMENTS = 12;
-const MAX_RADIUS_FACTOR = 0.499;
-
 const ROUNDABLE_BOX_TYPES = new Set<PrimitiveType>([
   'box',
   'cuboid',
@@ -17,34 +14,17 @@ const ROUNDABLE_BOX_TYPES = new Set<PrimitiveType>([
   'chimney'
 ]);
 
-const clampedPercent = (value: number | undefined, fallback: number): number =>
-  THREE.MathUtils.clamp(Number.isFinite(value) ? Number(value) : fallback, 0, 100);
+const clampPercent = (value: number | undefined, fallback: number): number =>
+  Math.min(100, Math.max(0, Number.isFinite(value) ? Number(value) : fallback));
 
-export function supportsGeometryRounding(type: PrimitiveType): boolean {
-  return ROUNDABLE_BOX_TYPES.has(type);
-}
+export const supportsGeometryRounding = (type: PrimitiveType): boolean =>
+  ROUNDABLE_BOX_TYPES.has(type);
 
-export function cornerRoundnessValue(geometry: Record<string, number>): number {
-  return clampedPercent(geometry.cornerRoundness, 0);
-}
+export const cornerRoundnessValue = (geometry: Record<string, number>): number =>
+  clampPercent(geometry.cornerRoundness, 0);
 
-export function edgeRoundnessValue(geometry: Record<string, number>): number {
-  return clampedPercent(geometry.edgeRoundness, DEFAULT_EDGE_ROUNDNESS);
-}
-
-export function roundedBoxSegments(_roundness?: number): number {
-  return ROUNDING_SEGMENTS;
-}
-
-export function roundedBoxRadius(
-  width: number,
-  height: number,
-  depth: number,
-  roundness: number
-): number {
-  const shortestSide = Math.max(0.0001, Math.min(Math.abs(width), Math.abs(height), Math.abs(depth)));
-  return shortestSide * MAX_RADIUS_FACTOR * clampedPercent(roundness, 0) / 100;
-}
+export const edgeRoundnessValue = (geometry: Record<string, number>): number =>
+  clampPercent(geometry.edgeRoundness, DEFAULT_EDGE_ROUNDNESS);
 
 export function createRoundableBoxGeometry(
   width: number,
@@ -52,8 +32,6 @@ export function createRoundableBoxGeometry(
   depth: number,
   _geometry: Record<string, number>
 ): THREE.BufferGeometry {
-  // Die Regler und ihre gespeicherten Werte bleiben erhalten. Ihre geometrische
-  // Wirkung ist vorerst bewusst deaktiviert, bis eine stabile getrennte Ecken-
-  // und Kantenabrundung umgesetzt wird.
+  // Reglerwerte bleiben kompatibel gespeichert, verändern die Geometrie aber bewusst nicht.
   return new THREE.BoxGeometry(width, height, depth);
 }
