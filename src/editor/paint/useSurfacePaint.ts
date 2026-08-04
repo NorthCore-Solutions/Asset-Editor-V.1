@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -73,7 +73,7 @@ function restorePositionCopy(patch: PositionCopyPatch): void {
 
 function patchPositionCopy(
   target: THREE.Object3D,
-  centerWorldRef: React.MutableRefObject<THREE.Vector3>
+  centerWorldRef: MutableRefObject<THREE.Vector3>
 ): PositionCopyPatch {
   const position = target.position;
   const originalCopy = position.copy;
