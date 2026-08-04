@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { getEdgeFreePreview } from '../../editor/view/edgeFreePreviewSession';
 import { exportGlb, inspectExport, type ExportGeometryMode } from '../../export/exportScene';
 import { useEditorStore } from '../../store/editorStore';
 
@@ -10,7 +9,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const setMessage = useEditorStore((state) => state.setMessage);
   const [selectionOnly, setSelectionOnly] = useState(false);
   const [geometryMode, setGeometryMode] = useState<ExportGeometryMode>('separate');
-  const [edgeFreeExport, setEdgeFreeExport] = useState(() => getEdgeFreePreview());
   const [filename, setFilename] = useState(projectName);
   const [busy, setBusy] = useState(false);
   const report = useMemo(
@@ -22,10 +20,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     if (report.objects.length === 0) { setMessage('Export abgebrochen: keine sichtbaren Objekte'); return; }
     setBusy(true);
     try {
-      const blob = await exportGlb(report.objects, filename, geometryMode, edgeFreeExport);
+      const blob = await exportGlb(report.objects, filename, geometryMode);
       const modeLabel = geometryMode === 'union' && report.unionEligible >= 2 ? 'Union' : 'getrennte Meshes';
-      const textureLabel = edgeFreeExport ? ', kantenfrei' : '';
-      setMessage(`GLB exportiert (${modeLabel}${textureLabel}): ${(blob.size / 1024).toFixed(1)} KB`);
+      setMessage(`GLB exportiert (${modeLabel}): ${(blob.size / 1024).toFixed(1)} KB`);
       onClose();
     } catch (error) {
       setMessage(error instanceof Error ? `GLB-Export fehlgeschlagen: ${error.message}` : 'GLB-Export fehlgeschlagen');
@@ -46,18 +43,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <option value="union">Grundformen als Union exportieren</option>
             </select>
           </div>
-          <div className="field-row">
-            <label htmlFor="edge-free-export">Darstellung</label>
-            <label>
-              <input
-                id="edge-free-export"
-                type="checkbox"
-                checked={edgeFreeExport}
-                onChange={(event) => setEdgeFreeExport(event.target.checked)}
-              />{' '}
-              Kantenfrei exportieren
-            </label>
-          </div>
           <div className="export-report"><strong>{report.objects.length}</strong> Objekte · <strong>{report.triangles.toLocaleString('de-DE')}</strong> Dreiecke</div>
           {geometryMode === 'union' && (
             <div className="export-report">
@@ -69,7 +54,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             {geometryMode === 'union'
               ? 'Geschlossene Grundformen werden nur für die exportierte GLB boolesch vereinigt. Die Editor-Szene bleibt unverändert.'
               : 'Transformationen und Materialien werden eingebettet. Raster, Achsen und Editor-Helfer werden nicht exportiert.'}
-            {edgeFreeExport ? ' Bemalungstexturen werden nur im Export geglättet.' : ''}
           </p>
         </div>
         <div className="modal-actions"><button onClick={onClose}>Abbrechen</button><button disabled={busy || report.objects.length === 0} onClick={() => void runExport()}>{busy ? 'Export läuft…' : 'GLB speichern'}</button></div>

@@ -80,15 +80,14 @@ export function inspectExport(
   return { objects: filtered, triangles, warnings, unionEligible, unionSeparate };
 }
 
-function loadTexture(dataUrl: string, edgeFree: boolean): Promise<THREE.Texture> {
+function loadTexture(dataUrl: string): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
       const texture = new THREE.Texture(image);
-      const filter = edgeFree ? THREE.LinearFilter : THREE.NearestFilter;
       texture.colorSpace = THREE.SRGBColorSpace;
-      texture.magFilter = filter;
-      texture.minFilter = filter;
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
       texture.generateMipmaps = false;
       texture.flipY = false;
       texture.needsUpdate = true;
@@ -99,12 +98,9 @@ function loadTexture(dataUrl: string, edgeFree: boolean): Promise<THREE.Texture>
   });
 }
 
-async function loadPaintTextures(
-  objects: SceneObjectData[],
-  edgeFree: boolean
-): Promise<Map<string, THREE.Texture>> {
+async function loadPaintTextures(objects: SceneObjectData[]): Promise<Map<string, THREE.Texture>> {
   const urls = [...new Set(objects.map((object) => object.material.paintTexture?.dataUrl).filter((url): url is string => Boolean(url)))];
-  const entries = await Promise.all(urls.map(async (url) => [url, await loadTexture(url, edgeFree)] as const));
+  const entries = await Promise.all(urls.map(async (url) => [url, await loadTexture(url)] as const));
   return new Map(entries);
 }
 
@@ -286,8 +282,7 @@ function addUnionMeshes(
 export async function exportGlb(
   objects: SceneObjectData[],
   filename: string,
-  geometryMode: ExportGeometryMode = 'separate',
-  edgeFree = false
+  geometryMode: ExportGeometryMode = 'separate'
 ): Promise<Blob> {
   const group = new THREE.Group();
   const resources: ExportResources = {
@@ -297,7 +292,7 @@ export async function exportGlb(
   };
 
   try {
-    const paintTextures = await loadPaintTextures(objects, edgeFree);
+    const paintTextures = await loadPaintTextures(objects);
     paintTextures.forEach((texture) => resources.textures.add(texture));
 
     if (geometryMode === 'union') {

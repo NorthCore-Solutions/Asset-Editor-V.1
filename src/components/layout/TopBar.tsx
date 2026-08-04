@@ -1,8 +1,4 @@
 import { useRef, useState } from 'react';
-import {
-  setEdgeFreePreview,
-  useEdgeFreePreview
-} from '../../editor/view/edgeFreePreviewSession';
 import { buildProjectFile, deserializeProject, downloadTextFile, safeFilename, serializeProject } from '../../persistence/projectFile';
 import { useEditorStore } from '../../store/editorStore';
 import { ExportDialog } from '../dialogs/ExportDialog';
@@ -53,7 +49,6 @@ export function TopBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const fileHandleRef = useRef<FileHandleLike | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const edgeFreePreview = useEdgeFreePreview();
   const project = useEditorStore((state) => state.project);
   const scene = useEditorStore((state) => state.scene);
   const objects = useEditorStore((state) => state.objects);
@@ -171,7 +166,6 @@ export function TopBar() {
             <button onClick={() => { requestCameraView('focus'); closeMenus(); }}>Auswahl fokussieren</button>
             <button onClick={() => { setScene({ gridVisible: !scene.gridVisible }); closeMenus(); }}>Raster {scene.gridVisible ? 'aus' : 'ein'}</button>
             <button onClick={() => { setScene({ axesVisible: !scene.axesVisible }); closeMenus(); }}>Achsen {scene.axesVisible ? 'aus' : 'ein'}</button>
-            <button onClick={() => { setEdgeFreePreview(!edgeFreePreview); closeMenus(); }}>Kantenfrei {edgeFreePreview ? 'aus' : 'ein'}</button>
           </div>
         </details>
         <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
