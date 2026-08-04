@@ -14,8 +14,6 @@ export interface PixelRegion {
   maxY: number;
 }
 
-export const DEFAULT_PAINT_SIZE = 128;
-
 export function hexToRgba(hex: string, alpha = 255): RgbaColor {
   const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.slice(1) : '000000';
   return {
