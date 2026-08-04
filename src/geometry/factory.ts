@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PrimitiveType, SceneObjectData } from '../types/editor';
+import { createRoundableBoxGeometry } from './rounding';
 import { applySurfaceUvAtlas } from './uvAtlas';
 
 const DEFAULT_MATERIAL = { color: '#AEB8BE', roughness: 0.8, metalness: 0, opacity: 1, flatShading: true } as const;
@@ -221,7 +222,7 @@ function createRawGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'>): 
     case 'door':
     case 'window':
     case 'chimney':
-      return new THREE.BoxGeometry(g.width ?? 1, g.height ?? 1, g.depth ?? 1);
+      return createRoundableBoxGeometry(g.width ?? 1, g.height ?? 1, g.depth ?? 1, g);
     default:
       return new THREE.BoxGeometry(1, 1, 1);
   }
