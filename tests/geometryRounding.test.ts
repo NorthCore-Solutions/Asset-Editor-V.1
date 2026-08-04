@@ -13,6 +13,26 @@ function triangleCount(geometry: ReturnType<typeof createGeometry>): number {
   return (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
 }
 
+function maximumPositionDifference(
+  first: ReturnType<typeof createGeometry>,
+  second: ReturnType<typeof createGeometry>
+): number {
+  const firstPosition = first.getAttribute('position');
+  const secondPosition = second.getAttribute('position');
+  expect(firstPosition.count).toBe(secondPosition.count);
+
+  let maximum = 0;
+  for (let index = 0; index < firstPosition.count; index += 1) {
+    maximum = Math.max(
+      maximum,
+      Math.abs(firstPosition.getX(index) - secondPosition.getX(index)),
+      Math.abs(firstPosition.getY(index) - secondPosition.getY(index)),
+      Math.abs(firstPosition.getZ(index) - secondPosition.getZ(index))
+    );
+  }
+  return maximum;
+}
+
 describe('Geometrie-Abrundung', () => {
   it('aktiviert die Regler nur für quaderbasierte Formen', () => {
     expect(supportsGeometryRounding('box')).toBe(true);
@@ -27,25 +47,25 @@ describe('Geometrie-Abrundung', () => {
     expect(supportsGeometryRounding('stairs')).toBe(false);
   });
 
-  it('lässt die ursprüngliche Box bei null Prozent unverändert', () => {
+  it('lässt die ursprüngliche Box bei beiden Reglern auf null unverändert', () => {
     const object = createSceneObject('box');
     object.geometry = {
       ...object.geometry,
       cornerRoundness: 0,
-      edgeRoundness: 100
+      edgeRoundness: 0
     };
     const geometry = createGeometry(object);
 
     try {
       expect(triangleCount(geometry)).toBe(12);
       expect(cornerRoundnessValue(object.geometry)).toBe(0);
-      expect(edgeRoundnessValue(object.geometry)).toBe(100);
+      expect(edgeRoundnessValue(object.geometry)).toBe(0);
     } finally {
       geometry.dispose();
     }
   });
 
-  it('behält beim Abrunden die Außenmaße und sechs Malflächen', () => {
+  it('behält beim kombinierten Abrunden die Außenmaße und sechs Malflächen', () => {
     const object = createSceneObject('cuboid');
     object.geometry = {
       ...object.geometry,
@@ -71,35 +91,52 @@ describe('Geometrie-Abrundung', () => {
     }
   });
 
-  it('erhöht mit Eckkanten-Abrundung nur die Kurvenauflösung', () => {
+  it('verändert Eckkanten als echten Radius bei gleicher Auflösung', () => {
     const object = createSceneObject('box');
-    const coarse = createGeometry({
+    const lowEdgeRadius = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 50, edgeRoundness: 0 }
+      geometry: { ...object.geometry, cornerRoundness: 35, edgeRoundness: 5 }
     });
-    const smooth = createGeometry({
+    const highEdgeRadius = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 50, edgeRoundness: 100 }
+      geometry: { ...object.geometry, cornerRoundness: 35, edgeRoundness: 90 }
     });
 
     try {
-      coarse.computeBoundingBox();
-      smooth.computeBoundingBox();
-      expect(triangleCount(smooth)).toBeGreaterThan(triangleCount(coarse));
-      expect(coarse.boundingBox?.min.x).toBeCloseTo(smooth.boundingBox?.min.x ?? 0, 5);
-      expect(coarse.boundingBox?.max.x).toBeCloseTo(smooth.boundingBox?.max.x ?? 0, 5);
-      expect(coarse.boundingBox?.min.y).toBeCloseTo(smooth.boundingBox?.min.y ?? 0, 5);
-      expect(coarse.boundingBox?.max.y).toBeCloseTo(smooth.boundingBox?.max.y ?? 0, 5);
-      expect(coarse.boundingBox?.min.z).toBeCloseTo(smooth.boundingBox?.min.z ?? 0, 5);
-      expect(coarse.boundingBox?.max.z).toBeCloseTo(smooth.boundingBox?.max.z ?? 0, 5);
+      expect(triangleCount(lowEdgeRadius)).toBe(triangleCount(highEdgeRadius));
+      expect(maximumPositionDifference(lowEdgeRadius, highEdgeRadius)).toBeGreaterThan(0.05);
+      expect(lowEdgeRadius.boundingBox?.min.x).toBeCloseTo(highEdgeRadius.boundingBox?.min.x ?? 0, 5);
+      expect(lowEdgeRadius.boundingBox?.max.x).toBeCloseTo(highEdgeRadius.boundingBox?.max.x ?? 0, 5);
     } finally {
-      coarse.dispose();
-      smooth.dispose();
+      lowEdgeRadius.dispose();
+      highEdgeRadius.dispose();
     }
   });
 
-  it('begrenzt Radius und Segmentzahl sicher', () => {
-    expect(roundedBoxSegments(-100)).toBe(1);
+  it('verändert Ecken unabhängig vom Kantenradius', () => {
+    const object = createSceneObject('box');
+    const lowCornerRadius = createGeometry({
+      type: object.type,
+      geometry: { ...object.geometry, cornerRoundness: 5, edgeRoundness: 40 }
+    });
+    const highCornerRadius = createGeometry({
+      type: object.type,
+      geometry: { ...object.geometry, cornerRoundness: 90, edgeRoundness: 40 }
+    });
+
+    try {
+      expect(triangleCount(lowCornerRadius)).toBe(triangleCount(highCornerRadius));
+      expect(maximumPositionDifference(lowCornerRadius, highCornerRadius)).toBeGreaterThan(0.05);
+      expect(lowCornerRadius.boundingBox?.min.y).toBeCloseTo(highCornerRadius.boundingBox?.min.y ?? 0, 5);
+      expect(lowCornerRadius.boundingBox?.max.y).toBeCloseTo(highCornerRadius.boundingBox?.max.y ?? 0, 5);
+    } finally {
+      lowCornerRadius.dispose();
+      highCornerRadius.dispose();
+    }
+  });
+
+  it('begrenzt Radius sicher und hält die Auflösung konstant', () => {
+    expect(roundedBoxSegments(-100)).toBe(8);
     expect(roundedBoxSegments(1000)).toBe(8);
     expect(roundedBoxRadius(2, 1, 3, -10)).toBe(0);
     expect(roundedBoxRadius(2, 1, 3, 1000)).toBeCloseTo(0.499, 6);
