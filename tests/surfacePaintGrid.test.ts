@@ -3,6 +3,8 @@ import { createGeometry } from '../src/geometry/factory';
 import { getSurfaceUvAtlas } from '../src/geometry/uvAtlas';
 import {
   getSurfaceRasterMetrics,
+  PAINT_BASE_ALPHA,
+  recolorSurfaceBasePixels,
   surfaceUvWindow
 } from '../src/editor/paint/surfacePaintGrid';
 
@@ -55,5 +57,39 @@ describe('unabhängige Bemalungsraster', () => {
     expect(window.scaleU).toBeCloseTo(67.2 / 68, 6);
     expect(window.offsetU).toBeCloseTo((1 - 67.2 / 68) / 2, 6);
     expect(window.offsetV).toBe(0);
+  });
+
+  it('ändert in Version 2 nur markierte Grundfarbenpixel', () => {
+    const image: ImageData = {
+      data: new Uint8ClampedArray([
+        0x11, 0x22, 0x33, PAINT_BASE_ALPHA,
+        0x11, 0x22, 0x33, 255
+      ]),
+      width: 2,
+      height: 1,
+      colorSpace: 'srgb'
+    };
+
+    recolorSurfaceBasePixels(image, '#112233', '#445566', 2);
+
+    expect([...image.data.slice(0, 4)]).toEqual([0x44, 0x55, 0x66, PAINT_BASE_ALPHA]);
+    expect([...image.data.slice(4, 8)]).toEqual([0x11, 0x22, 0x33, 255]);
+  });
+
+  it('migriert alte Grundfarbenpixel auf den eindeutigen Marker', () => {
+    const image: ImageData = {
+      data: new Uint8ClampedArray([
+        0x11, 0x22, 0x33, 255,
+        0xAA, 0xBB, 0xCC, 255
+      ]),
+      width: 2,
+      height: 1,
+      colorSpace: 'srgb'
+    };
+
+    recolorSurfaceBasePixels(image, '#112233', '#445566', 1);
+
+    expect([...image.data.slice(0, 4)]).toEqual([0x44, 0x55, 0x66, PAINT_BASE_ALPHA]);
+    expect([...image.data.slice(4, 8)]).toEqual([0xAA, 0xBB, 0xCC, 255]);
   });
 });

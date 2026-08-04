@@ -17,7 +17,7 @@ export interface PaintSurfaceGridLayerData {
 }
 
 export interface PaintSurfaceGridData {
-  version: 1;
+  version: 1 | 2;
   atlasSignature: string;
   pixelsPerWorldUnit: number;
   baseColor?: string;

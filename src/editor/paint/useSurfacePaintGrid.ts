@@ -10,6 +10,7 @@ import {
   createPaintTextureData,
   getSurfaceRasterMetrics,
   loadSurfaceCanvases,
+  PAINT_BASE_ALPHA,
   resizeSurfaceCanvases,
   surfaceMetricsKey,
   surfacePointFromUv,
@@ -227,6 +228,7 @@ export function useSurfacePaint(
   const metricsKey = surfaceMetricsKey(metrics);
 
   const loadedDataUrlRef = useRef<string | null | undefined>(undefined);
+  const loadedBaseColorRef = useRef<string | undefined>(undefined);
   const requestedDataUrlRef = useRef<string | null | undefined>(undefined);
   const loadRequestRef = useRef(0);
   const persistTimeoutRef = useRef<number | null>(null);
@@ -297,6 +299,7 @@ export function useSurfacePaint(
         }
       : created;
     loadedDataUrlRef.current = data.dataUrl;
+    loadedBaseColorRef.current = object.material.color.toUpperCase();
     requestedDataUrlRef.current = undefined;
     updateMaterial(object.id, { paintTexture: data }, false);
   };
@@ -409,6 +412,7 @@ export function useSurfacePaint(
 
   useEffect(() => {
     const dataUrl = paintTexture?.dataUrl ?? null;
+    const baseColor = object.material.color.toUpperCase();
     const externalTextureUpdate = loadedDataUrlRef.current !== undefined
       && loadedDataUrlRef.current !== dataUrl;
 
@@ -421,7 +425,11 @@ export function useSurfacePaint(
       resizeTimeoutRef.current = null;
     }
 
-    if (surface.layers.length > 0 && loadedDataUrlRef.current === dataUrl) return;
+    if (
+      surface.layers.length > 0
+      && loadedDataUrlRef.current === dataUrl
+      && loadedBaseColorRef.current === baseColor
+    ) return;
     if (requestedDataUrlRef.current === dataUrl) return;
 
     const requestId = ++loadRequestRef.current;
@@ -441,10 +449,12 @@ export function useSurfacePaint(
         refreshAtlas();
         requestedDataUrlRef.current = undefined;
         loadedDataUrlRef.current = dataUrl;
+        loadedBaseColorRef.current = baseColor;
 
         if (paintTexture) {
           const currentGrid = paintTexture.surfaceGrid;
           const needsMigration = !currentGrid
+            || currentGrid.version !== 2
             || currentGrid.atlasSignature !== atlas.signature
             || currentGrid.baseColor?.toUpperCase() !== object.material.color.toUpperCase()
             || !currentGrid.sourceDataUrl
@@ -544,7 +554,7 @@ export function useSurfacePaint(
       const color = settings.tool === 'eraser'
         ? settings.eraseAll
           ? hexToRgba('#000000', 0)
-          : hexToRgba(object.material.color)
+          : hexToRgba(object.material.color, PAINT_BASE_ALPHA)
         : hexToRgba(settings.color);
       const points = currentPrevious ? linePoints(currentPrevious, currentPoint) : [currentPoint];
       points.forEach(([x, y]) => paintBrush(image, x, y, settings.brushSize, color));

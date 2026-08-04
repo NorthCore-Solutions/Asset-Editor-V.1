@@ -12,6 +12,7 @@ import {
   createPaintTextureData,
   createVisibleSurfaceCanvas,
   loadSurfaceCanvases,
+  PAINT_BASE_ALPHA,
   resizeSurfaceCanvases,
   surfaceCanvasRegion,
   surfaceDimensionsKey,
@@ -306,6 +307,7 @@ export function TexturePaintEditor({
         const storedGrid = texture?.surfaceGrid;
         const needsMigration = Boolean(texture) && (
           !storedGrid
+          || storedGrid.version !== 2
           || storedGrid.atlasSignature !== atlas.signature
           || storedGrid.baseColor?.toUpperCase() !== baseColor.toUpperCase()
           || !storedGrid.sourceDataUrl
@@ -402,7 +404,7 @@ export function TexturePaintEditor({
       const color = tool === 'eraser'
         ? eraseAll
           ? hexToRgba('#000000', 0)
-          : hexToRgba(baseColor)
+          : hexToRgba(baseColor, PAINT_BASE_ALPHA)
         : hexToRgba(paintColor);
       linePoints(previous ?? point, point).forEach(([x, y]) => paintBrush(image, x, y, brushSize, color));
     }
