@@ -209,6 +209,7 @@ export function useSurfacePaint(
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const updateMaterial = useEditorStore((state) => state.updateMaterial);
+  const setMessage = useEditorStore((state) => state.setMessage);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const [surface] = useState<PaintSurface>(createSurface);
@@ -227,6 +228,7 @@ export function useSurfacePaint(
   const loadRequestRef = useRef(0);
   const persistTimeoutRef = useRef<number | null>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
+  const disposeTimeoutRef = useRef<number | null>(null);
   const editRevisionRef = useRef(0);
   const activePointerRef = useRef<number | null>(null);
   const activeIslandRef = useRef<number | null>(null);
@@ -292,7 +294,7 @@ export function useSurfacePaint(
         }
       : created;
     loadedDataUrlRef.current = data.dataUrl;
-    requestedDataUrlRef.current = null;
+    requestedDataUrlRef.current = undefined;
     updateMaterial(object.id, { paintTexture: data }, false);
   };
 
@@ -376,17 +378,30 @@ export function useSurfacePaint(
     camera.updateMatrixWorld(true);
   }, [active, camera, controls]);
 
-  useEffect(() => () => {
-    loadRequestRef.current += 1;
-    if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
-    if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
-    lastClientPointRef.current = null;
-    if (activePointerRef.current !== null) {
-      activePointerRef.current = null;
-      activeIslandRef.current = null;
-      endTransaction();
+  useEffect(() => {
+    if (disposeTimeoutRef.current !== null) {
+      window.clearTimeout(disposeTimeoutRef.current);
+      disposeTimeoutRef.current = null;
     }
-    surface.texture.dispose();
+
+    return () => {
+      loadRequestRef.current += 1;
+      requestedDataUrlRef.current = undefined;
+      if (persistTimeoutRef.current !== null) window.clearTimeout(persistTimeoutRef.current);
+      if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
+      lastClientPointRef.current = null;
+      if (activePointerRef.current !== null) {
+        activePointerRef.current = null;
+        activeIslandRef.current = null;
+        endTransaction();
+      }
+
+      const textureToDispose = surface.texture;
+      disposeTimeoutRef.current = window.setTimeout(() => {
+        textureToDispose.dispose();
+        disposeTimeoutRef.current = null;
+      }, 0);
+    };
   }, [endTransaction, surface]);
 
   useEffect(() => {
@@ -408,17 +423,20 @@ export function useSurfacePaint(
 
     const requestId = ++loadRequestRef.current;
     const editRevision = editRevisionRef.current;
+    let cancelled = false;
     requestedDataUrlRef.current = dataUrl;
+
     void loadSurfaceCanvases(paintTexture, atlas, metricsRef.current, object.material.color)
       .then((layers) => {
-        if (loadRequestRef.current !== requestId) return;
+        if (cancelled || loadRequestRef.current !== requestId) return;
         if (editRevisionRef.current !== editRevision) {
-          requestedDataUrlRef.current = null;
+          if (requestedDataUrlRef.current === dataUrl) requestedDataUrlRef.current = undefined;
           return;
         }
+
         surface.layers = layers;
         refreshAtlas();
-        requestedDataUrlRef.current = null;
+        requestedDataUrlRef.current = undefined;
         loadedDataUrlRef.current = dataUrl;
 
         if (paintTexture) {
@@ -443,10 +461,28 @@ export function useSurfacePaint(
           if (needsMigration) persist();
         }
       })
-      .catch(() => {
-        if (loadRequestRef.current === requestId) requestedDataUrlRef.current = null;
+      .catch((error: unknown) => {
+        if (cancelled || loadRequestRef.current !== requestId) return;
+        if (requestedDataUrlRef.current === dataUrl) requestedDataUrlRef.current = undefined;
+        setMessage(error instanceof Error
+          ? `Bemalung konnte nicht geladen werden: ${error.message}`
+          : 'Bemalung konnte nicht geladen werden.');
       });
-  }, [atlas, object.material.color, paintTexture?.dataUrl, paintTexture?.height, paintTexture?.width, surface]);
+
+    return () => {
+      cancelled = true;
+      if (loadRequestRef.current === requestId) loadRequestRef.current += 1;
+      if (requestedDataUrlRef.current === dataUrl) requestedDataUrlRef.current = undefined;
+    };
+  }, [
+    atlas,
+    object.material.color,
+    paintTexture?.dataUrl,
+    paintTexture?.height,
+    paintTexture?.width,
+    setMessage,
+    surface
+  ]);
 
   useEffect(() => {
     if (surface.layers.length === 0) return;
