@@ -82,3 +82,38 @@ export function chooseAtlasCellPixelSize(
 
   return bestCandidate;
 }
+
+export function normalizedCoordinateToPixel(
+  coordinate: number,
+  pixelCount: number
+): number {
+  const safePixelCount = Math.max(1, Math.round(pixelCount));
+  const normalized = Math.max(0, Math.min(1, coordinate));
+  return Math.max(0, Math.min(
+    safePixelCount - 1,
+    Math.floor(normalized * safePixelCount)
+  ));
+}
+
+export function atlasPixelToSourcePixel(
+  atlasPixel: number,
+  atlasRegionStart: number,
+  atlasRegionPixels: number,
+  sourceStart: number,
+  sourcePixels: number,
+  sourceLimit: number
+): number {
+  const safeAtlasPixels = Math.max(1, Math.round(atlasRegionPixels));
+  const safeSourceLimit = Math.max(1, Math.round(sourceLimit));
+  const localAtlasPixel = Math.max(0, Math.min(
+    safeAtlasPixels - 1,
+    Math.round(atlasPixel) - Math.round(atlasRegionStart)
+  ));
+  const sourceCoordinate = sourceStart
+    + ((localAtlasPixel + 0.5) / safeAtlasPixels) * Math.max(0.000001, sourcePixels);
+
+  return Math.max(0, Math.min(
+    safeSourceLimit - 1,
+    Math.floor(sourceCoordinate)
+  ));
+}
