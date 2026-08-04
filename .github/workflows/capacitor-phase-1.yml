@@ -1,15 +1,12 @@
 name: Capacitor Phase 1
 
 on:
-  push:
-    branches:
-      - app/capacitor-phase-1
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: capacitor-phase-1-${{ github.ref }}
@@ -21,8 +18,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'push' && github.ref_name || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,43 +30,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-
-      - name: Install Capacitor and create Android project
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          npm install @capacitor/core @capacitor/android
-          npm install --save-dev @capacitor/cli
-          node -e "const fs=require('fs');const p=require('./package.json');p.scripts={...p.scripts,'app:sync':'npm run build && cap sync android','app:open':'cap open android','app:android':'npm run app:sync && cap open android','app:apk':'npm run app:sync && cd android && ./gradlew assembleDebug'};fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
-          cat > capacitor.config.ts <<'EOF'
-          import type { CapacitorConfig } from '@capacitor/cli';
-
-          const config: CapacitorConfig = {
-            appId: 'de.northcore.asseteditor',
-            appName: 'NorthCore Asset Editor',
-            webDir: 'dist',
-            bundledWebRuntime: false,
-            android: {
-              allowMixedContent: false
-            }
-          };
-
-          export default config;
-          EOF
-          npm run build
-          npx cap add android
-          npx cap sync android
-          cat >> .gitignore <<'EOF'
-          android/.gradle/
-          android/local.properties
-          android/app/build/
-          android/build/
-          EOF
-          git config user.name "NorthCore CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add package.json package-lock.json capacitor.config.ts android .gitignore
-          git commit -m "Capacitor-Android-Grundgerüst hinzufügen"
-          git push origin HEAD:app/capacitor-phase-1
 
       - name: Install dependencies
         run: npm ci
