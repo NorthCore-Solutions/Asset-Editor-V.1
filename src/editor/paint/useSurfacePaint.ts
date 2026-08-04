@@ -51,11 +51,16 @@ function setSceneEnvironment(scene: THREE.Scene, environment: THREE.Texture | nu
   scene.environment = environment;
 }
 
+function isMaterial(value: unknown): value is THREE.Material {
+  return value instanceof THREE.Material;
+}
+
 function materialList(value: unknown): THREE.Material[] {
   if (Array.isArray(value)) {
-    return value.filter((entry): entry is THREE.Material => entry instanceof THREE.Material);
+    const entries: unknown[] = value;
+    return entries.filter(isMaterial);
   }
-  return value instanceof THREE.Material ? [value] : [];
+  return isMaterial(value) ? [value] : [];
 }
 
 function normalizedHex(color: string): string | null {
