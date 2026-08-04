@@ -91,47 +91,49 @@ describe('Geometrie-Abrundung', () => {
     }
   });
 
-  it('verändert Eckkanten als echten Radius bei gleicher Auflösung', () => {
+  it('formt Eckkanten bei gleichem Radius von einer Fase zu einem C-Bogen', () => {
     const object = createSceneObject('box');
-    const lowEdgeRadius = createGeometry({
+    const bevel = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 35, edgeRoundness: 5 }
+      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 0 }
     });
-    const highEdgeRadius = createGeometry({
+    const cCurve = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 35, edgeRoundness: 90 }
+      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 100 }
     });
 
     try {
-      expect(triangleCount(lowEdgeRadius)).toBe(triangleCount(highEdgeRadius));
-      expect(maximumPositionDifference(lowEdgeRadius, highEdgeRadius)).toBeGreaterThan(0.05);
-      expect(lowEdgeRadius.boundingBox?.min.x).toBeCloseTo(highEdgeRadius.boundingBox?.min.x ?? 0, 5);
-      expect(lowEdgeRadius.boundingBox?.max.x).toBeCloseTo(highEdgeRadius.boundingBox?.max.x ?? 0, 5);
+      expect(triangleCount(bevel)).toBe(triangleCount(cCurve));
+      expect(maximumPositionDifference(bevel, cCurve)).toBeGreaterThan(0.03);
+      expect(bevel.boundingBox?.min.x).toBeCloseTo(cCurve.boundingBox?.min.x ?? 0, 5);
+      expect(bevel.boundingBox?.max.x).toBeCloseTo(cCurve.boundingBox?.max.x ?? 0, 5);
+      expect(bevel.boundingBox?.min.y).toBeCloseTo(cCurve.boundingBox?.min.y ?? 0, 5);
+      expect(bevel.boundingBox?.max.y).toBeCloseTo(cCurve.boundingBox?.max.y ?? 0, 5);
     } finally {
-      lowEdgeRadius.dispose();
-      highEdgeRadius.dispose();
+      bevel.dispose();
+      cCurve.dispose();
     }
   });
 
-  it('verändert Ecken unabhängig vom Kantenradius', () => {
+  it('verändert die acht Eckbereiche unabhängig vom C-Profil der Kanten', () => {
     const object = createSceneObject('box');
-    const lowCornerRadius = createGeometry({
+    const angularCorners = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 5, edgeRoundness: 40 }
+      geometry: { ...object.geometry, cornerRoundness: 0, edgeRoundness: 100 }
     });
-    const highCornerRadius = createGeometry({
+    const roundedCorners = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 90, edgeRoundness: 40 }
+      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 100 }
     });
 
     try {
-      expect(triangleCount(lowCornerRadius)).toBe(triangleCount(highCornerRadius));
-      expect(maximumPositionDifference(lowCornerRadius, highCornerRadius)).toBeGreaterThan(0.05);
-      expect(lowCornerRadius.boundingBox?.min.y).toBeCloseTo(highCornerRadius.boundingBox?.min.y ?? 0, 5);
-      expect(lowCornerRadius.boundingBox?.max.y).toBeCloseTo(highCornerRadius.boundingBox?.max.y ?? 0, 5);
+      expect(triangleCount(angularCorners)).toBe(triangleCount(roundedCorners));
+      expect(maximumPositionDifference(angularCorners, roundedCorners)).toBeGreaterThan(0.03);
+      expect(angularCorners.boundingBox?.min.z).toBeCloseTo(roundedCorners.boundingBox?.min.z ?? 0, 5);
+      expect(angularCorners.boundingBox?.max.z).toBeCloseTo(roundedCorners.boundingBox?.max.z ?? 0, 5);
     } finally {
-      lowCornerRadius.dispose();
-      highCornerRadius.dispose();
+      angularCorners.dispose();
+      roundedCorners.dispose();
     }
   });
 
