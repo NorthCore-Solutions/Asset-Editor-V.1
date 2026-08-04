@@ -11,6 +11,7 @@ const REFERENCE_LABEL_WIDTH = 256;
 const REFERENCE_LABEL_HEIGHT = 96;
 const LABEL_PADDING = 8;
 const LABEL_BORDER_INSET = 2;
+const LABEL_MIN_ASPECT_RATIO = 2.35;
 
 export interface ObjectDimensionLayout {
   min: THREE.Vector3;
@@ -164,8 +165,11 @@ function createDimensionLabel(
   const glyphHeight = textRaster.bounds.maxY - textRaster.bounds.minY + 1;
   const contentInset = LABEL_BORDER_INSET + LABEL_PADDING;
   const canvas = document.createElement('canvas');
-  canvas.width = glyphWidth + contentInset * 2;
   canvas.height = glyphHeight + contentInset * 2;
+  canvas.width = Math.max(
+    glyphWidth + contentInset * 2,
+    Math.ceil(canvas.height * LABEL_MIN_ASPECT_RATIO)
+  );
 
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
@@ -178,14 +182,16 @@ function createDimensionLabel(
   context.strokeStyle = DIMENSION_COLOR;
   context.stroke();
 
+  const targetX = Math.round((canvas.width - glyphWidth) * 0.5);
+  const targetY = Math.round((canvas.height - glyphHeight) * 0.5);
   context.drawImage(
     textRaster.canvas,
     textRaster.bounds.minX,
     textRaster.bounds.minY,
     glyphWidth,
     glyphHeight,
-    contentInset,
-    contentInset,
+    targetX,
+    targetY,
     glyphWidth,
     glyphHeight
   );
@@ -259,7 +265,7 @@ function createDashedDimensionLine(
 }
 
 function dimensionEntries(layout: ObjectDimensionLayout): DimensionEntry[] {
-  const { min, max, offset, labelLift } = layout;
+  const { min, max, offset } = layout;
   const centerX = (min.x + max.x) * 0.5;
   const centerY = (min.y + max.y) * 0.5;
   const centerZ = (min.z + max.z) * 0.5;
@@ -269,19 +275,19 @@ function dimensionEntries(layout: ObjectDimensionLayout): DimensionEntry[] {
       value: layout.length,
       start: new THREE.Vector3(min.x, max.y + offset, max.z + offset),
       end: new THREE.Vector3(max.x, max.y + offset, max.z + offset),
-      label: new THREE.Vector3(centerX, max.y + offset + labelLift, max.z + offset)
+      label: new THREE.Vector3(centerX, max.y + offset, max.z + offset)
     },
     {
       value: layout.height,
       start: new THREE.Vector3(max.x + offset, min.y, max.z + offset),
       end: new THREE.Vector3(max.x + offset, max.y, max.z + offset),
-      label: new THREE.Vector3(max.x + offset + labelLift, centerY, max.z + offset)
+      label: new THREE.Vector3(max.x + offset, centerY, max.z + offset)
     },
     {
       value: layout.depth,
       start: new THREE.Vector3(max.x + offset, max.y + offset, min.z),
       end: new THREE.Vector3(max.x + offset, max.y + offset, max.z),
-      label: new THREE.Vector3(max.x + offset, max.y + offset + labelLift, centerZ)
+      label: new THREE.Vector3(max.x + offset, max.y + offset, centerZ)
     }
   ];
 }
