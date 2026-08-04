@@ -11,3 +11,11 @@ android/local.properties
 android/**/build/
 *.apk
 *.aab
+
+# Android / Capacitor
+android/.gradle/
+android/.idea/
+android/local.properties
+android/**/build/
+*.apk
+*.aab
