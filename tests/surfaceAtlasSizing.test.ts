@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  atlasPixelToSourcePixel,
   atlasRegionPixelSize,
   chooseAtlasCellPixelSize,
-  chooseAtlasInnerPixelSize
+  chooseAtlasInnerPixelSize,
+  normalizedCoordinateToPixel
 } from '../src/editor/paint/surfaceAtlasSizing';
 
 const MAX_SURFACE_PIXELS = 384;
@@ -31,5 +33,31 @@ describe('Paint-Atlasgrößen', () => {
 
   it('begrenzt nicht praktikable gemeinsame Vielfache auf die bestehende Obergrenze', () => {
     expect(chooseAtlasInnerPixelSize([31, 32], MAX_SURFACE_PIXELS)).toBe(MAX_SURFACE_PIXELS);
+  });
+
+  it('ordnet die komplette sichtbare Breite jeder 32er-Kachel demselben Quellpixel zu', () => {
+    const cellPixels = chooseAtlasCellPixelSize(32, ATLAS_PADDING);
+    const regionStart = Math.floor(ATLAS_PADDING * cellPixels);
+    const regionPixels = atlasRegionPixelSize(cellPixels, ATLAS_PADDING);
+
+    for (let sourcePixel = 0; sourcePixel < 32; sourcePixel += 1) {
+      const atlasPixel = regionStart + sourcePixel;
+      const leftInside = (atlasPixel + 0.001) / cellPixels;
+      const rightInside = (atlasPixel + 0.999) / cellPixels;
+
+      for (const coordinate of [leftInside, rightInside]) {
+        const resolvedAtlasPixel = normalizedCoordinateToPixel(coordinate, cellPixels);
+        const resolvedSourcePixel = atlasPixelToSourcePixel(
+          resolvedAtlasPixel,
+          regionStart,
+          regionPixels,
+          0,
+          32,
+          32
+        );
+
+        expect(resolvedSourcePixel).toBe(sourcePixel);
+      }
+    }
   });
 });
