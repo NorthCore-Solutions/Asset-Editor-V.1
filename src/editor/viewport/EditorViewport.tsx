@@ -326,7 +326,7 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
   return (
     <mesh ref={handleRef} renderOrder={1000} onPointerDown={(event) => onPointerDown(axis, side, event)}>
       <boxGeometry args={[0.72, 0.72, 0.72]} />
-      <meshBasicMaterial color={color} transparent opacity={0.96} depthTest={false} depthWrite={false} toneMapped={false} />
+      <meshBasicMaterial color={color} transparent opacity={1} depthTest={false} depthWrite={false} toneMapped={false} />
     </mesh>
   );
 }
@@ -686,12 +686,12 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
   return (
     <>
       <CenterScaleHandle mesh={mesh} bounds={bounds} onPointerDown={startCenterDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff3653" onPointerDown={startAxisDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff3653" onPointerDown={startAxisDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#8adb00" onPointerDown={startAxisDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={1} color="#8adb00" onPointerDown={startAxisDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={-1} color="#2c8fff" onPointerDown={startAxisDrag} />
-      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={1} color="#2c8fff" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff0000" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff0000" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#00ff00" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={1} color="#00ff00" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={-1} color="#0000ff" onPointerDown={startAxisDrag} />
+      <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={1} color="#0000ff" onPointerDown={startAxisDrag} />
       {CORNERS.map((sides) => <CornerScaleHandle key={sides.join(':')} mesh={mesh} bounds={bounds} sides={sides} onPointerDown={startUniformDrag} />)}
     </>
   );
