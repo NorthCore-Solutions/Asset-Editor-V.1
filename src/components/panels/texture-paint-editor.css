@@ -58,10 +58,13 @@
 }
 
 .paint-surface-field {
-  align-items: start;
+  position: relative;
+  align-items: center;
 }
 
 .paint-surface-picker {
+  position: relative;
+  width: 100%;
   min-width: 0;
 }
 
@@ -69,16 +72,22 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 30px;
-  padding: 5px 8px;
-  color: var(--silver);
+  gap: 6px;
+  width: 100%;
+  height: 25px;
+  min-height: 25px;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--text);
+  font: inherit;
   font-size: 12px;
-  line-height: 18px;
-  background: #11181c;
-  border: 1px solid #425159;
+  line-height: 23px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #12181c;
+  border: 1px solid var(--border);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: default;
   list-style: none;
   user-select: none;
 }
@@ -90,41 +99,58 @@
 .paint-surface-picker summary::after {
   content: '▾';
   flex: 0 0 auto;
-  color: #8fa0a8;
-  transition: transform 140ms ease;
+  color: var(--text);
+  font-size: 10px;
 }
 
-.paint-surface-picker[open] summary::after {
-  transform: rotate(180deg);
+.paint-surface-picker summary:focus {
+  outline: 1px solid var(--green-accent);
+  border-color: var(--green);
 }
 
 .paint-surface-options {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 2px);
+  right: 0;
+  left: 0;
   display: grid;
-  gap: 3px;
+  gap: 0;
   max-height: 190px;
-  margin-top: 4px;
-  padding: 4px;
+  margin: 0;
+  padding: 2px;
   overflow-y: auto;
-  background: #11181c;
-  border: 1px solid #425159;
+  background: #12181c;
+  border: 1px solid var(--border);
   border-radius: 3px;
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.42);
 }
 
 .paint-surface-options button {
-  min-height: 28px;
-  padding: 5px 7px;
+  width: 100%;
+  min-height: 25px;
+  padding: 0 6px;
   overflow: hidden;
-  color: var(--silver);
-  font-size: 11px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 23px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: #12181c;
+  border: 0;
+  border-radius: 0;
+}
+
+.paint-surface-options button:hover {
+  background: var(--panel-hover);
 }
 
 .paint-surface-options button.active {
-  background: #22382d;
-  border-color: #68a47d;
-  box-shadow: inset 0 0 0 1px rgba(104, 164, 125, 0.25);
+  background: var(--green);
+  color: var(--text);
+  box-shadow: none;
 }
 
 .paint-copy-button {
