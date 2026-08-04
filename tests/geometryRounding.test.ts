@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { createGeometry, createSceneObject } from '../src/geometry/factory';
 import {
@@ -31,6 +32,27 @@ function maximumPositionDifference(
     );
   }
   return maximum;
+}
+
+function minimumVertexDistance(
+  geometry: ReturnType<typeof createGeometry>,
+  target: THREE.Vector3
+): number {
+  const position = geometry.getAttribute('position');
+  let minimum = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < position.count; index += 1) {
+    minimum = Math.min(
+      minimum,
+      target.distanceTo(new THREE.Vector3(
+        position.getX(index),
+        position.getY(index),
+        position.getZ(index)
+      ))
+    );
+  }
+
+  return minimum;
 }
 
 describe('Geometrie-Abrundung', () => {
@@ -91,49 +113,57 @@ describe('Geometrie-Abrundung', () => {
     }
   });
 
-  it('formt Eckkanten bei gleichem Radius von einer Fase zu einem C-Bogen', () => {
+  it('rundet ausschließlich die Kanten und lässt den Eckpunkt scharf', () => {
     const object = createSceneObject('box');
-    const bevel = createGeometry({
-      type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 0 }
-    });
-    const cCurve = createGeometry({
-      type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 100 }
-    });
-
-    try {
-      expect(triangleCount(bevel)).toBe(triangleCount(cCurve));
-      expect(maximumPositionDifference(bevel, cCurve)).toBeGreaterThan(0.03);
-      expect(bevel.boundingBox?.min.x).toBeCloseTo(cCurve.boundingBox?.min.x ?? 0, 5);
-      expect(bevel.boundingBox?.max.x).toBeCloseTo(cCurve.boundingBox?.max.x ?? 0, 5);
-      expect(bevel.boundingBox?.min.y).toBeCloseTo(cCurve.boundingBox?.min.y ?? 0, 5);
-      expect(bevel.boundingBox?.max.y).toBeCloseTo(cCurve.boundingBox?.max.y ?? 0, 5);
-    } finally {
-      bevel.dispose();
-      cCurve.dispose();
-    }
-  });
-
-  it('verändert die acht Eckbereiche unabhängig vom C-Profil der Kanten', () => {
-    const object = createSceneObject('box');
-    const angularCorners = createGeometry({
+    const edgeOnly = createGeometry({
       type: object.type,
       geometry: { ...object.geometry, cornerRoundness: 0, edgeRoundness: 100 }
     });
-    const roundedCorners = createGeometry({
+
+    try {
+      const sharpCorner = new THREE.Vector3(0.5, 0.5, 0.5);
+      const sharpEdgeMiddle = new THREE.Vector3(0, 0.5, 0.5);
+      expect(minimumVertexDistance(edgeOnly, sharpCorner)).toBeLessThan(0.01);
+      expect(minimumVertexDistance(edgeOnly, sharpEdgeMiddle)).toBeGreaterThan(0.05);
+    } finally {
+      edgeOnly.dispose();
+    }
+  });
+
+  it('rundet ausschließlich die Ecken und lässt die Kantenmitte scharf', () => {
+    const object = createSceneObject('box');
+    const cornerOnly = createGeometry({
       type: object.type,
-      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 100 }
+      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 0 }
     });
 
     try {
-      expect(triangleCount(angularCorners)).toBe(triangleCount(roundedCorners));
-      expect(maximumPositionDifference(angularCorners, roundedCorners)).toBeGreaterThan(0.03);
-      expect(angularCorners.boundingBox?.min.z).toBeCloseTo(roundedCorners.boundingBox?.min.z ?? 0, 5);
-      expect(angularCorners.boundingBox?.max.z).toBeCloseTo(roundedCorners.boundingBox?.max.z ?? 0, 5);
+      const sharpCorner = new THREE.Vector3(0.5, 0.5, 0.5);
+      const sharpEdgeMiddle = new THREE.Vector3(0, 0.5, 0.5);
+      expect(minimumVertexDistance(cornerOnly, sharpCorner)).toBeGreaterThan(0.05);
+      expect(minimumVertexDistance(cornerOnly, sharpEdgeMiddle)).toBeLessThan(0.01);
     } finally {
-      angularCorners.dispose();
-      roundedCorners.dispose();
+      cornerOnly.dispose();
+    }
+  });
+
+  it('liefert bei gleichem Maximalradius unterschiedliche Ecken- und Kantenformen', () => {
+    const object = createSceneObject('box');
+    const edgeOnly = createGeometry({
+      type: object.type,
+      geometry: { ...object.geometry, cornerRoundness: 0, edgeRoundness: 100 }
+    });
+    const cornerOnly = createGeometry({
+      type: object.type,
+      geometry: { ...object.geometry, cornerRoundness: 100, edgeRoundness: 0 }
+    });
+
+    try {
+      expect(triangleCount(edgeOnly)).toBe(triangleCount(cornerOnly));
+      expect(maximumPositionDifference(edgeOnly, cornerOnly)).toBeGreaterThan(0.05);
+    } finally {
+      edgeOnly.dispose();
+      cornerOnly.dispose();
     }
   });
 
