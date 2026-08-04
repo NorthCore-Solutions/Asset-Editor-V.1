@@ -13,8 +13,10 @@ import {
 import { createFilledImageData, hexToRgba } from './pixelPaint';
 import { isPrimaryPointerActive, subscribePrimaryPointer } from './primaryPointerState';
 import {
+  atlasPixelToSourcePixel,
   chooseAtlasCellPixelSize,
-  chooseAtlasInnerPixelSize
+  chooseAtlasInnerPixelSize,
+  normalizedCoordinateToPixel
 } from './surfaceAtlasSizing';
 
 export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
@@ -60,6 +62,13 @@ interface PendingMetricRefresh {
   scale: Vec3;
   atlas: SurfaceUvAtlas;
   target: SurfaceRasterMetric[];
+}
+
+interface SurfaceAtlasPixelLayout {
+  cellWidth: number;
+  cellHeight: number;
+  canvasWidth: number;
+  canvasHeight: number;
 }
 
 const rasterMetricsCache = new WeakMap<THREE.BufferGeometry, SurfaceRasterMetric[]>();
@@ -477,12 +486,10 @@ export function resizeSurfaceCanvases(
   });
 }
 
-export function composeSurfaceAtlasCanvas(
-  surfaces: HTMLCanvasElement[],
-  atlas: SurfaceUvAtlas,
+function surfaceAtlasPixelLayout(
   metrics: SurfaceRasterMetric[],
-  baseColor: string
-): HTMLCanvasElement {
+  atlas: SurfaceUvAtlas
+): SurfaceAtlasPixelLayout {
   const innerWidth = chooseAtlasInnerPixelSize(
     metrics.map((metric) => metric.width),
     MAX_SURFACE_PIXELS
@@ -493,9 +500,25 @@ export function composeSurfaceAtlasCanvas(
   );
   const cellWidth = chooseAtlasCellPixelSize(innerWidth, atlas.padding);
   const cellHeight = chooseAtlasCellPixelSize(innerHeight, atlas.padding);
+
+  return {
+    cellWidth,
+    cellHeight,
+    canvasWidth: Math.max(1, atlas.columns * cellWidth),
+    canvasHeight: Math.max(1, atlas.rows * cellHeight)
+  };
+}
+
+export function composeSurfaceAtlasCanvas(
+  surfaces: HTMLCanvasElement[],
+  atlas: SurfaceUvAtlas,
+  metrics: SurfaceRasterMetric[],
+  baseColor: string
+): HTMLCanvasElement {
+  const layout = surfaceAtlasPixelLayout(metrics, atlas);
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, atlas.columns * cellWidth);
-  canvas.height = Math.max(1, atlas.rows * cellHeight);
+  canvas.width = layout.canvasWidth;
+  canvas.height = layout.canvasHeight;
   const context = canvasContext(canvas);
   context.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -606,27 +629,51 @@ export function surfacePointFromUv(
   surfaces?: HTMLCanvasElement[]
 ): { islandIndex: number; point: [number, number] } | null {
   const islandIndex = atlasIslandAtUv(atlas, uv);
-  const island = atlas.islands[islandIndex];
   const metric = metrics[islandIndex];
-  if (!island || !metric) return null;
+  if (!atlas.islands[islandIndex] || !metric) return null;
 
-  const islandWidth = Math.max(EPSILON, island.uMax - island.uMin);
-  const islandHeight = Math.max(EPSILON, island.vMax - island.vMin);
-  const localU = THREE.MathUtils.clamp((uv.x - island.uMin) / islandWidth, 0, 0.999999);
-  const localV = THREE.MathUtils.clamp((uv.y - island.vMin) / islandHeight, 0, 0.999999);
-  const window = surfaceUvWindow(metric);
-  const sampleU = window.offsetU + localU * window.scaleU;
-  const sampleV = window.offsetV + localV * window.scaleV;
+  const layout = surfaceAtlasPixelLayout(metrics, atlas);
+  const atlasRegion = atlasPixelRegion(
+    atlas,
+    islandIndex,
+    layout.canvasWidth,
+    layout.canvasHeight
+  );
+  const atlasRegionWidth = Math.max(1, atlasRegion.maxX - atlasRegion.minX + 1);
+  const atlasRegionHeight = Math.max(1, atlasRegion.maxY - atlasRegion.minY + 1);
+  const atlasX = normalizedCoordinateToPixel(uv.x, layout.canvasWidth);
+  const atlasY = normalizedCoordinateToPixel(1 - uv.y, layout.canvasHeight);
   const surface = surfaces?.[islandIndex];
   const visible = surface
     ? surfaceCanvasRegion(surface, metric)
     : { x: 0, y: 0, width: metric.width, height: metric.height };
+  const window = surfaceUvWindow(metric);
+  const sourceX = visible.x + window.offsetU * visible.width;
+  const sourceY = visible.y + (1 - window.offsetV - window.scaleV) * visible.height;
+  const sourceWidth = Math.max(EPSILON, window.scaleU * visible.width);
+  const sourceHeight = Math.max(EPSILON, window.scaleV * visible.height);
+  const sourceLimitWidth = surface?.width ?? metric.width;
+  const sourceLimitHeight = surface?.height ?? metric.height;
 
   return {
     islandIndex,
     point: [
-      visible.x + Math.max(0, Math.min(visible.width - 1, Math.floor(sampleU * visible.width))),
-      visible.y + Math.max(0, Math.min(visible.height - 1, Math.floor((1 - sampleV) * visible.height)))
+      atlasPixelToSourcePixel(
+        atlasX,
+        atlasRegion.minX,
+        atlasRegionWidth,
+        sourceX,
+        sourceWidth,
+        sourceLimitWidth
+      ),
+      atlasPixelToSourcePixel(
+        atlasY,
+        atlasRegion.minY,
+        atlasRegionHeight,
+        sourceY,
+        sourceHeight,
+        sourceLimitHeight
+      )
     ]
   };
 }
