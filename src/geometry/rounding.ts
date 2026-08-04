@@ -3,9 +3,12 @@ import type { PrimitiveType } from '../types/editor';
 
 export const DEFAULT_EDGE_ROUNDNESS = 0;
 
-const ROUNDING_SEGMENTS = 8;
+const ROUNDING_SEGMENTS = 12;
 const MAX_RADIUS_FACTOR = 0.499;
 const EPSILON = 0.000001;
+const AXES = [0, 1, 2] as const;
+
+type Axis = typeof AXES[number];
 
 const ROUNDABLE_BOX_TYPES = new Set<PrimitiveType>([
   'box',
@@ -47,58 +50,118 @@ export function roundedBoxRadius(
   return shortestSide * MAX_RADIUS_FACTOR * clampedPercent(roundness, 0) / 100;
 }
 
-interface RoundedTarget {
-  position: THREE.Vector3;
-  activeAxes: number;
-  proximity: number;
+function component(vector: THREE.Vector3, axis: Axis): number {
+  if (axis === 0) return vector.x;
+  if (axis === 1) return vector.y;
+  return vector.z;
 }
 
-function roundedTarget(
+function setComponent(vector: THREE.Vector3, axis: Axis, value: number): void {
+  if (axis === 0) vector.x = value;
+  else if (axis === 1) vector.y = value;
+  else vector.z = value;
+}
+
+function signed(source: number, absoluteValue: number): number {
+  return source < 0 ? -absoluteValue : absoluteValue;
+}
+
+function boundaryDistances(source: THREE.Vector3, halfExtents: THREE.Vector3): [number, number, number] {
+  return [
+    Math.max(0, halfExtents.x - Math.abs(source.x)),
+    Math.max(0, halfExtents.y - Math.abs(source.y)),
+    Math.max(0, halfExtents.z - Math.abs(source.z))
+  ];
+}
+
+function nearestEdgeTarget(
   source: THREE.Vector3,
   halfExtents: THREE.Vector3,
   radius: number
-): RoundedTarget | null {
+): { target: THREE.Vector3; weight: number } | null {
   if (radius <= EPSILON) return null;
 
-  const absolute = new THREE.Vector3(Math.abs(source.x), Math.abs(source.y), Math.abs(source.z));
+  const distances = boundaryDistances(source, halfExtents);
+  const orderedAxes = [...AXES].sort((first, second) => distances[first] - distances[second]);
+  const firstAxis = orderedAxes[0];
+  const secondAxis = orderedAxes[1];
+  const longitudinalAxis = orderedAxes[2];
+  if (firstAxis === undefined || secondAxis === undefined || longitudinalAxis === undefined) return null;
+  if (distances[firstAxis] >= radius || distances[secondAxis] >= radius) return null;
+
+  const firstHalfExtent = component(halfExtents, firstAxis);
+  const secondHalfExtent = component(halfExtents, secondAxis);
+  const firstAbsolute = Math.abs(component(source, firstAxis));
+  const secondAbsolute = Math.abs(component(source, secondAxis));
+  const firstOffset = Math.max(0, firstAbsolute - (firstHalfExtent - radius));
+  const secondOffset = Math.max(0, secondAbsolute - (secondHalfExtent - radius));
+  const offsetLength = Math.hypot(firstOffset, secondOffset);
+  if (offsetLength <= EPSILON) return null;
+
+  const transitionWidth = Math.min(
+    radius,
+    Math.max(EPSILON, component(halfExtents, longitudinalAxis))
+  );
+  const longitudinalDistance = distances[longitudinalAxis];
+  const weight = THREE.MathUtils.smoothstep(longitudinalDistance, 0, transitionWidth);
+  if (weight <= EPSILON) return null;
+
+  const target = source.clone();
+  setComponent(
+    target,
+    firstAxis,
+    signed(
+      component(source, firstAxis),
+      firstHalfExtent - radius + firstOffset / offsetLength * radius
+    )
+  );
+  setComponent(
+    target,
+    secondAxis,
+    signed(
+      component(source, secondAxis),
+      secondHalfExtent - radius + secondOffset / offsetLength * radius
+    )
+  );
+
+  return { target, weight };
+}
+
+function cornerTarget(
+  source: THREE.Vector3,
+  halfExtents: THREE.Vector3,
+  radius: number
+): { target: THREE.Vector3; weight: number } | null {
+  if (radius <= EPSILON) return null;
+
+  const distances = boundaryDistances(source, halfExtents);
+  const maximumDistance = Math.max(distances[0], distances[1], distances[2]);
+  if (maximumDistance >= radius) return null;
+
   const core = new THREE.Vector3(
     Math.max(0, halfExtents.x - radius),
     Math.max(0, halfExtents.y - radius),
     Math.max(0, halfExtents.z - radius)
   );
+  const absolute = new THREE.Vector3(Math.abs(source.x), Math.abs(source.y), Math.abs(source.z));
   const offset = new THREE.Vector3(
     Math.max(0, absolute.x - core.x),
     Math.max(0, absolute.y - core.y),
     Math.max(0, absolute.z - core.z)
   );
-  const activeAxes = Number(offset.x > EPSILON)
-    + Number(offset.y > EPSILON)
-    + Number(offset.z > EPSILON);
   const offsetLength = offset.length();
+  if (offsetLength <= EPSILON) return null;
 
-  if (activeAxes < 2 || offsetLength <= EPSILON) return null;
-
-  const activeFractions = [
-    offset.x > EPSILON ? offset.x / radius : null,
-    offset.y > EPSILON ? offset.y / radius : null,
-    offset.z > EPSILON ? offset.z / radius : null
-  ].filter((value): value is number => value !== null);
-  const proximity = activeFractions.length > 0
-    ? THREE.MathUtils.clamp(Math.min(...activeFractions), 0, 1)
-    : 0;
-  const direction = offset.clone().multiplyScalar(1 / offsetLength);
-  const position = new THREE.Vector3(
-    offset.x > EPSILON ? core.x + direction.x * radius : absolute.x,
-    offset.y > EPSILON ? core.y + direction.y * radius : absolute.y,
-    offset.z > EPSILON ? core.z + direction.z * radius : absolute.z
+  const direction = offset.multiplyScalar(1 / offsetLength);
+  const target = new THREE.Vector3(
+    signed(source.x, core.x + direction.x * radius),
+    signed(source.y, core.y + direction.y * radius),
+    signed(source.z, core.z + direction.z * radius)
   );
-  position.set(
-    source.x < 0 ? -position.x : position.x,
-    source.y < 0 ? -position.y : position.y,
-    source.z < 0 ? -position.z : position.z
-  );
+  const weight = 1 - THREE.MathUtils.smoothstep(maximumDistance, 0, radius);
+  if (weight <= EPSILON) return null;
 
-  return { position, activeAxes, proximity };
+  return { target, weight };
 }
 
 function smoothRoundedNormals(
@@ -150,20 +213,11 @@ function applySeparatedRounding(
     );
     const result = source.clone();
 
-    const edge = roundedTarget(source, halfExtents, edgeRadius);
-    if (edge && edge.activeAxes >= 2) {
-      const cornerFade = edge.activeAxes === 3
-        ? THREE.MathUtils.smoothstep(edge.proximity, 0, 1)
-        : 0;
-      const edgeWeight = 1 - cornerFade;
-      if (edgeWeight > EPSILON) result.lerp(edge.position, edgeWeight);
-    }
+    const edge = nearestEdgeTarget(source, halfExtents, edgeRadius);
+    if (edge) result.lerp(edge.target, edge.weight);
 
-    const corner = roundedTarget(source, halfExtents, cornerRadius);
-    if (corner?.activeAxes === 3) {
-      const cornerWeight = THREE.MathUtils.smoothstep(corner.proximity, 0, 1);
-      if (cornerWeight > EPSILON) result.lerp(corner.position, cornerWeight);
-    }
+    const corner = cornerTarget(source, halfExtents, cornerRadius);
+    if (corner) result.lerp(corner.target, corner.weight);
 
     if (result.distanceToSquared(source) <= EPSILON * EPSILON) continue;
     position.setXYZ(index, result.x, result.y, result.z);
