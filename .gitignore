@@ -3,3 +3,7 @@ dist/
 coverage/
 *.local
 .DS_Store
+android/.gradle/
+android/local.properties
+android/app/build/
+android/build/
