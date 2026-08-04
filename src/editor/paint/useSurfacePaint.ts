@@ -22,11 +22,14 @@ interface SceneEnvironmentEntry {
   references: number;
 }
 
-interface CenterHandlePatch {
-  group: THREE.Group;
+interface PositionCopyPatch {
+  target: THREE.Object3D;
   position: THREE.Vector3;
   originalCopy: (value: THREE.Vector3) => THREE.Vector3;
   hadOwnCopy: boolean;
+}
+
+interface CenterHandlePatch extends PositionCopyPatch {
   material: THREE.MeshBasicMaterial;
   originalColor: THREE.Color;
   originalOpacity: number;
@@ -56,6 +59,41 @@ function octahedronRadius(mesh: THREE.Mesh): number | null {
   if (!(mesh.geometry instanceof THREE.OctahedronGeometry)) return null;
   const parameters = mesh.geometry.parameters as { radius?: number };
   return typeof parameters.radius === 'number' ? parameters.radius : null;
+}
+
+function restorePositionCopy(patch: PositionCopyPatch): void {
+  if (patch.hadOwnCopy) {
+    patch.position.copy = patch.originalCopy;
+  } else {
+    delete (patch.position as unknown as {
+      copy?: (value: THREE.Vector3) => THREE.Vector3;
+    }).copy;
+  }
+}
+
+function patchPositionCopy(
+  target: THREE.Object3D,
+  centerWorldRef: React.MutableRefObject<THREE.Vector3>
+): PositionCopyPatch {
+  const position = target.position;
+  const originalCopy = position.copy;
+  const hadOwnCopy = Object.prototype.hasOwnProperty.call(position, 'copy');
+  position.copy = function copyGeometryCenter(this: THREE.Vector3): THREE.Vector3 {
+    return originalCopy.call(this, centerWorldRef.current);
+  };
+  return { target, position, originalCopy, hadOwnCopy };
+}
+
+function geometryCenterWorld(
+  target: THREE.Vector3,
+  localCenter: THREE.Vector3,
+  object: SceneObjectData
+): THREE.Vector3 {
+  return target
+    .copy(localCenter)
+    .multiply(new THREE.Vector3(...object.scale))
+    .applyEuler(new THREE.Euler(...object.rotation))
+    .add(new THREE.Vector3(...object.position));
 }
 
 function findOriginalCenterScaleHandle(scene: THREE.Scene): {
@@ -95,6 +133,28 @@ function findOriginalCenterScaleHandle(scene: THREE.Scene): {
   return result;
 }
 
+function findOriginalTranslateCenterHandles(scene: THREE.Scene): {
+  handles: THREE.Mesh[];
+  material: THREE.MeshBasicMaterial | null;
+} {
+  const handles: THREE.Mesh[] = [];
+  let material: THREE.MeshBasicMaterial | null = null;
+
+  scene.traverse((candidate) => {
+    if (!(candidate instanceof THREE.Mesh) || candidate.name !== 'XYZ') return;
+    const radius = octahedronRadius(candidate);
+    if (radius === null || (Math.abs(radius - 0.1) >= 0.0001 && Math.abs(radius - 0.2) >= 0.0001)) return;
+    if (!(candidate.material instanceof THREE.MeshBasicMaterial)) return;
+
+    handles.push(candidate);
+    if (Math.abs(radius - 0.1) < 0.0001 && candidate.material.opacity > 0.001) {
+      material = candidate.material;
+    }
+  });
+
+  return { handles, material };
+}
+
 function useOriginalCenterScaleHandle(
   object: SceneObjectData,
   geometry: THREE.BufferGeometry,
@@ -115,13 +175,7 @@ function useOriginalCenterScaleHandle(
     const patch = patchRef.current;
     if (!patch) return;
 
-    if (patch.hadOwnCopy) {
-      patch.position.copy = patch.originalCopy;
-    } else {
-      delete (patch.position as unknown as {
-        copy?: (value: THREE.Vector3) => THREE.Vector3;
-      }).copy;
-    }
+    restorePositionCopy(patch);
     patch.material.color.copy(patch.originalColor);
     patch.material.opacity = patch.originalOpacity;
     patch.material.needsUpdate = true;
@@ -143,30 +197,17 @@ function useOriginalCenterScaleHandle(
       return;
     }
 
-    centerWorldRef.current
-      .copy(localCenter)
-      .multiply(new THREE.Vector3(...object.scale))
-      .applyEuler(new THREE.Euler(...object.rotation))
-      .add(new THREE.Vector3(...object.position));
+    geometryCenterWorld(centerWorldRef.current, localCenter, object);
 
     let patch = patchRef.current;
-    if (!patch || !patch.group.parent) {
+    if (!patch || !patch.target.parent) {
       restorePatch();
       const found = findOriginalCenterScaleHandle(scene);
       if (!found) return;
 
-      const position = found.group.position;
-      const originalCopy = position.copy;
-      const hadOwnCopy = Object.prototype.hasOwnProperty.call(position, 'copy');
-      position.copy = function copyGeometryCenter(this: THREE.Vector3): THREE.Vector3 {
-        return originalCopy.call(this, centerWorldRef.current);
-      };
-
+      const positionPatch = patchPositionCopy(found.group, centerWorldRef);
       patch = {
-        group: found.group,
-        position,
-        originalCopy,
-        hadOwnCopy,
+        ...positionPatch,
         material: found.material,
         originalColor: found.material.color.clone(),
         originalOpacity: found.material.opacity
@@ -177,6 +218,83 @@ function useOriginalCenterScaleHandle(
     patch.material.color.set(invertHexColor(object.material.color));
     patch.material.opacity = 1;
     patch.material.needsUpdate = true;
+  });
+}
+
+function useOriginalTranslateCenterHandle(
+  object: SceneObjectData,
+  geometry: THREE.BufferGeometry,
+  selected: boolean,
+  paintModeEnabled: boolean
+): void {
+  const scene = useThree((state) => state.scene);
+  const tool = useEditorStore((state) => state.tool);
+  const selectedCount = useEditorStore((state) => state.selectedIds.length);
+  const patchesRef = useRef<PositionCopyPatch[]>([]);
+  const materialRef = useRef<{
+    material: THREE.MeshBasicMaterial;
+    color: THREE.Color;
+    opacity: number;
+  } | null>(null);
+  const centerWorldRef = useRef(new THREE.Vector3());
+  const localCenter = useMemo(() => {
+    geometry.computeBoundingBox();
+    return geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+  }, [geometry]);
+
+  const restorePatches = (): void => {
+    patchesRef.current.forEach(restorePositionCopy);
+    patchesRef.current = [];
+
+    const storedMaterial = materialRef.current;
+    if (storedMaterial) {
+      storedMaterial.material.color.copy(storedMaterial.color);
+      storedMaterial.material.opacity = storedMaterial.opacity;
+      storedMaterial.material.needsUpdate = true;
+      materialRef.current = null;
+    }
+  };
+
+  useEffect(() => () => restorePatches(), []);
+
+  useFrame(() => {
+    const active = selected
+      && selectedCount === 1
+      && !paintModeEnabled
+      && object.visible
+      && !object.locked
+      && tool === 'translate';
+
+    if (!active) {
+      restorePatches();
+      return;
+    }
+
+    geometryCenterWorld(centerWorldRef.current, localCenter, object);
+
+    const patchesInvalid = patchesRef.current.length === 0
+      || patchesRef.current.some((patch) => !patch.target.parent);
+    if (patchesInvalid) {
+      restorePatches();
+      const found = findOriginalTranslateCenterHandles(scene);
+      if (found.handles.length === 0) return;
+
+      patchesRef.current = found.handles.map((handle) => patchPositionCopy(handle, centerWorldRef));
+      if (found.material) {
+        materialRef.current = {
+          material: found.material,
+          color: found.material.color.clone(),
+          opacity: found.material.opacity
+        };
+      }
+    }
+
+    const storedMaterial = materialRef.current;
+    if (storedMaterial) {
+      storedMaterial.material.color.set(invertHexColor(object.material.color));
+      storedMaterial.material.opacity = 1;
+      storedMaterial.material.needsUpdate = true;
+    }
   });
 }
 
@@ -277,6 +395,7 @@ export function useSurfacePaint(
   useViewportPerformance(object, geometry);
   useObjectDimensionsOverlay(object, geometry);
   useOriginalCenterScaleHandle(object, geometry, selected, settings.enabled);
+  useOriginalTranslateCenterHandle(object, geometry, selected, settings.enabled);
   const binding = useSurfacePaintGrid(object, selected, settings, geometry);
   const visibleTexture = object.material.paintTexture ? binding.texture : null;
   useSceneMaterialSync(object, geometry, visibleTexture);
