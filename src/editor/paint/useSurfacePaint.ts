@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
-import { useThree } from '@react-three/fiber';
+import { useEffect, useMemo } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData } from '../../types/editor';
 import { useObjectDimensionsOverlay } from '../measurement/useObjectDimensionsOverlay';
 import { useViewportPerformance } from '../viewport/useViewportPerformance';
@@ -22,6 +23,94 @@ interface SceneEnvironmentEntry {
 }
 
 const sceneEnvironments = new WeakMap<THREE.Scene, SceneEnvironmentEntry>();
+const MARKER_SOURCE_DIAMETER = 0.22;
+
+function normalizedHex(color: string): string | null {
+  const raw = color.trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(raw)) {
+    return raw.split('').map((character) => `${character}${character}`).join('');
+  }
+  return /^[0-9a-f]{6}$/i.test(raw) ? raw : null;
+}
+
+export function invertHexColor(color: string): string {
+  const hex = normalizedHex(color);
+  if (!hex) return '#000000';
+  const inverted = [0, 2, 4]
+    .map((offset) => 255 - Number.parseInt(hex.slice(offset, offset + 2), 16))
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+  return `#${inverted.toUpperCase()}`;
+}
+
+function useContrastCenterMarker(
+  object: SceneObjectData,
+  geometry: THREE.BufferGeometry,
+  selected: boolean,
+  paintModeEnabled: boolean
+): void {
+  const scene = useThree((state) => state.scene);
+  const tool = useEditorStore((state) => state.tool);
+  const selectedCount = useEditorStore((state) => state.selectedIds.length);
+  const localAverageSize = useMemo(() => {
+    geometry.computeBoundingBox();
+    const size = geometry.boundingBox?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(1, 1, 1);
+    return (Math.abs(size.x) + Math.abs(size.y) + Math.abs(size.z)) / 3;
+  }, [geometry]);
+  const marker = useMemo(() => {
+    const markerGeometry = new THREE.OctahedronGeometry(MARKER_SOURCE_DIAMETER / 2, 0);
+    const markerMaterial = new THREE.MeshBasicMaterial({
+      color: invertHexColor(object.material.color),
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      fog: false
+    });
+    const mesh = new THREE.Mesh(markerGeometry, markerMaterial);
+    mesh.name = `Kontrast-Mittelpunkt: ${object.id}`;
+    mesh.renderOrder = 2005;
+    mesh.frustumCulled = false;
+    mesh.raycast = () => undefined;
+    return mesh;
+  }, [object.id]);
+
+  useEffect(() => {
+    scene.add(marker);
+    return () => {
+      scene.remove(marker);
+      marker.geometry.dispose();
+      const material = marker.material;
+      if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
+      else material.dispose();
+    };
+  }, [marker, scene]);
+
+  useEffect(() => {
+    const material = marker.material;
+    if (material instanceof THREE.MeshBasicMaterial) {
+      material.color.set(invertHexColor(object.material.color));
+    }
+  }, [marker, object.material.color]);
+
+  useFrame(() => {
+    const visible = selected
+      && selectedCount === 1
+      && !paintModeEnabled
+      && object.visible
+      && !object.locked
+      && (tool === 'translate' || tool === 'scale');
+    marker.visible = visible;
+    if (!visible) return;
+
+    marker.position.set(object.position[0], object.position[1], object.position[2]);
+    marker.quaternion.identity();
+    const averageWorldSize = localAverageSize * (
+      Math.abs(object.scale[0]) + Math.abs(object.scale[1]) + Math.abs(object.scale[2])
+    ) / 3;
+    const diameter = THREE.MathUtils.clamp(averageWorldSize * 0.064, 0.035, 0.32);
+    marker.scale.setScalar(diameter / MARKER_SOURCE_DIAMETER);
+  });
+}
 
 function useNeutralMaterialEnvironment(): void {
   const gl = useThree((state) => state.gl);
@@ -121,6 +210,7 @@ export function useSurfacePaint(
   useNeutralMaterialEnvironment();
   useViewportPerformance(object, geometry);
   useObjectDimensionsOverlay(object, geometry);
+  useContrastCenterMarker(object, geometry, selected, settings.enabled);
   const binding = useSurfacePaintGrid(object, selected, settings, geometry);
   const visibleTexture = object.material.paintTexture ? binding.texture : null;
   useSceneMaterialSync(object, geometry, visibleTexture);
