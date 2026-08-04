@@ -122,6 +122,7 @@ export function useSurfacePaint(
   useViewportPerformance(object, geometry);
   useObjectDimensionsOverlay(object, geometry);
   const binding = useSurfacePaintGrid(object, selected, settings, geometry);
-  useSceneMaterialSync(object, geometry, binding.texture);
-  return binding;
+  const visibleTexture = object.material.paintTexture ? binding.texture : null;
+  useSceneMaterialSync(object, geometry, visibleTexture);
+  return { ...binding, texture: visibleTexture };
 }
