@@ -1,4 +1,11 @@
-import type { PrimitiveType, ProjectFile, SceneObjectData } from '../types/editor';
+import type {
+  PaintSurfaceGridData,
+  PaintSurfaceGridLayerData,
+  PaintTextureData,
+  PrimitiveType,
+  ProjectFile,
+  SceneObjectData
+} from '../types/editor';
 
 export const PROJECT_FORMAT = 'northcore-asset-editor' as const;
 export const PROJECT_VERSION = 1 as const;
@@ -17,7 +24,106 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const isUnitNumber = (value: unknown): value is number => isFiniteNumber(value) && value >= 0 && value <= 1;
+const isPositiveNumber = (value: unknown): value is number => isFiniteNumber(value) && value > 0;
+const isPositiveInteger = (value: unknown): value is number => Number.isInteger(value) && isPositiveNumber(value);
 const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+const isPngDataUrl = (value: unknown): value is string =>
+  typeof value === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u.test(value);
+
+function validateSurfaceGridLayer(
+  value: unknown,
+  objectIndex: number,
+  surfaceIndex: number
+): PaintSurfaceGridLayerData {
+  if (!isObject(value)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Malfläche ${surfaceIndex + 1} ist ungültig.`);
+  }
+  if (typeof value.label !== 'string' || value.label.length === 0) {
+    throw new Error(`Objekt ${objectIndex + 1}: Malfläche ${surfaceIndex + 1} hat keine Bezeichnung.`);
+  }
+  if (!isPositiveInteger(value.width) || !isPositiveInteger(value.height)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Rastergröße der Malfläche ${surfaceIndex + 1} ist ungültig.`);
+  }
+  if (!isUnitNumber(value.coverageU) || value.coverageU <= 0 || !isUnitNumber(value.coverageV) || value.coverageV <= 0) {
+    throw new Error(`Objekt ${objectIndex + 1}: Rasterabdeckung der Malfläche ${surfaceIndex + 1} ist ungültig.`);
+  }
+  if (value.sourceWidth !== undefined && !isPositiveInteger(value.sourceWidth)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Quellbreite der Malfläche ${surfaceIndex + 1} ist ungültig.`);
+  }
+  if (value.sourceHeight !== undefined && !isPositiveInteger(value.sourceHeight)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Quellhöhe der Malfläche ${surfaceIndex + 1} ist ungültig.`);
+  }
+
+  return {
+    label: value.label,
+    width: value.width,
+    height: value.height,
+    coverageU: value.coverageU,
+    coverageV: value.coverageV,
+    ...(value.sourceWidth !== undefined ? { sourceWidth: value.sourceWidth } : {}),
+    ...(value.sourceHeight !== undefined ? { sourceHeight: value.sourceHeight } : {})
+  };
+}
+
+function validateSurfaceGrid(value: unknown, objectIndex: number): PaintSurfaceGridData {
+  if (!isObject(value)) throw new Error(`Objekt ${objectIndex + 1}: Flächenraster der Bemalung ist ungültig.`);
+  if (value.version !== 1) throw new Error(`Objekt ${objectIndex + 1}: Unbekannte Flächenraster-Version.`);
+  if (typeof value.atlasSignature !== 'string' || value.atlasSignature.length === 0) {
+    throw new Error(`Objekt ${objectIndex + 1}: Atlas-Signatur der Bemalung fehlt.`);
+  }
+  if (!isPositiveNumber(value.pixelsPerWorldUnit)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Rasterauflösung der Bemalung ist ungültig.`);
+  }
+  if (value.baseColor !== undefined && !isHexColor(value.baseColor)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Grundfarbe der Bemalung ist ungültig.`);
+  }
+  if (!Array.isArray(value.surfaces) || value.surfaces.length === 0) {
+    throw new Error(`Objekt ${objectIndex + 1}: Malflächen der Bemalung fehlen.`);
+  }
+  if (value.sourceDataUrl !== undefined && !isPngDataUrl(value.sourceDataUrl)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Quelldaten der Bemalung sind ungültig.`);
+  }
+  if (value.sourceWidth !== undefined && !isPositiveInteger(value.sourceWidth)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Quellbreite der Bemalung ist ungültig.`);
+  }
+  if (value.sourceHeight !== undefined && !isPositiveInteger(value.sourceHeight)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Quellhöhe der Bemalung ist ungültig.`);
+  }
+
+  return {
+    version: 1,
+    atlasSignature: value.atlasSignature,
+    pixelsPerWorldUnit: value.pixelsPerWorldUnit,
+    ...(value.baseColor !== undefined ? { baseColor: value.baseColor.toUpperCase() } : {}),
+    surfaces: value.surfaces.map((surface, surfaceIndex) =>
+      validateSurfaceGridLayer(surface, objectIndex, surfaceIndex)
+    ),
+    ...(value.sourceDataUrl !== undefined ? { sourceDataUrl: value.sourceDataUrl } : {}),
+    ...(value.sourceWidth !== undefined ? { sourceWidth: value.sourceWidth } : {}),
+    ...(value.sourceHeight !== undefined ? { sourceHeight: value.sourceHeight } : {})
+  };
+}
+
+function validatePaintTexture(value: unknown, objectIndex: number): PaintTextureData {
+  if (!isObject(value)) throw new Error(`Objekt ${objectIndex + 1}: Bemalung ist ungültig.`);
+  if (!isPngDataUrl(value.dataUrl)) throw new Error(`Objekt ${objectIndex + 1}: Bilddaten der Bemalung sind ungültig.`);
+  if (!isPositiveInteger(value.width) || !isPositiveInteger(value.height)) {
+    throw new Error(`Objekt ${objectIndex + 1}: Bildgröße der Bemalung ist ungültig.`);
+  }
+  if (typeof value.pixelated !== 'boolean') {
+    throw new Error(`Objekt ${objectIndex + 1}: Pixelmodus der Bemalung ist ungültig.`);
+  }
+
+  return {
+    dataUrl: value.dataUrl,
+    width: value.width,
+    height: value.height,
+    pixelated: value.pixelated,
+    ...(value.surfaceGrid !== undefined
+      ? { surfaceGrid: validateSurfaceGrid(value.surfaceGrid, objectIndex) }
+      : {})
+  };
+}
 
 function validateSceneObject(value: unknown, index: number): SceneObjectData {
   if (!isObject(value)) throw new Error(`Objekt ${index + 1} ist ungültig.`);
@@ -48,7 +154,10 @@ function validateSceneObject(value: unknown, index: number): SceneObjectData {
       roughness: value.material.roughness,
       metalness: value.material.metalness,
       opacity: value.material.opacity,
-      flatShading: value.material.flatShading
+      flatShading: value.material.flatShading,
+      ...(value.material.paintTexture !== undefined
+        ? { paintTexture: validatePaintTexture(value.material.paintTexture, index) }
+        : {})
     },
     ...(typeof value.parentId === 'string' ? { parentId: value.parentId } : {})
   };
