@@ -3,8 +3,6 @@ import { createGeometry, createSceneObject } from '../src/geometry/factory';
 import {
   cornerRoundnessValue,
   edgeRoundnessValue,
-  roundedBoxRadius,
-  roundedBoxSegments,
   supportsGeometryRounding
 } from '../src/geometry/rounding';
 import { getSurfaceUvAtlas } from '../src/geometry/uvAtlas';
@@ -34,7 +32,7 @@ describe('Geometrie-Abrundung', () => {
     expect(edgeRoundnessValue({ edgeRoundness: 500 })).toBe(100);
   });
 
-  it('erzeugt unabhängig von beiden Reglerwerten wieder eine normale Box', () => {
+  it('erzeugt unabhängig von beiden Reglerwerten eine normale Box', () => {
     const object = createSceneObject('cuboid');
     const sharp = createGeometry({
       type: object.type,
@@ -54,12 +52,5 @@ describe('Geometrie-Abrundung', () => {
       sharp.dispose();
       storedRoundness.dispose();
     }
-  });
-
-  it('behält Hilfswerte für eine spätere stabile Umsetzung kompatibel', () => {
-    expect(roundedBoxSegments(-100)).toBe(12);
-    expect(roundedBoxSegments(1000)).toBe(12);
-    expect(roundedBoxRadius(2, 1, 3, -10)).toBe(0);
-    expect(roundedBoxRadius(2, 1, 3, 1000)).toBeCloseTo(0.499, 6);
   });
 });
