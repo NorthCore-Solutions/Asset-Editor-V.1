@@ -46,15 +46,7 @@ export function EditorToolbar() {
       <div className="group">
         <label><input type="checkbox" checked={snap.enabled} onChange={(event) => setSnap({ enabled: event.target.checked })} /> Snapping</label>
         <label title="Grundformen an den Fangflächen anderer Grundformen einrasten"><input type="checkbox" checked={snap.surface} onChange={(event) => setSnap({ surface: event.target.checked })} /> Formen-Snap</label>
-        <button
-          type="button"
-          className={dimensionsVisible ? 'active measurement-toggle' : 'measurement-toggle'}
-          aria-pressed={dimensionsVisible}
-          title="Länge, Höhe und Tiefe aller sichtbaren Formen anzeigen"
-          onClick={() => setDimensionOverlayVisible(!dimensionsVisible)}
-        >
-          Maße
-        </button>
+        <label title="Länge, Höhe und Tiefe aller sichtbaren Formen anzeigen"><input type="checkbox" checked={dimensionsVisible} onChange={(event) => setDimensionOverlayVisible(event.target.checked)} /> Maße</label>
         <label>Pos. <input type="number" min="0.01" step="0.05" value={snap.position} onChange={(event) => setSnap({ position: Number(event.target.value) })} /></label>
         <label>Grad <input type="number" min="1" step="1" value={snap.rotation} onChange={(event) => setSnap({ rotation: Number(event.target.value) })} /></label>
         <label>Skala <input type="number" min="0.01" step="0.05" value={snap.scale} onChange={(event) => setSnap({ scale: Number(event.target.value) })} /></label>
