@@ -32,7 +32,8 @@ export function edgeRoundnessValue(geometry: Record<string, number>): number {
   return clampedPercent(geometry.edgeRoundness, DEFAULT_EDGE_ROUNDNESS);
 }
 
-export function roundedBoxSegments(_roundness?: number): number {
+export function roundedBoxSegments(roundness?: number): number {
+  void roundness;
   return ROUNDING_SEGMENTS;
 }
 
@@ -50,8 +51,9 @@ export function createRoundableBoxGeometry(
   width: number,
   height: number,
   depth: number,
-  _geometry: Record<string, number>
+  geometry: Record<string, number>
 ): THREE.BufferGeometry {
+  void geometry;
   // Die Regler und ihre gespeicherten Werte bleiben erhalten. Ihre geometrische
   // Wirkung ist vorerst bewusst deaktiviert, bis eine stabile getrennte Ecken-
   // und Kantenabrundung umgesetzt wird.
