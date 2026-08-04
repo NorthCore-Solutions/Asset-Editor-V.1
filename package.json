@@ -8,9 +8,14 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "mobile:sync": "npm run build && cap sync android",
+    "mobile:open": "cap open android",
+    "android:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "8.4.2",
+    "@capacitor/core": "8.4.2",
     "@react-three/drei": "10.7.7",
     "@react-three/fiber": "9.6.1",
     "react": "19.2.8",
@@ -20,6 +25,7 @@
     "zustand": "5.0.14"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.4.2",
     "@eslint/js": "9.39.1",
     "@types/node": "24.10.1",
     "@types/react": "19.2.17",

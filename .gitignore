@@ -3,3 +3,11 @@ dist/
 coverage/
 *.local
 .DS_Store
+
+# Android / Capacitor
+android/.gradle/
+android/.idea/
+android/local.properties
+android/**/build/
+*.apk
+*.aab
