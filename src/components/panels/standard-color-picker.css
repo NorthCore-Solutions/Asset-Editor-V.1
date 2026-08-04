@@ -1,0 +1,208 @@
+.standard-color-picker {
+  position: relative;
+  margin-top: 7px;
+}
+
+.standard-color-row-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.standard-color-all-button {
+  height: auto;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--silver);
+  font-size: 11px;
+}
+
+.standard-color-all-button:hover {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.standard-color-preview {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+  margin-top: 5px;
+}
+
+.standard-color-preview-swatch,
+.standard-color-grid-swatch {
+  aspect-ratio: 1;
+  width: 100%;
+  padding: 0;
+  border: 1px solid rgba(174, 184, 190, 0.42);
+  border-radius: 50%;
+  box-shadow: none;
+}
+
+.standard-color-preview-swatch {
+  max-width: 34px;
+  justify-self: center;
+}
+
+.standard-color-preview-swatch:hover,
+.standard-color-grid-swatch:hover {
+  border-color: var(--text);
+  background-color: inherit;
+  transform: scale(1.06);
+}
+
+.standard-color-preview-swatch.selected,
+.standard-color-grid-swatch.selected {
+  outline: 2px solid var(--green-accent);
+  outline-offset: 2px;
+}
+
+.standard-color-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.right-panel > .standard-color-overlay,
+.right-panel .standard-color-overlay {
+  position: fixed;
+  top: calc(var(--topbar-height) + var(--toolbar-height));
+  right: 0;
+  bottom: calc(var(--status-height) + var(--hierarchy-panel-height));
+  left: auto;
+  width: var(--properties-panel-width, 300px);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 18px rgba(0, 0, 0, 0.2);
+}
+
+.standard-color-overlay-header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: #171e22;
+}
+
+.standard-color-overlay-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.standard-color-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.standard-color-header-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+  font-size: 21px;
+  line-height: 1;
+}
+
+.standard-color-header-button:hover {
+  border-color: transparent;
+  background: var(--panel-hover);
+}
+
+.standard-color-back-button {
+  font-size: 20px;
+}
+
+.standard-color-view-button {
+  font-size: 19px;
+}
+
+.standard-color-close-button {
+  font-size: 26px;
+  font-weight: 300;
+}
+
+.standard-color-overlay-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 14px 12px 18px;
+  overscroll-behavior: contain;
+}
+
+.standard-color-grid {
+  display: grid;
+  align-items: center;
+  gap: 9px 7px;
+}
+
+.standard-color-grid-swatch {
+  min-width: 0;
+}
+
+.standard-color-list {
+  display: grid;
+  gap: 3px;
+}
+
+.standard-color-list-entry {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 5px 8px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+
+.standard-color-list-entry:hover {
+  border-color: transparent;
+  background: var(--panel-hover);
+}
+
+.standard-color-list-entry.selected {
+  background: #273138;
+}
+
+.standard-color-list-swatch {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(174, 184, 190, 0.42);
+  border-radius: 50%;
+}
+
+.standard-color-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.standard-color-list-hex {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
