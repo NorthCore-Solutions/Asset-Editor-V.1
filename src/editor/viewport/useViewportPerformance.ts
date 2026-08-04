@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { SceneObjectData } from '../../types/editor';
+import { useConstantScaleHandleSize } from './useConstantScaleHandleSize';
 
 const BASE_ZOOM_SPEED = 1.25;
 const MAX_ZOOM_SPEED = 3.75;
@@ -66,6 +67,8 @@ export function useViewportPerformance(
   object: SceneObjectData,
   geometry: THREE.BufferGeometry
 ): void {
+  useConstantScaleHandleSize();
+
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
