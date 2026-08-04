@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MATERIAL_PRESETS, NORTHCORE_COLORS, LOW_POLY_COLORS } from '../../materials/presets';
+import { MATERIAL_PRESETS } from '../../materials/presets';
 import { createGeometry } from '../../geometry/factory';
 import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
 import { getSurfaceRasterMetrics } from '../../editor/paint/surfacePaintGrid';
 import { setSurfacePaintSettings, subscribeSurfacePaint } from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, PaintTextureData, Vec3 } from '../../types/editor';
+import { StandardColorPicker } from './StandardColorPicker';
 import { TexturePaintEditor } from './TexturePaintEditor';
 
 interface PropertiesPanelProps {
@@ -166,7 +167,6 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   const updateMaterial = useEditorStore((state) => state.updateMaterial);
   const duplicateObject = useEditorStore((state) => state.duplicateObject);
   const deleteObject = useEditorStore((state) => state.deleteObject);
-  const recentColors = useEditorStore((state) => state.recentColors);
   const [colorTarget, setColorTarget] = useState<ColorTarget>('base');
   const [paintColor, setPaintColor] = useState('#AEB8BE');
   const recolorRequestRef = useRef(0);
@@ -221,7 +221,6 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   }
 
   const setMaterial = (patch: Partial<MaterialData>, history = true) => updateMaterial(object.id, patch, history);
-  const mergedColors = [...new Set([...recentColors, ...NORTHCORE_COLORS, ...LOW_POLY_COLORS])];
   const shownColor = colorTarget === 'base' ? object.material.color : paintColor;
 
   const changeBaseColor = (normalized: string): void => {
@@ -297,18 +296,7 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
               <button type="button" className={colorTarget === 'base' ? 'color-target-button active' : 'color-target-button'} onClick={() => setColorTarget('base')}>Grundfarbe</button>
               <button type="button" className={colorTarget === 'paint' ? 'color-target-button active' : 'color-target-button'} onClick={() => setColorTarget('paint')}>Malfarbe</button>
             </div>
-            <div className="field-row">
-              <label>Farbe</label>
-              <div className="color-row">
-                <input type="color" value={shownColor} onChange={(event) => changeSelectedColor(event.target.value)} />
-                <input value={shownColor} onChange={(event) => /^#[0-9a-fA-F]{6}$/.test(event.target.value) && changeSelectedColor(event.target.value)} />
-              </div>
-            </div>
-            <div className="palette">
-              {mergedColors.map((color) => (
-                <button key={color} className="swatch" title={color} aria-label={color} style={{ background: color }} onClick={() => changeSelectedColor(color)} />
-              ))}
-            </div>
+            <StandardColorPicker value={shownColor} onChange={changeSelectedColor} />
           </div>
 
           <RangeField label="Rauheit" value={object.material.roughness} min={0} max={1} step={0.01} onChange={(value, history) => setMaterial({ roughness: value }, history)} />
