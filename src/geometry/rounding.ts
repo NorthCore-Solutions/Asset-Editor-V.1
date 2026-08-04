@@ -29,8 +29,7 @@ export const edgeRoundnessValue = (geometry: Record<string, number>): number =>
 export function createRoundableBoxGeometry(
   width: number,
   height: number,
-  depth: number,
-  _geometry: Record<string, number>
+  depth: number
 ): THREE.BufferGeometry {
   // Reglerwerte bleiben kompatibel gespeichert, verändern die Geometrie aber bewusst nicht.
   return new THREE.BoxGeometry(width, height, depth);
