@@ -1,12 +1,10 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { PrimitiveType } from '../types/editor';
 
 export const DEFAULT_EDGE_ROUNDNESS = 0;
 
 const ROUNDING_SEGMENTS = 8;
 const MAX_RADIUS_FACTOR = 0.499;
-const CORNER_DIAGONAL_COMPONENT = 1 / Math.sqrt(3);
 const EPSILON = 0.000001;
 
 const ROUNDABLE_BOX_TYPES = new Set<PrimitiveType>([
@@ -49,85 +47,132 @@ export function roundedBoxRadius(
   return shortestSide * MAX_RADIUS_FACTOR * clampedPercent(roundness, 0) / 100;
 }
 
-function signed(value: number, absoluteValue: number): number {
-  return value < 0 ? -absoluteValue : absoluteValue;
+interface RoundedTarget {
+  position: THREE.Vector3;
+  activeAxes: number;
+  proximity: number;
 }
 
-function applyIndependentCornerAndEdgeRadii(
+function roundedTarget(
+  source: THREE.Vector3,
+  halfExtents: THREE.Vector3,
+  radius: number
+): RoundedTarget | null {
+  if (radius <= EPSILON) return null;
+
+  const absolute = new THREE.Vector3(Math.abs(source.x), Math.abs(source.y), Math.abs(source.z));
+  const core = new THREE.Vector3(
+    Math.max(0, halfExtents.x - radius),
+    Math.max(0, halfExtents.y - radius),
+    Math.max(0, halfExtents.z - radius)
+  );
+  const offset = new THREE.Vector3(
+    Math.max(0, absolute.x - core.x),
+    Math.max(0, absolute.y - core.y),
+    Math.max(0, absolute.z - core.z)
+  );
+  const activeAxes = Number(offset.x > EPSILON)
+    + Number(offset.y > EPSILON)
+    + Number(offset.z > EPSILON);
+  const offsetLength = offset.length();
+
+  if (activeAxes < 2 || offsetLength <= EPSILON) return null;
+
+  const direction = offset.multiplyScalar(1 / offsetLength);
+  const position = new THREE.Vector3(
+    offset.x > EPSILON ? core.x + direction.x * radius : absolute.x,
+    offset.y > EPSILON ? core.y + direction.y * radius : absolute.y,
+    offset.z > EPSILON ? core.z + direction.z * radius : absolute.z
+  );
+  position.set(
+    source.x < 0 ? -position.x : position.x,
+    source.y < 0 ? -position.y : position.y,
+    source.z < 0 ? -position.z : position.z
+  );
+
+  const activeFractions = [
+    offset.x > EPSILON ? offset.x / radius : null,
+    offset.y > EPSILON ? offset.y / radius : null,
+    offset.z > EPSILON ? offset.z / radius : null
+  ].filter((value): value is number => value !== null);
+  const proximity = activeFractions.length > 0
+    ? THREE.MathUtils.clamp(Math.min(...activeFractions), 0, 1)
+    : 0;
+
+  return { position, activeAxes, proximity };
+}
+
+function smoothRoundedNormals(
+  geometry: THREE.BufferGeometry,
+  roundedVertices: ReadonlySet<number>
+): void {
+  geometry.computeVertexNormals();
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  const accumulated = new Map<string, THREE.Vector3>();
+
+  for (const index of roundedVertices) {
+    const key = `${position.getX(index).toFixed(6)}:${position.getY(index).toFixed(6)}:${position.getZ(index).toFixed(6)}`;
+    const sum = accumulated.get(key) ?? new THREE.Vector3();
+    sum.add(new THREE.Vector3(normal.getX(index), normal.getY(index), normal.getZ(index)));
+    accumulated.set(key, sum);
+  }
+
+  for (const index of roundedVertices) {
+    const key = `${position.getX(index).toFixed(6)}:${position.getY(index).toFixed(6)}:${position.getZ(index).toFixed(6)}`;
+    const averaged = accumulated.get(key)?.normalize();
+    if (averaged) normal.setXYZ(index, averaged.x, averaged.y, averaged.z);
+  }
+
+  normal.needsUpdate = true;
+}
+
+function applySeparatedRounding(
   geometry: THREE.BufferGeometry,
   width: number,
   height: number,
   depth: number,
-  sourceRadius: number,
   edgeRadius: number,
   cornerRadius: number
 ): THREE.BufferGeometry {
   const position = geometry.getAttribute('position');
-  const halfExtents = [Math.abs(width) / 2, Math.abs(height) / 2, Math.abs(depth) / 2] as const;
-  const sourceCore = halfExtents.map((halfExtent) => Math.max(0, halfExtent - sourceRadius));
+  const halfExtents = new THREE.Vector3(
+    Math.abs(width) / 2,
+    Math.abs(height) / 2,
+    Math.abs(depth) / 2
+  );
+  const roundedVertices = new Set<number>();
 
   for (let index = 0; index < position.count; index += 1) {
-    const coordinates = [position.getX(index), position.getY(index), position.getZ(index)];
-    const absoluteCoordinates = coordinates.map(Math.abs);
-    const offsets = absoluteCoordinates.map((coordinate, axis) =>
-      Math.max(0, coordinate - (sourceCore[axis] ?? 0))
+    const source = new THREE.Vector3(
+      position.getX(index),
+      position.getY(index),
+      position.getZ(index)
     );
-    const activeAxes = offsets.reduce((count, offset) => count + (offset > EPSILON ? 1 : 0), 0);
+    let result = source.clone();
 
-    // Eine aktive Achse gehört zu einer ebenen Fläche und bleibt vollständig unverändert.
-    if (activeAxes < 2) continue;
-
-    const normalizedOffsets = offsets.map((offset) =>
-      THREE.MathUtils.clamp(offset / sourceRadius, 0, 1)
-    );
-
-    // Zwei aktive Achsen sind eine reine Kante. Erst bei drei aktiven Achsen
-    // beginnt der Eckbereich. Am Übergang bleibt der Kantenradius erhalten;
-    // ausschließlich im Zentrum der Ecke wirkt der Eckenradius vollständig.
-    const cornerWeight = activeAxes === 3
-      ? THREE.MathUtils.smoothstep(
-          Math.min(
-            normalizedOffsets[0] ?? 0,
-            normalizedOffsets[1] ?? 0,
-            normalizedOffsets[2] ?? 0
-          ),
-          0,
-          CORNER_DIAGONAL_COMPONENT
-        )
-      : 0;
-    const localRadius = THREE.MathUtils.lerp(edgeRadius, cornerRadius, cornerWeight);
-
-    for (let axis = 0; axis < 3; axis += 1) {
-      const halfExtent = halfExtents[axis] ?? 0;
-      const coordinate = coordinates[axis] ?? 0;
-      const offset = offsets[axis] ?? 0;
-      let absolutePosition: number;
-
-      if (offset > EPSILON) {
-        // Profilrichtung des stabilen Ausgangsnetzes beibehalten und nur den
-        // zuständigen Radius austauschen.
-        absolutePosition = halfExtent
-          - localRadius
-          + (normalizedOffsets[axis] ?? 0) * localRadius;
-      } else {
-        // Die Längsachse einer Kante wird nur an den neuen Kern angepasst.
-        // Dadurch bleiben Außenmaße und Übergänge geschlossen.
-        const sourceHalfCore = sourceCore[axis] ?? 0;
-        const targetHalfCore = Math.max(0, halfExtent - localRadius);
-        const normalizedCorePosition = sourceHalfCore > EPSILON
-          ? THREE.MathUtils.clamp(absoluteCoordinates[axis] / sourceHalfCore, 0, 1)
-          : 0;
-        absolutePosition = normalizedCorePosition * targetHalfCore;
-      }
-
-      if (axis === 0) position.setX(index, signed(coordinate, absolutePosition));
-      else if (axis === 1) position.setY(index, signed(coordinate, absolutePosition));
-      else position.setZ(index, signed(coordinate, absolutePosition));
+    const edge = roundedTarget(source, halfExtents, edgeRadius);
+    if (edge && edge.activeAxes >= 2) {
+      const cornerFade = edge.activeAxes === 3
+        ? THREE.MathUtils.smoothstep(edge.proximity, 0, 1)
+        : 0;
+      const edgeWeight = 1 - cornerFade;
+      if (edgeWeight > EPSILON) result.lerp(edge.position, edgeWeight);
     }
+
+    const corner = roundedTarget(source, halfExtents, cornerRadius);
+    if (corner?.activeAxes === 3) {
+      const cornerWeight = THREE.MathUtils.smoothstep(corner.proximity, 0, 1);
+      if (cornerWeight > EPSILON) result.lerp(corner.position, cornerWeight);
+    }
+
+    if (result.distanceToSquared(source) <= EPSILON * EPSILON) continue;
+    position.setXYZ(index, result.x, result.y, result.z);
+    roundedVertices.add(index);
   }
 
   position.needsUpdate = true;
-  geometry.computeVertexNormals();
+  smoothRoundedNormals(geometry, roundedVertices);
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
@@ -151,24 +196,25 @@ export function createRoundableBoxGeometry(
     depth,
     edgeRoundnessValue(geometry)
   );
-  const sourceRadius = Math.max(cornerRadius, edgeRadius);
 
-  if (sourceRadius <= EPSILON) return new THREE.BoxGeometry(width, height, depth);
+  if (cornerRadius <= EPSILON && edgeRadius <= EPSILON) {
+    return new THREE.BoxGeometry(width, height, depth);
+  }
 
-  const rounded = new RoundedBoxGeometry(
+  const segmented = new THREE.BoxGeometry(
     width,
     height,
     depth,
-    roundedBoxSegments(),
-    sourceRadius
+    ROUNDING_SEGMENTS,
+    ROUNDING_SEGMENTS,
+    ROUNDING_SEGMENTS
   );
 
-  return applyIndependentCornerAndEdgeRadii(
-    rounded,
+  return applySeparatedRounding(
+    segmented,
     width,
     height,
     depth,
-    sourceRadius,
     edgeRadius,
     cornerRadius
   );
