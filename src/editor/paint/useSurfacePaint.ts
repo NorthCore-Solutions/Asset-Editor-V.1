@@ -52,10 +52,15 @@ function useContrastCenterMarker(
   const scene = useThree((state) => state.scene);
   const tool = useEditorStore((state) => state.tool);
   const selectedCount = useEditorStore((state) => state.selectedIds.length);
-  const localAverageSize = useMemo(() => {
+  const geometryMetrics = useMemo(() => {
     geometry.computeBoundingBox();
-    const size = geometry.boundingBox?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(1, 1, 1);
-    return (Math.abs(size.x) + Math.abs(size.y) + Math.abs(size.z)) / 3;
+    const bounds = geometry.boundingBox;
+    const size = bounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(1, 1, 1);
+    const center = bounds?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+    return {
+      localAverageSize: (Math.abs(size.x) + Math.abs(size.y) + Math.abs(size.z)) / 3,
+      localCenter: center
+    };
   }, [geometry]);
   const marker = useMemo(() => {
     const markerGeometry = new THREE.OctahedronGeometry(MARKER_SOURCE_DIAMETER / 2, 0);
@@ -102,9 +107,22 @@ function useContrastCenterMarker(
     marker.visible = visible;
     if (!visible) return;
 
-    marker.position.set(object.position[0], object.position[1], object.position[2]);
+    const transformedCenter = geometryMetrics.localCenter.clone()
+      .multiply(new THREE.Vector3(
+        object.scale[0],
+        object.scale[1],
+        object.scale[2]
+      ))
+      .applyEuler(new THREE.Euler(
+        object.rotation[0],
+        object.rotation[1],
+        object.rotation[2]
+      ));
+    marker.position
+      .set(object.position[0], object.position[1], object.position[2])
+      .add(transformedCenter);
     marker.quaternion.identity();
-    const averageWorldSize = localAverageSize * (
+    const averageWorldSize = geometryMetrics.localAverageSize * (
       Math.abs(object.scale[0]) + Math.abs(object.scale[1]) + Math.abs(object.scale[2])
     ) / 3;
     const diameter = THREE.MathUtils.clamp(averageWorldSize * 0.064, 0.035, 0.32);
