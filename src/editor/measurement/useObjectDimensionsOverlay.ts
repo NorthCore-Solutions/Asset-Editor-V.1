@@ -6,11 +6,11 @@ import { useDimensionOverlayVisible } from './dimensionOverlaySession';
 
 const DIMENSION_COLOR = '#00E5FF';
 const LABEL_BACKGROUND = 'rgba(3, 20, 27, 0.9)';
-const LABEL_FONT = '400 38px Inter, system-ui, sans-serif';
+const LABEL_FONT = '300 36px Inter, system-ui, sans-serif';
 const REFERENCE_LABEL_WIDTH = 256;
 const REFERENCE_LABEL_HEIGHT = 96;
-const LABEL_HORIZONTAL_PADDING = 16;
-const LABEL_VERTICAL_PADDING = 8;
+const LABEL_PADDING = 8;
+const LABEL_BORDER_INSET = 2;
 
 export interface ObjectDimensionLayout {
   min: THREE.Vector3;
@@ -162,31 +162,30 @@ function createDimensionLabel(
   const textRaster = createTextRaster(text);
   const glyphWidth = textRaster.bounds.maxX - textRaster.bounds.minX + 1;
   const glyphHeight = textRaster.bounds.maxY - textRaster.bounds.minY + 1;
+  const contentInset = LABEL_BORDER_INSET + LABEL_PADDING;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(56, glyphWidth + LABEL_HORIZONTAL_PADDING * 2);
-  canvas.height = glyphHeight + LABEL_VERTICAL_PADDING * 2;
+  canvas.width = glyphWidth + contentInset * 2;
+  canvas.height = glyphHeight + contentInset * 2;
 
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  drawRoundedRectangle(context, 1, 1, canvas.width - 2, canvas.height - 2, 10);
+  drawRoundedRectangle(context, 1, 1, canvas.width - 2, canvas.height - 2, 8);
   context.fillStyle = LABEL_BACKGROUND;
   context.fill();
   context.lineWidth = 2;
   context.strokeStyle = DIMENSION_COLOR;
   context.stroke();
 
-  const targetX = Math.round((canvas.width - glyphWidth) * 0.5);
-  const targetY = Math.round((canvas.height - glyphHeight) * 0.5);
   context.drawImage(
     textRaster.canvas,
     textRaster.bounds.minX,
     textRaster.bounds.minY,
     glyphWidth,
     glyphHeight,
-    targetX,
-    targetY,
+    contentInset,
+    contentInset,
     glyphWidth,
     glyphHeight
   );
