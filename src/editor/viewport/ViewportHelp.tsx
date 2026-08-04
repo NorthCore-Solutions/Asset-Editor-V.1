@@ -7,7 +7,10 @@ export function ViewportHelp() {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setHost(document.querySelector<HTMLElement>('.viewport'));
+    const frame = window.requestAnimationFrame(() => {
+      setHost(document.querySelector<HTMLElement>('.viewport'));
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
