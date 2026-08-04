@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability -- Dieser Adapter verwaltet absichtlich mutable Canvas-, Three.js- und OrbitControls-Ressourcen außerhalb des React-Zustands. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -220,7 +221,9 @@ export function useSurfacePaint(
     [atlas, geometry, object.scale[0], object.scale[1], object.scale[2]]
   );
   const metricsRef = useRef(metrics);
-  metricsRef.current = metrics;
+  useEffect(() => {
+    metricsRef.current = metrics;
+  }, [metrics]);
   const metricsKey = surfaceMetricsKey(metrics);
 
   const loadedDataUrlRef = useRef<string | null | undefined>(undefined);

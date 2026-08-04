@@ -162,7 +162,8 @@ export function TexturePaintEditor({
   const [surfaceEnabled, setSurfaceEnabled] = useState(false);
   const [selectedIsland, setSelectedIsland] = useState(-1);
   const [copyTargetIsland, setCopyTargetIsland] = useState(-1);
-  const [, refreshControls] = useState(0);
+  const [historyLength, setHistoryLength] = useState(0);
+  const [futureLength, setFutureLength] = useState(0);
   const dimensionsKey = surfaceDimensionsKey(metrics);
   const metricsKey = surfaceMetricsKey(metrics);
 
@@ -211,7 +212,8 @@ export function TexturePaintEditor({
     if (layersRef.current.length === 0) return;
     historyRef.current = [...historyRef.current.slice(-29), snapshotLayers(layersRef.current)];
     futureRef.current = [];
-    refreshControls((value) => value + 1);
+    setHistoryLength(historyRef.current.length);
+    setFutureLength(futureRef.current.length);
   };
 
   useEffect(() => subscribeSurfacePaint((settings) => {
@@ -231,16 +233,16 @@ export function TexturePaintEditor({
   useEffect(() => {
     const clamped = Math.min(Math.max(-1, selectedIsland), Math.max(0, atlas.islands.length - 1));
     if (clamped !== selectedIsland) {
-      setSelectedIsland(clamped);
-      setSurfacePaintSettings({ islandIndex: clamped });
-      return;
+      const timer = window.setTimeout(() => {
+        setSelectedIsland(clamped);
+        setSurfacePaintSettings({ islandIndex: clamped });
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     renderSelectedSurface(clamped);
   }, [atlas.signature, selectedIsland, metricsKey]);
 
-  useEffect(() => {
-    setCopyTargetIsland((current) => current >= atlas.islands.length ? -1 : current);
-  }, [atlas.islands.length]);
+  const validCopyTargetIsland = copyTargetIsland >= atlas.islands.length ? -1 : copyTargetIsland;
 
   const changeTool = (nextTool: PaintTool): void => {
     setTool(nextTool);
@@ -298,7 +300,8 @@ export function TexturePaintEditor({
         historyRef.current = [];
         futureRef.current = [];
         renderSelectedSurface();
-        refreshControls((value) => value + 1);
+        setHistoryLength(historyRef.current.length);
+        setFutureLength(futureRef.current.length);
 
         const storedGrid = texture?.surfaceGrid;
         const needsMigration = Boolean(texture) && (
@@ -459,9 +462,9 @@ export function TexturePaintEditor({
     const source = layersRef.current[selectedIsland];
     const sourceMetric = metrics[selectedIsland];
     if (!source || !sourceMetric || selectedIsland < 0) return;
-    const targetIndices = copyTargetIsland < 0
+    const targetIndices = validCopyTargetIsland < 0
       ? atlas.islands.map((_, index) => index).filter((index) => index !== selectedIsland)
-      : [copyTargetIsland];
+      : [validCopyTargetIsland];
     if (targetIndices.length === 0 || targetIndices.includes(selectedIsland)) return;
 
     pushHistory();
@@ -483,7 +486,8 @@ export function TexturePaintEditor({
     layersRef.current = canvasesFromSnapshot(previous);
     renderSelectedSurface();
     commitLayers();
-    refreshControls((value) => value + 1);
+    setHistoryLength(historyRef.current.length);
+    setFutureLength(futureRef.current.length);
   };
 
   const redo = (): void => {
@@ -494,7 +498,8 @@ export function TexturePaintEditor({
     layersRef.current = canvasesFromSnapshot(next);
     renderSelectedSurface();
     commitLayers();
-    refreshControls((value) => value + 1);
+    setHistoryLength(historyRef.current.length);
+    setFutureLength(futureRef.current.length);
   };
 
   const clearTexture = (): void => {
@@ -503,7 +508,8 @@ export function TexturePaintEditor({
     loadedKeyRef.current = '';
     layersRef.current = [];
     onCommit(undefined);
-    refreshControls((value) => value + 1);
+    setHistoryLength(historyRef.current.length);
+    setFutureLength(futureRef.current.length);
   };
 
   const selectedSurface = selectedIsland >= 0 ? atlas.islands[selectedIsland] : undefined;
@@ -512,7 +518,7 @@ export function TexturePaintEditor({
     : surfaceDisplayLabel(selectedIsland, selectedSurface?.label ?? 'Oberfläche');
   const copyDisabled = atlas.islands.length < 2
     || selectedIsland < 0
-    || copyTargetIsland === selectedIsland;
+    || validCopyTargetIsland === selectedIsland;
 
   return (
     <div className="paint-editor">
@@ -587,7 +593,7 @@ export function TexturePaintEditor({
 
         <div className="field-row">
           <label>Kopieren nach</label>
-          <select value={copyTargetIsland} onChange={(event) => setCopyTargetIsland(Number(event.target.value))}>
+          <select value={validCopyTargetIsland} onChange={(event) => setCopyTargetIsland(Number(event.target.value))}>
             <option value={-1}>Alle Flächen</option>
             {atlas.islands.map((island, islandIndex) => (
               <option key={`copy:${island.label}:${islandIndex}`} value={islandIndex}>
@@ -619,8 +625,8 @@ export function TexturePaintEditor({
       </div>
 
       <div className="paint-history-actions">
-        <button type="button" disabled={historyRef.current.length === 0} onClick={undo}>Rückgängig</button>
-        <button type="button" disabled={futureRef.current.length === 0} onClick={redo}>Wiederholen</button>
+        <button type="button" disabled={historyLength === 0} onClick={undo}>Rückgängig</button>
+        <button type="button" disabled={futureLength === 0} onClick={redo}>Wiederholen</button>
         <button type="button" className="danger" disabled={!texture} onClick={clearTexture}>Entfernen</button>
       </div>
     </div>

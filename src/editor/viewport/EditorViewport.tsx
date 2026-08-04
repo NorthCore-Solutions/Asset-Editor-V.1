@@ -960,6 +960,8 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
     && selectedObjects.every((object) => object.visible && !object.locked);
 
   useEffect(() => {
+    // Der Highlight-Zustand muss synchron mit dem externen Snapping-Modus zurückgesetzt werden.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!snap.surface || (tool !== 'translate' && tool !== 'scale') || paintSettings.enabled) setSnapTargetId(null);
   }, [paintSettings.enabled, snap.surface, tool]);
 
