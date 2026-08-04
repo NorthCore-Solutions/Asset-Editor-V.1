@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MATERIAL_PRESETS } from '../../materials/presets';
 import { createGeometry } from '../../geometry/factory';
+import {
+  cornerRoundnessValue,
+  edgeRoundnessValue,
+  supportsGeometryRounding
+} from '../../geometry/rounding';
 import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
 import { getSurfaceRasterMetrics } from '../../editor/paint/surfacePaintGrid';
 import { setSurfacePaintSettings, subscribeSurfacePaint } from '../../editor/paint/surfacePaintSession';
@@ -136,10 +141,46 @@ function VectorEditor({ label, value, unit, onChange }: { label: string; value: 
   );
 }
 
-function RangeField({ label, value, min, max, step, onChange }: { label: string; value: number; min: number; max: number; step: number; onChange: (value: number, history?: boolean) => void }) {
+function RangeField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  decimals = 2,
+  className,
+  title,
+  onChange
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  decimals?: number;
+  className?: string;
+  title?: string;
+  onChange: (value: number, history?: boolean) => void;
+}) {
   const begin = useEditorStore((state) => state.beginTransaction);
   const end = useEditorStore((state) => state.endTransaction);
-  return <div className="range-row"><label>{label}</label><input type="range" min={min} max={max} step={step} value={value} onPointerDown={begin} onPointerUp={end} onChange={(event) => onChange(Number(event.target.value), false)} /><span>{value.toFixed(2)}</span></div>;
+  return (
+    <div className={`range-row${className ? ` ${className}` : ''}`} title={title}>
+      <label>{label}</label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onPointerDown={begin}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onChange={(event) => onChange(Number(event.target.value), false)}
+      />
+      <span>{value.toFixed(decimals)}</span>
+    </div>
+  );
 }
 
 function PropertiesHeader({ collapsed, onToggle }: PropertiesPanelProps) {
@@ -221,6 +262,11 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
   }
 
   const setMaterial = (patch: Partial<MaterialData>, history = true) => updateMaterial(object.id, patch, history);
+  const setGeometry = (patch: Record<string, number>, history = true) => updateObject(
+    object.id,
+    { geometry: { ...object.geometry, ...patch } },
+    history
+  );
   const shownColor = colorTarget === 'base' ? object.material.color : paintColor;
 
   const changeBaseColor = (normalized: string): void => {
@@ -285,6 +331,32 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
           <VectorEditor label="Position" value={object.position} onChange={(value) => updateTransform(object.id, 'position', value)} />
           <VectorEditor label="Rotation" value={object.rotation} unit="deg" onChange={(value) => updateTransform(object.id, 'rotation', value)} />
           <VectorEditor label="Skalierung" value={object.scale} onChange={(value) => updateTransform(object.id, 'scale', value)} />
+          {supportsGeometryRounding(object.type) && (
+            <div className="rounding-controls">
+              <RangeField
+                className="rounding-range-row"
+                label="Ecken abrunden"
+                value={cornerRoundnessValue(object.geometry)}
+                min={0}
+                max={100}
+                step={1}
+                decimals={0}
+                title="Bestimmt die Größe des Abrundungsradius."
+                onChange={(value, history) => setGeometry({ cornerRoundness: value }, history)}
+              />
+              <RangeField
+                className="rounding-range-row"
+                label="Eckkanten abrunden"
+                value={edgeRoundnessValue(object.geometry)}
+                min={0}
+                max={100}
+                step={1}
+                decimals={0}
+                title="Bestimmt, wie weich die abgerundeten Kanten aufgebaut werden."
+                onChange={(value, history) => setGeometry({ edgeRoundness: value }, history)}
+              />
+            </div>
+          )}
         </section>
 
         <section className="panel-section">
