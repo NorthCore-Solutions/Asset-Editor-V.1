@@ -103,6 +103,10 @@ input:focus, select:focus { outline: 1px solid var(--green-accent); border-color
 .range-row { display: grid; grid-template-columns: 86px 1fr 42px; align-items: center; gap: 5px; min-height: 30px; font-size: 12px; }
 .range-row label { color: var(--muted); }
 .range-row input { width: 100%; }
+.rounding-controls { margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(52, 65, 73, .72); }
+.rounding-range-row { grid-template-columns: 112px minmax(0, 1fr) 28px; min-height: 28px; font-size: 11px; }
+.rounding-range-row label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.rounding-range-row span { text-align: right; font-variant-numeric: tabular-nums; }
 .object-list { width: 100%; border-collapse: collapse; font-size: 12px; }
 .object-list th { position: sticky; top: 32px; background: #171e22; color: var(--muted); font-weight: 600; text-align: left; border-bottom: 1px solid var(--border); padding: 5px 8px; }
 .object-list td { border-bottom: 1px solid #273138; padding: 4px 8px; height: 29px; }
