@@ -6,7 +6,7 @@ import { useDimensionOverlayVisible } from './dimensionOverlaySession';
 
 const DIMENSION_COLOR = '#00E5FF';
 const LABEL_BACKGROUND = 'rgba(3, 20, 27, 0.9)';
-const LABEL_FONT = '600 38px Inter, system-ui, sans-serif';
+const LABEL_FONT = '400 38px Inter, system-ui, sans-serif';
 const REFERENCE_LABEL_WIDTH = 256;
 const REFERENCE_LABEL_HEIGHT = 96;
 
@@ -105,9 +105,13 @@ function createDimensionLabel(
   if (!measuringContext) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
 
   measuringContext.font = LABEL_FONT;
-  const textWidth = Math.ceil(measuringContext.measureText(text).width);
+  const measuredText = measuringContext.measureText(text);
+  const textWidth = Math.ceil(measuredText.width);
+  const textAscent = Math.ceil(measuredText.actualBoundingBoxAscent || 30);
+  const textDescent = Math.ceil(measuredText.actualBoundingBoxDescent || 8);
+  const verticalPadding = 10;
   canvas.width = Math.max(72, textWidth + 32);
-  canvas.height = 64;
+  canvas.height = Math.max(56, textAscent + textDescent + verticalPadding * 2);
 
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
@@ -122,8 +126,12 @@ function createDimensionLabel(
   context.fillStyle = '#C9FBFF';
   context.font = LABEL_FONT;
   context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText(text, canvas.width * 0.5, canvas.height * 0.51);
+  context.textBaseline = 'alphabetic';
+  context.fillText(
+    text,
+    canvas.width * 0.5,
+    (canvas.height + textAscent - textDescent) * 0.5
+  );
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
