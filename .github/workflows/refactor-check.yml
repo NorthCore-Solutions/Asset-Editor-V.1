@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - refactor-safe-2026-08-04
+  pull_request:
+    branches:
+      - main
 
 jobs:
   verify:
