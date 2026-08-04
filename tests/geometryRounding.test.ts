@@ -168,8 +168,8 @@ describe('Geometrie-Abrundung', () => {
   });
 
   it('begrenzt Radius sicher und hält die Auflösung konstant', () => {
-    expect(roundedBoxSegments(-100)).toBe(8);
-    expect(roundedBoxSegments(1000)).toBe(8);
+    expect(roundedBoxSegments(-100)).toBe(12);
+    expect(roundedBoxSegments(1000)).toBe(12);
     expect(roundedBoxRadius(2, 1, 3, -10)).toBe(0);
     expect(roundedBoxRadius(2, 1, 3, 1000)).toBeCloseTo(0.499, 6);
   });
