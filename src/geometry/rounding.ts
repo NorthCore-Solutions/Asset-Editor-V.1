@@ -6,7 +6,7 @@ export const DEFAULT_EDGE_ROUNDNESS = 0;
 
 const ROUNDING_SEGMENTS = 8;
 const MAX_RADIUS_FACTOR = 0.499;
-const CORNER_BLEND_LIMIT = 1 / Math.sqrt(3);
+const CORNER_DIAGONAL_COMPONENT = 1 / Math.sqrt(3);
 const EPSILON = 0.000001;
 
 const ROUNDABLE_BOX_TYPES = new Set<PrimitiveType>([
@@ -53,59 +53,72 @@ function signed(value: number, absoluteValue: number): number {
   return value < 0 ? -absoluteValue : absoluteValue;
 }
 
-function applyConvexRoundingProfile(
+function applyIndependentCornerAndEdgeRadii(
   geometry: THREE.BufferGeometry,
   width: number,
   height: number,
   depth: number,
-  radius: number,
-  edgeRoundness: number,
-  cornerRoundness: number
+  sourceRadius: number,
+  edgeRadius: number,
+  cornerRadius: number
 ): THREE.BufferGeometry {
   const position = geometry.getAttribute('position');
   const halfExtents = [Math.abs(width) / 2, Math.abs(height) / 2, Math.abs(depth) / 2] as const;
-  const core = halfExtents.map((halfExtent) => Math.max(0, halfExtent - radius));
-  const edgeBlend = clampedPercent(edgeRoundness, 0) / 100;
-  const cornerBlend = clampedPercent(cornerRoundness, 0) / 100;
+  const sourceCore = halfExtents.map((halfExtent) => Math.max(0, halfExtent - sourceRadius));
 
   for (let index = 0; index < position.count; index += 1) {
     const coordinates = [position.getX(index), position.getY(index), position.getZ(index)];
-    const offsets = coordinates.map((coordinate, axis) =>
-      Math.max(0, Math.abs(coordinate) - (core[axis] ?? 0))
+    const absoluteCoordinates = coordinates.map(Math.abs);
+    const offsets = absoluteCoordinates.map((coordinate, axis) =>
+      Math.max(0, coordinate - (sourceCore[axis] ?? 0))
     );
     const activeAxes = offsets.reduce((count, offset) => count + (offset > EPSILON ? 1 : 0), 0);
 
-    // Flächenmitten bleiben vollständig eben. Nur Kanten und Ecken werden verändert.
+    // Eine aktive Achse gehört zu einer ebenen Fläche und bleibt vollständig unverändert.
     if (activeAxes < 2) continue;
 
-    const lengthL1 = offsets.reduce((sum, offset) => sum + offset, 0);
-    const lengthL2 = Math.hypot(offsets[0] ?? 0, offsets[1] ?? 0, offsets[2] ?? 0);
-    if (lengthL1 <= EPSILON || lengthL2 <= EPSILON) continue;
+    const normalizedOffsets = offsets.map((offset) =>
+      THREE.MathUtils.clamp(offset / sourceRadius, 0, 1)
+    );
 
-    const linearProfile = offsets.map((offset) => offset / lengthL1);
-    const circularProfile = offsets.map((offset) => offset / lengthL2);
-    const fractions = offsets
-      .filter((offset) => offset > EPSILON)
-      .map((offset) => THREE.MathUtils.clamp(offset / radius, 0, 1));
-
-    const transitionToCorner = activeAxes === 3
-      ? THREE.MathUtils.smoothstep(Math.min(...fractions), 0, CORNER_BLEND_LIMIT)
+    // Zwei aktive Achsen sind eine reine Kante. Erst bei drei aktiven Achsen
+    // beginnt der Eckbereich. Am Übergang bleibt der Kantenradius erhalten;
+    // ausschließlich im Zentrum der Ecke wirkt der Eckenradius vollständig.
+    const cornerWeight = activeAxes === 3
+      ? THREE.MathUtils.smoothstep(
+          Math.min(
+            normalizedOffsets[0] ?? 0,
+            normalizedOffsets[1] ?? 0,
+            normalizedOffsets[2] ?? 0
+          ),
+          0,
+          CORNER_DIAGONAL_COMPONENT
+        )
       : 0;
-    const profileBlend = activeAxes === 3
-      ? THREE.MathUtils.lerp(edgeBlend, cornerBlend, transitionToCorner)
-      : edgeBlend;
+    const localRadius = THREE.MathUtils.lerp(edgeRadius, cornerRadius, cornerWeight);
 
     for (let axis = 0; axis < 3; axis += 1) {
-      const offset = offsets[axis] ?? 0;
-      if (offset <= EPSILON) continue;
-
-      const profile = THREE.MathUtils.lerp(
-        linearProfile[axis] ?? 0,
-        circularProfile[axis] ?? 0,
-        profileBlend
-      );
-      const absolutePosition = (core[axis] ?? 0) + profile * radius;
+      const halfExtent = halfExtents[axis] ?? 0;
       const coordinate = coordinates[axis] ?? 0;
+      const offset = offsets[axis] ?? 0;
+      let absolutePosition: number;
+
+      if (offset > EPSILON) {
+        // Profilrichtung des stabilen Ausgangsnetzes beibehalten und nur den
+        // zuständigen Radius austauschen.
+        absolutePosition = halfExtent
+          - localRadius
+          + (normalizedOffsets[axis] ?? 0) * localRadius;
+      } else {
+        // Die Längsachse einer Kante wird nur an den neuen Kern angepasst.
+        // Dadurch bleiben Außenmaße und Übergänge geschlossen.
+        const sourceHalfCore = sourceCore[axis] ?? 0;
+        const targetHalfCore = Math.max(0, halfExtent - localRadius);
+        const normalizedCorePosition = sourceHalfCore > EPSILON
+          ? THREE.MathUtils.clamp(absoluteCoordinates[axis] / sourceHalfCore, 0, 1)
+          : 0;
+        absolutePosition = normalizedCorePosition * targetHalfCore;
+      }
 
       if (axis === 0) position.setX(index, signed(coordinate, absolutePosition));
       else if (axis === 1) position.setY(index, signed(coordinate, absolutePosition));
@@ -126,32 +139,37 @@ export function createRoundableBoxGeometry(
   depth: number,
   geometry: Record<string, number>
 ): THREE.BufferGeometry {
-  const cornerRoundness = cornerRoundnessValue(geometry);
-  const edgeRoundness = edgeRoundnessValue(geometry);
-  const radius = roundedBoxRadius(
+  const cornerRadius = roundedBoxRadius(
     width,
     height,
     depth,
-    Math.max(cornerRoundness, edgeRoundness)
+    cornerRoundnessValue(geometry)
   );
+  const edgeRadius = roundedBoxRadius(
+    width,
+    height,
+    depth,
+    edgeRoundnessValue(geometry)
+  );
+  const sourceRadius = Math.max(cornerRadius, edgeRadius);
 
-  if (radius <= EPSILON) return new THREE.BoxGeometry(width, height, depth);
+  if (sourceRadius <= EPSILON) return new THREE.BoxGeometry(width, height, depth);
 
   const rounded = new RoundedBoxGeometry(
     width,
     height,
     depth,
     roundedBoxSegments(),
-    radius
+    sourceRadius
   );
 
-  return applyConvexRoundingProfile(
+  return applyIndependentCornerAndEdgeRadii(
     rounded,
     width,
     height,
     depth,
-    radius,
-    edgeRoundness,
-    cornerRoundness
+    sourceRadius,
+    edgeRadius,
+    cornerRadius
   );
 }
