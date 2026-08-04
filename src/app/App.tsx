@@ -10,9 +10,17 @@ import { EditorViewport } from '../editor/viewport/EditorViewport';
 import { ViewportHelp } from '../editor/viewport/ViewportHelp';
 import '../editor/viewport/viewport-help.css';
 import '../styles/panel-collapse.css';
+import '../styles/tablet.css';
 import { useEditorShortcuts } from '../editor/shortcuts/useEditorShortcuts';
 import { AUTOSAVE_KEY, buildProjectFile, deserializeProject, serializeProject } from '../persistence/projectFile';
 import { useEditorStore } from '../store/editorStore';
+
+const TABLET_MEDIA_QUERY = '(max-width: 1180px), (pointer: coarse) and (max-width: 1400px)';
+
+const isCompactWorkspace = (): boolean =>
+  typeof window !== 'undefined'
+  && typeof window.matchMedia === 'function'
+  && window.matchMedia(TABLET_MEDIA_QUERY).matches;
 
 export function App() {
   useEditorShortcuts();
@@ -22,10 +30,12 @@ export function App() {
   const loadProject = useEditorStore((state) => state.loadProject);
   const setMessage = useEditorStore((state) => state.setMessage);
   const initialAutosave = useMemo(() => localStorage.getItem(AUTOSAVE_KEY), []);
+  const compactAtStart = useMemo(isCompactWorkspace, []);
   const [restoreOpen, setRestoreOpen] = useState(Boolean(initialAutosave));
-  const [inventoryCollapsed, setInventoryCollapsed] = useState(false);
-  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
-  const [hierarchyCollapsed, setHierarchyCollapsed] = useState(false);
+  const [compactWorkspace, setCompactWorkspace] = useState(compactAtStart);
+  const [inventoryCollapsed, setInventoryCollapsed] = useState(compactAtStart);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(compactAtStart);
+  const [hierarchyCollapsed, setHierarchyCollapsed] = useState(compactAtStart);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -35,6 +45,21 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [objects, project, scene]);
 
+  useEffect(() => {
+    const media = window.matchMedia(TABLET_MEDIA_QUERY);
+    const handleChange = (event: MediaQueryListEvent): void => {
+      setCompactWorkspace(event.matches);
+      if (!event.matches) return;
+      setInventoryCollapsed(true);
+      setPropertiesCollapsed(true);
+      setHierarchyCollapsed(true);
+    };
+
+    setCompactWorkspace(media.matches);
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
+
   const restore = () => {
     if (!initialAutosave) { setRestoreOpen(false); return; }
     try { loadProject(deserializeProject(initialAutosave)); }
@@ -43,8 +68,17 @@ export function App() {
   };
 
   const discard = () => { localStorage.removeItem(AUTOSAVE_KEY); setRestoreOpen(false); };
+  const toggleInventory = (): void => {
+    if (compactWorkspace && inventoryCollapsed) setPropertiesCollapsed(true);
+    setInventoryCollapsed(!inventoryCollapsed);
+  };
+  const toggleProperties = (): void => {
+    if (compactWorkspace && propertiesCollapsed) setInventoryCollapsed(true);
+    setPropertiesCollapsed(!propertiesCollapsed);
+  };
   const workspaceClassName = [
     'workspace',
+    compactWorkspace ? 'compact-workspace' : '',
     inventoryCollapsed ? 'inventory-collapsed' : '',
     propertiesCollapsed ? 'properties-collapsed' : '',
     hierarchyCollapsed ? 'hierarchy-collapsed' : ''
@@ -55,10 +89,10 @@ export function App() {
       <TopBar />
       <EditorToolbar />
       <main className={workspaceClassName}>
-        <ShapesPanel collapsed={inventoryCollapsed} onToggle={() => setInventoryCollapsed((current) => !current)} />
+        <ShapesPanel collapsed={inventoryCollapsed} onToggle={toggleInventory} />
         <EditorViewport />
         <ViewportHelp />
-        <PropertiesPanel collapsed={propertiesCollapsed} onToggle={() => setPropertiesCollapsed((current) => !current)} />
+        <PropertiesPanel collapsed={propertiesCollapsed} onToggle={toggleProperties} />
         <HierarchyPanel collapsed={hierarchyCollapsed} onToggle={() => setHierarchyCollapsed((current) => !current)} />
       </main>
       <StatusBar />
