@@ -12,6 +12,10 @@ import {
 } from '../../geometry/uvAtlas';
 import { createFilledImageData, hexToRgba } from './pixelPaint';
 import { isPrimaryPointerActive, subscribePrimaryPointer } from './primaryPointerState';
+import {
+  chooseAtlasCellPixelSize,
+  chooseAtlasInnerPixelSize
+} from './surfaceAtlasSizing';
 
 export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
 const MAX_SURFACE_PIXELS = 384;
@@ -479,11 +483,16 @@ export function composeSurfaceAtlasCanvas(
   metrics: SurfaceRasterMetric[],
   baseColor: string
 ): HTMLCanvasElement {
-  const innerRatio = Math.max(0.1, 1 - atlas.padding * 2);
-  const maxWidth = Math.max(1, ...metrics.map((metric) => metric.width));
-  const maxHeight = Math.max(1, ...metrics.map((metric) => metric.height));
-  const cellWidth = Math.max(4, Math.ceil(maxWidth / innerRatio));
-  const cellHeight = Math.max(4, Math.ceil(maxHeight / innerRatio));
+  const innerWidth = chooseAtlasInnerPixelSize(
+    metrics.map((metric) => metric.width),
+    MAX_SURFACE_PIXELS
+  );
+  const innerHeight = chooseAtlasInnerPixelSize(
+    metrics.map((metric) => metric.height),
+    MAX_SURFACE_PIXELS
+  );
+  const cellWidth = chooseAtlasCellPixelSize(innerWidth, atlas.padding);
+  const cellHeight = chooseAtlasCellPixelSize(innerHeight, atlas.padding);
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, atlas.columns * cellWidth);
   canvas.height = Math.max(1, atlas.rows * cellHeight);
