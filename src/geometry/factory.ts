@@ -222,7 +222,7 @@ function createRawGeometry(object: Pick<SceneObjectData, 'type' | 'geometry'>): 
     case 'door':
     case 'window':
     case 'chimney':
-      return createRoundableBoxGeometry(g.width ?? 1, g.height ?? 1, g.depth ?? 1, g);
+      return createRoundableBoxGeometry(g.width ?? 1, g.height ?? 1, g.depth ?? 1);
     default:
       return new THREE.BoxGeometry(1, 1, 1);
   }
