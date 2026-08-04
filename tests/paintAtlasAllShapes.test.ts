@@ -58,6 +58,19 @@ function mappedSourcePixel(input: AxisMappingInput, atlasPixel: number): number 
   );
 }
 
+function projectedAtlasPixelsForSourcePixel(
+  input: AxisMappingInput,
+  sourcePixel: number
+): number {
+  const sourceEnd = input.sourceStart + input.sourcePixels;
+  const overlap = Math.max(
+    0,
+    Math.min(sourcePixel + 1, sourceEnd) - Math.max(sourcePixel, input.sourceStart)
+  );
+
+  return overlap / Math.max(EPSILON, input.sourcePixels) * input.atlasRegionPixels;
+}
+
 function expectCompleteAtlasPixelHitArea(input: AxisMappingInput): void {
   let previousSourcePixel = -1;
   const hitCounts = Array.from({ length: input.sourceLimit }, () => 0);
@@ -81,14 +94,14 @@ function expectCompleteAtlasPixelHitArea(input: AxisMappingInput): void {
     previousSourcePixel = expectedSourcePixel;
   }
 
-  const firstVisiblePixel = Math.max(0, Math.floor(input.sourceStart));
-  const lastVisiblePixel = Math.min(
-    input.sourceLimit - 1,
-    Math.floor(input.sourceStart + input.sourcePixels - EPSILON)
-  );
+  for (let sourcePixel = 0; sourcePixel < input.sourceLimit; sourcePixel += 1) {
+    const projectedPixels = projectedAtlasPixelsForSourcePixel(input, sourcePixel);
 
-  for (let sourcePixel = firstVisiblePixel; sourcePixel <= lastVisiblePixel; sourcePixel += 1) {
-    expect(hitCounts[sourcePixel]).toBeGreaterThan(0);
+    // Ein kleiner angeschnittener Rand kann weniger als einen Atlaspixel breit sein.
+    // Jede tatsächlich als mindestens ein Pixel darstellbare Kachel muss vollständig klickbar sein.
+    if (projectedPixels >= 1 - EPSILON) {
+      expect(hitCounts[sourcePixel]).toBeGreaterThan(0);
+    }
   }
 
   if (
@@ -96,13 +109,12 @@ function expectCompleteAtlasPixelHitArea(input: AxisMappingInput): void {
     && Math.abs(input.sourcePixels - Math.round(input.sourcePixels)) <= EPSILON
     && Math.round(input.sourcePixels) === input.sourceLimit
   ) {
-    const visibleCounts = hitCounts.slice(firstVisiblePixel, lastVisiblePixel + 1);
-    const minimum = Math.min(...visibleCounts);
-    const maximum = Math.max(...visibleCounts);
+    const minimum = Math.min(...hitCounts);
+    const maximum = Math.max(...hitCounts);
 
     expect(maximum - minimum).toBeLessThanOrEqual(1);
     if (input.atlasRegionPixels % input.sourceLimit === 0) {
-      expect(new Set(visibleCounts).size).toBe(1);
+      expect(new Set(hitCounts).size).toBe(1);
     }
   }
 }
