@@ -163,10 +163,18 @@ function cameraDestination(
   view: CameraView,
   target: THREE.Vector3,
   distance: number
-): { position: THREE.Vector3; up: THREE.Vector3 } | null {
+): { position: THREE.Vector3; up: THREE.Vector3 } {
   const up = new THREE.Vector3(0, 1, 0);
 
   switch (view) {
+    case 'perspective': return {
+      position: target.clone().add(new THREE.Vector3(6, 5, 7)),
+      up
+    };
+    case 'focus': return {
+      position: target.clone().add(new THREE.Vector3(distance, distance * 0.65, distance)),
+      up
+    };
     case 'front': return { position: target.clone().add(new THREE.Vector3(0, 0, distance)), up };
     case 'back': return { position: target.clone().add(new THREE.Vector3(0, 0, -distance)), up };
     case 'left': return { position: target.clone().add(new THREE.Vector3(-distance, 0, 0)), up };
@@ -179,7 +187,6 @@ function cameraDestination(
       position: target.clone().add(new THREE.Vector3(0, -distance, 0.001)),
       up: new THREE.Vector3(0, 0, 1)
     };
-    default: return null;
   }
 }
 
@@ -300,7 +307,6 @@ export function useSurfacePaint(
       Math.max(Math.abs(object.scale[0]), Math.abs(object.scale[1]), Math.abs(object.scale[2])) * 4
     );
     const destination = cameraDestination(settings.cameraView, target, distance);
-    if (!destination) return;
 
     const startUp = camera.up.clone().normalize();
     const endUp = destination.up.clone().normalize();
