@@ -78,7 +78,15 @@ function roundedTarget(
 
   if (activeAxes < 2 || offsetLength <= EPSILON) return null;
 
-  const direction = offset.multiplyScalar(1 / offsetLength);
+  const activeFractions = [
+    offset.x > EPSILON ? offset.x / radius : null,
+    offset.y > EPSILON ? offset.y / radius : null,
+    offset.z > EPSILON ? offset.z / radius : null
+  ].filter((value): value is number => value !== null);
+  const proximity = activeFractions.length > 0
+    ? THREE.MathUtils.clamp(Math.min(...activeFractions), 0, 1)
+    : 0;
+  const direction = offset.clone().multiplyScalar(1 / offsetLength);
   const position = new THREE.Vector3(
     offset.x > EPSILON ? core.x + direction.x * radius : absolute.x,
     offset.y > EPSILON ? core.y + direction.y * radius : absolute.y,
@@ -89,15 +97,6 @@ function roundedTarget(
     source.y < 0 ? -position.y : position.y,
     source.z < 0 ? -position.z : position.z
   );
-
-  const activeFractions = [
-    offset.x > EPSILON ? offset.x / radius : null,
-    offset.y > EPSILON ? offset.y / radius : null,
-    offset.z > EPSILON ? offset.z / radius : null
-  ].filter((value): value is number => value !== null);
-  const proximity = activeFractions.length > 0
-    ? THREE.MathUtils.clamp(Math.min(...activeFractions), 0, 1)
-    : 0;
 
   return { position, activeAxes, proximity };
 }
@@ -149,7 +148,7 @@ function applySeparatedRounding(
       position.getY(index),
       position.getZ(index)
     );
-    let result = source.clone();
+    const result = source.clone();
 
     const edge = roundedTarget(source, halfExtents, edgeRadius);
     if (edge && edge.activeAxes >= 2) {
