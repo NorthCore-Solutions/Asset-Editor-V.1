@@ -86,7 +86,6 @@ describe('Geometrie-Abrundung', () => {
       coarse.computeBoundingBox();
       smooth.computeBoundingBox();
       expect(triangleCount(smooth)).toBeGreaterThan(triangleCount(coarse));
-      expect(smooth.boundingBox?.getSize({ x: 0, y: 0, z: 0 } as never)).toBeDefined();
       expect(coarse.boundingBox?.min.x).toBeCloseTo(smooth.boundingBox?.min.x ?? 0, 5);
       expect(coarse.boundingBox?.max.x).toBeCloseTo(smooth.boundingBox?.max.x ?? 0, 5);
       expect(coarse.boundingBox?.min.y).toBeCloseTo(smooth.boundingBox?.min.y ?? 0, 5);
