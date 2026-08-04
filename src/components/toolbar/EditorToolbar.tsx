@@ -1,3 +1,4 @@
+import { requestSurfaceCameraView } from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
 import type { CameraView, TransformMode } from '../../types/editor';
 
@@ -14,15 +15,25 @@ const views: Array<{ view: CameraView; label: string }> = [
 export function EditorToolbar() {
   const tool = useEditorStore((state) => state.tool);
   const setTool = useEditorStore((state) => state.setTool);
+  const selectedIds = useEditorStore((state) => state.selectedIds);
   const snap = useEditorStore((state) => state.snap);
   const setSnap = useEditorStore((state) => state.setSnap);
   const scene = useEditorStore((state) => state.scene);
   const setScene = useEditorStore((state) => state.setScene);
   const requestCameraView = useEditorStore((state) => state.requestCameraView);
+
+  const selectCameraView = (view: CameraView): void => {
+    if (selectedIds.length === 1) {
+      requestSurfaceCameraView(view);
+      return;
+    }
+    requestCameraView(view);
+  };
+
   return (
     <div className="toolbar">
       <div className="group">{tools.map((item) => <button key={item.mode} className={tool === item.mode ? 'active' : ''} title={item.key} onClick={() => setTool(item.mode)}>{item.label}</button>)}</div>
-      <div className="group">{views.map((item) => <button key={item.view} onClick={() => requestCameraView(item.view)}>{item.label}</button>)}</div>
+      <div className="group">{views.map((item) => <button key={item.view} onClick={() => selectCameraView(item.view)}>{item.label}</button>)}</div>
       <div className="group">
         <label><input type="checkbox" checked={scene.gridVisible} onChange={(event) => setScene({ gridVisible: event.target.checked })} /> Raster</label>
         <label><input type="checkbox" checked={scene.axesVisible} onChange={(event) => setScene({ axesVisible: event.target.checked })} /> Achsen</label>
