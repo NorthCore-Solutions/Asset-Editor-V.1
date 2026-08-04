@@ -53,55 +53,64 @@ function signed(value: number, absoluteValue: number): number {
   return value < 0 ? -absoluteValue : absoluteValue;
 }
 
-function applyIndependentRounding(
+function applyConvexRoundingProfile(
   geometry: THREE.BufferGeometry,
   width: number,
   height: number,
   depth: number,
-  sourceRadius: number,
-  edgeRadius: number,
-  cornerRadius: number
+  radius: number,
+  edgeRoundness: number,
+  cornerRoundness: number
 ): THREE.BufferGeometry {
   const position = geometry.getAttribute('position');
   const halfExtents = [Math.abs(width) / 2, Math.abs(height) / 2, Math.abs(depth) / 2] as const;
-  const sourceCore = halfExtents.map((halfExtent) => Math.max(0, halfExtent - sourceRadius));
+  const core = halfExtents.map((halfExtent) => Math.max(0, halfExtent - radius));
+  const edgeBlend = clampedPercent(edgeRoundness, 0) / 100;
+  const cornerBlend = clampedPercent(cornerRoundness, 0) / 100;
 
   for (let index = 0; index < position.count; index += 1) {
     const coordinates = [position.getX(index), position.getY(index), position.getZ(index)];
-    const absolute = coordinates.map(Math.abs);
-    const offsets = absolute.map((value, axis) => Math.max(0, value - (sourceCore[axis] ?? 0)));
-    const offsetLength = Math.hypot(offsets[0] ?? 0, offsets[1] ?? 0, offsets[2] ?? 0);
-    if (offsetLength <= EPSILON) continue;
-
-    const fractions = offsets.map((offset) => THREE.MathUtils.clamp(offset / sourceRadius, 0, 1));
-    const cornerBlend = THREE.MathUtils.smoothstep(
-      Math.min(fractions[0] ?? 0, fractions[1] ?? 0, fractions[2] ?? 0),
-      0,
-      CORNER_BLEND_LIMIT
+    const offsets = coordinates.map((coordinate, axis) =>
+      Math.max(0, Math.abs(coordinate) - (core[axis] ?? 0))
     );
-    const localRadius = THREE.MathUtils.lerp(edgeRadius, cornerRadius, cornerBlend);
-    const next = [0, 0, 0];
+    const activeAxes = offsets.reduce((count, offset) => count + (offset > EPSILON ? 1 : 0), 0);
+
+    // Flächenmitten bleiben vollständig eben. Nur Kanten und Ecken werden verändert.
+    if (activeAxes < 2) continue;
+
+    const lengthL1 = offsets.reduce((sum, offset) => sum + offset, 0);
+    const lengthL2 = Math.hypot(offsets[0] ?? 0, offsets[1] ?? 0, offsets[2] ?? 0);
+    if (lengthL1 <= EPSILON || lengthL2 <= EPSILON) continue;
+
+    const linearProfile = offsets.map((offset) => offset / lengthL1);
+    const circularProfile = offsets.map((offset) => offset / lengthL2);
+    const fractions = offsets
+      .filter((offset) => offset > EPSILON)
+      .map((offset) => THREE.MathUtils.clamp(offset / radius, 0, 1));
+
+    const transitionToCorner = activeAxes === 3
+      ? THREE.MathUtils.smoothstep(Math.min(...fractions), 0, CORNER_BLEND_LIMIT)
+      : 0;
+    const profileBlend = activeAxes === 3
+      ? THREE.MathUtils.lerp(edgeBlend, cornerBlend, transitionToCorner)
+      : edgeBlend;
 
     for (let axis = 0; axis < 3; axis += 1) {
-      const halfExtent = halfExtents[axis] ?? 0;
-      const coordinate = coordinates[axis] ?? 0;
       const offset = offsets[axis] ?? 0;
+      if (offset <= EPSILON) continue;
 
-      if (offset > EPSILON) {
-        const normalComponent = offset / offsetLength;
-        next[axis] = signed(coordinate, halfExtent - localRadius + normalComponent * localRadius);
-        continue;
-      }
+      const profile = THREE.MathUtils.lerp(
+        linearProfile[axis] ?? 0,
+        circularProfile[axis] ?? 0,
+        profileBlend
+      );
+      const absolutePosition = (core[axis] ?? 0) + profile * radius;
+      const coordinate = coordinates[axis] ?? 0;
 
-      const sourceHalfCore = sourceCore[axis] ?? 0;
-      const targetHalfCore = Math.max(0, halfExtent - localRadius);
-      const normalized = sourceHalfCore > EPSILON
-        ? THREE.MathUtils.clamp(Math.abs(coordinate) / sourceHalfCore, 0, 1)
-        : 0;
-      next[axis] = signed(coordinate, normalized * targetHalfCore);
+      if (axis === 0) position.setX(index, signed(coordinate, absolutePosition));
+      else if (axis === 1) position.setY(index, signed(coordinate, absolutePosition));
+      else position.setZ(index, signed(coordinate, absolutePosition));
     }
-
-    position.setXYZ(index, next[0] ?? 0, next[1] ?? 0, next[2] ?? 0);
   }
 
   position.needsUpdate = true;
@@ -117,27 +126,32 @@ export function createRoundableBoxGeometry(
   depth: number,
   geometry: Record<string, number>
 ): THREE.BufferGeometry {
-  const cornerRadius = roundedBoxRadius(width, height, depth, cornerRoundnessValue(geometry));
-  const edgeRadius = roundedBoxRadius(width, height, depth, edgeRoundnessValue(geometry));
-  const sourceRadius = Math.max(cornerRadius, edgeRadius);
+  const cornerRoundness = cornerRoundnessValue(geometry);
+  const edgeRoundness = edgeRoundnessValue(geometry);
+  const radius = roundedBoxRadius(
+    width,
+    height,
+    depth,
+    Math.max(cornerRoundness, edgeRoundness)
+  );
 
-  if (sourceRadius <= EPSILON) return new THREE.BoxGeometry(width, height, depth);
+  if (radius <= EPSILON) return new THREE.BoxGeometry(width, height, depth);
 
   const rounded = new RoundedBoxGeometry(
     width,
     height,
     depth,
     roundedBoxSegments(),
-    sourceRadius
+    radius
   );
 
-  return applyIndependentRounding(
+  return applyConvexRoundingProfile(
     rounded,
     width,
     height,
     depth,
-    sourceRadius,
-    edgeRadius,
-    cornerRadius
+    radius,
+    edgeRoundness,
+    cornerRoundness
   );
 }
