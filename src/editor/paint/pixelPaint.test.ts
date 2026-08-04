@@ -9,7 +9,7 @@ function image(width: number, height: number, color = hexToRgba('#FFFFFF')): Ima
     data[index * 4 + 2] = color.b;
     data[index * 4 + 3] = color.a;
   }
-  return { data, width, height, colorSpace: 'srgb' } as ImageData;
+  return { data, width, height, colorSpace: 'srgb' };
 }
 
 describe('Pixelbemalung', () => {
