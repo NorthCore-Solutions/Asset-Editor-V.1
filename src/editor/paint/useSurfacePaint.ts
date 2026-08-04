@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { SceneObjectData } from '../../types/editor';
 import { useObjectDimensionsOverlay } from '../measurement/useObjectDimensionsOverlay';
+import { useViewportPerformance } from '../viewport/useViewportPerformance';
 import type { SurfacePaintSettings } from './surfacePaintSession';
 import {
   useSurfacePaint as useSurfacePaintGrid,
@@ -118,6 +119,7 @@ export function useSurfacePaint(
   geometry: THREE.BufferGeometry
 ): SurfacePaintBinding {
   useNeutralMaterialEnvironment();
+  useViewportPerformance(object, geometry);
   useObjectDimensionsOverlay(object, geometry);
   const binding = useSurfacePaintGrid(object, selected, settings, geometry);
   useSceneMaterialSync(object, geometry, binding.texture);
