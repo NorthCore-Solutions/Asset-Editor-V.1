@@ -9,6 +9,8 @@ const LABEL_BACKGROUND = 'rgba(3, 20, 27, 0.9)';
 const LABEL_FONT = '400 38px Inter, system-ui, sans-serif';
 const REFERENCE_LABEL_WIDTH = 256;
 const REFERENCE_LABEL_HEIGHT = 96;
+const LABEL_HORIZONTAL_PADDING = 16;
+const LABEL_VERTICAL_PADDING = 8;
 
 export interface ObjectDimensionLayout {
   min: THREE.Vector3;
@@ -29,6 +31,13 @@ interface DimensionEntry {
   start: THREE.Vector3;
   end: THREE.Vector3;
   label: THREE.Vector3;
+}
+
+interface OpaqueBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 }
 
 function scaledRange(minimum: number, maximum: number, scale: number): [number, number] {
@@ -94,24 +103,68 @@ function drawRoundedRectangle(
   context.closePath();
 }
 
+function findOpaqueBounds(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): OpaqueBounds | null {
+  const pixels = context.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = pixels[(y * width + x) * 4 + 3];
+      if (alpha === 0) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  return maxX >= minX && maxY >= minY
+    ? { minX, minY, maxX, maxY }
+    : null;
+}
+
+function createTextRaster(text: string): { canvas: HTMLCanvasElement; bounds: OpaqueBounds } {
+  const canvas = document.createElement('canvas');
+  const measuringContext = canvas.getContext('2d');
+  if (!measuringContext) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
+
+  measuringContext.font = LABEL_FONT;
+  canvas.width = Math.max(96, Math.ceil(measuringContext.measureText(text).width) + 64);
+  canvas.height = 96;
+
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#C9FBFF';
+  context.font = LABEL_FONT;
+  context.textAlign = 'left';
+  context.textBaseline = 'alphabetic';
+  context.fillText(text, 32, 64);
+
+  const bounds = findOpaqueBounds(context, canvas.width, canvas.height);
+  if (!bounds) throw new Error('Maßbeschriftung konnte nicht gerendert werden.');
+  return { canvas, bounds };
+}
+
 function createDimensionLabel(
   text: string,
   position: THREE.Vector3,
   width: number,
   height: number
 ): { sprite: THREE.Sprite; dispose: () => void } {
+  const textRaster = createTextRaster(text);
+  const glyphWidth = textRaster.bounds.maxX - textRaster.bounds.minX + 1;
+  const glyphHeight = textRaster.bounds.maxY - textRaster.bounds.minY + 1;
   const canvas = document.createElement('canvas');
-  const measuringContext = canvas.getContext('2d');
-  if (!measuringContext) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
-
-  measuringContext.font = LABEL_FONT;
-  const measuredText = measuringContext.measureText(text);
-  const textWidth = Math.ceil(measuredText.width);
-  const textAscent = Math.ceil(measuredText.actualBoundingBoxAscent || 30);
-  const textDescent = Math.ceil(measuredText.actualBoundingBoxDescent || 8);
-  const verticalPadding = 10;
-  canvas.width = Math.max(72, textWidth + 32);
-  canvas.height = Math.max(56, textAscent + textDescent + verticalPadding * 2);
+  canvas.width = Math.max(56, glyphWidth + LABEL_HORIZONTAL_PADDING * 2);
+  canvas.height = glyphHeight + LABEL_VERTICAL_PADDING * 2;
 
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
@@ -123,14 +176,19 @@ function createDimensionLabel(
   context.lineWidth = 2;
   context.strokeStyle = DIMENSION_COLOR;
   context.stroke();
-  context.fillStyle = '#C9FBFF';
-  context.font = LABEL_FONT;
-  context.textAlign = 'center';
-  context.textBaseline = 'alphabetic';
-  context.fillText(
-    text,
-    canvas.width * 0.5,
-    (canvas.height + textAscent - textDescent) * 0.5
+
+  const targetX = Math.round((canvas.width - glyphWidth) * 0.5);
+  const targetY = Math.round((canvas.height - glyphHeight) * 0.5);
+  context.drawImage(
+    textRaster.canvas,
+    textRaster.bounds.minX,
+    textRaster.bounds.minY,
+    glyphWidth,
+    glyphHeight,
+    targetX,
+    targetY,
+    glyphWidth,
+    glyphHeight
   );
 
   const texture = new THREE.CanvasTexture(canvas);
