@@ -37,6 +37,27 @@ interface CenterHandlePatch extends PositionCopyPatch {
 
 const sceneEnvironments = new WeakMap<THREE.Scene, SceneEnvironmentEntry>();
 
+function setBasicMaterialAppearance(
+  material: THREE.MeshBasicMaterial,
+  color: THREE.ColorRepresentation,
+  opacity: number
+): void {
+  material.color.set(color);
+  material.opacity = opacity;
+  material.needsUpdate = true;
+}
+
+function setSceneEnvironment(scene: THREE.Scene, environment: THREE.Texture | null): void {
+  scene.environment = environment;
+}
+
+function materialList(value: unknown): THREE.Material[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is THREE.Material => entry instanceof THREE.Material);
+  }
+  return value instanceof THREE.Material ? [value] : [];
+}
+
 function normalizedHex(color: string): string | null {
   const raw = color.trim().replace(/^#/, '');
   if (/^[0-9a-f]{3}$/i.test(raw)) {
@@ -55,9 +76,9 @@ export function invertHexColor(color: string): string {
   return `#${inverted.toUpperCase()}`;
 }
 
-function octahedronRadius(mesh: THREE.Mesh): number | null {
-  if (!(mesh.geometry instanceof THREE.OctahedronGeometry)) return null;
-  const parameters = mesh.geometry.parameters as { radius?: number };
+function octahedronRadius(object: THREE.Object3D): number | null {
+  if (!(object instanceof THREE.Mesh) || !(object.geometry instanceof THREE.OctahedronGeometry)) return null;
+  const parameters = object.geometry.parameters as { radius?: number };
   return typeof parameters.radius === 'number' ? parameters.radius : null;
 }
 
@@ -76,7 +97,7 @@ function patchPositionCopy(
   centerWorldRef: MutableRefObject<THREE.Vector3>
 ): PositionCopyPatch {
   const position = target.position;
-  const originalCopy = position.copy;
+  const originalCopy = position.copy.bind(position);
   const hadOwnCopy = Object.prototype.hasOwnProperty.call(position, 'copy');
   position.copy = function copyGeometryCenter(this: THREE.Vector3): THREE.Vector3 {
     return originalCopy.call(this, centerWorldRef.current);
@@ -97,10 +118,10 @@ function geometryCenterWorld(
 }
 
 function findOriginalCenterScaleHandle(scene: THREE.Scene): {
-  group: THREE.Group;
+  group: THREE.Object3D;
   material: THREE.MeshBasicMaterial;
 } | null {
-  let result: { group: THREE.Group; material: THREE.MeshBasicMaterial } | null = null;
+  let result: { group: THREE.Object3D; material: THREE.MeshBasicMaterial } | null = null;
 
   scene.traverse((candidate) => {
     if (result || !(candidate instanceof THREE.Group) || candidate.children.length !== 2) return;
@@ -126,8 +147,9 @@ function findOriginalCenterScaleHandle(scene: THREE.Scene): {
         && Math.abs(radius - 0.2) < 0.0001;
     });
 
-    if (!visual || !hitArea || !(visual.material instanceof THREE.MeshBasicMaterial)) return;
-    result = { group: candidate, material: visual.material };
+    const visualMaterial: unknown = visual?.material;
+    if (!visual || !hitArea || !(visualMaterial instanceof THREE.MeshBasicMaterial)) return;
+    result = { group: candidate, material: visualMaterial };
   });
 
   return result;
@@ -173,11 +195,12 @@ function findOriginalTranslateGizmo(scene: THREE.Scene): {
 
     const radius = octahedronRadius(candidate);
     if (radius === null || Math.abs(radius - 0.1) >= 0.0001) return;
-    if (!(candidate.material instanceof THREE.MeshBasicMaterial) || candidate.material.opacity <= 0.001) return;
+    const material: unknown = candidate.material;
+    if (!(material instanceof THREE.MeshBasicMaterial) || material.opacity <= 0.001) return;
 
     const root = transformControlsRootForHandle(candidate, scene);
     if (!root) return;
-    result = { root, material: candidate.material };
+    result = { root, material };
   });
 
   return result;
@@ -204,9 +227,7 @@ function useOriginalCenterScaleHandle(
     if (!patch) return;
 
     restorePositionCopy(patch);
-    patch.material.color.copy(patch.originalColor);
-    patch.material.opacity = patch.originalOpacity;
-    patch.material.needsUpdate = true;
+    setBasicMaterialAppearance(patch.material, patch.originalColor, patch.originalOpacity);
     patchRef.current = null;
   };
 
@@ -243,9 +264,7 @@ function useOriginalCenterScaleHandle(
       patchRef.current = patch;
     }
 
-    patch.material.color.set(invertHexColor(object.material.color));
-    patch.material.opacity = 1;
-    patch.material.needsUpdate = true;
+    setBasicMaterialAppearance(patch.material, invertHexColor(object.material.color), 1);
   });
 }
 
@@ -343,7 +362,7 @@ function useNeutralMaterialEnvironment(): void {
         references: 0
       };
       sceneEnvironments.set(scene, entry);
-      scene.environment = target.texture;
+      setSceneEnvironment(scene, target.texture);
     }
 
     entry.references += 1;
@@ -355,7 +374,7 @@ function useNeutralMaterialEnvironment(): void {
       if (current.references > 0) return;
 
       if (scene.environment === current.target.texture) {
-        scene.environment = current.previous;
+        setSceneEnvironment(scene, current.previous);
       }
       current.target.dispose();
       sceneEnvironments.delete(scene);
@@ -379,9 +398,8 @@ function useSceneMaterialSync(
     const roughness = THREE.MathUtils.clamp(object.material.roughness, 0, 1);
     const metalness = THREE.MathUtils.clamp(object.material.metalness, 0, 1);
     const transparent = opacity < 0.999;
-    const materials: THREE.Material[] = Array.isArray(mesh.material)
-      ? mesh.material
-      : [mesh.material];
+    const rawMaterial: unknown = mesh.material;
+    const materials = materialList(rawMaterial);
 
     materials.forEach((material) => {
       if (!(material instanceof THREE.MeshStandardMaterial)) return;

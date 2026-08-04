@@ -62,6 +62,35 @@ function setPixelRatio(gl: THREE.WebGLRenderer, value: number): void {
   gl.setPixelRatio(value);
 }
 
+function setControlZoomSpeed(controls: OrbitControlApi, value: number): void {
+  controls.zoomSpeed = value;
+}
+
+function configureControls(controls: OrbitControlApi, zoomSpeed: number): void {
+  controls.zoomSpeed = zoomSpeed;
+  controls.zoomToCursor = true;
+  controls.minDistance = 0.08;
+  controls.maxDistance = 500;
+  controls.dampingFactor = 0.1;
+}
+
+function restoreControls(entry: ViewportPerformanceEntry): void {
+  entry.controls.zoomSpeed = entry.previousZoomSpeed;
+  entry.controls.zoomToCursor = entry.previousZoomToCursor;
+  entry.controls.minDistance = entry.previousMinDistance;
+  entry.controls.maxDistance = entry.previousMaxDistance;
+  entry.controls.dampingFactor = entry.previousDampingFactor;
+}
+
+function configureShadowMap(gl: THREE.WebGLRenderer, autoUpdate: boolean): void {
+  gl.shadowMap.autoUpdate = autoUpdate;
+  gl.shadowMap.needsUpdate = true;
+}
+
+function requestShadowUpdate(gl: THREE.WebGLRenderer): void {
+  gl.shadowMap.needsUpdate = true;
+}
+
 export function useViewportPerformance(
   object: SceneObjectData,
   geometry: THREE.BufferGeometry
@@ -70,6 +99,12 @@ export function useViewportPerformance(
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
+  const materialOpacity = object.material.opacity;
+  const paintTextureDataUrl = object.material.paintTexture?.dataUrl;
+  const [positionX, positionY, positionZ] = object.position;
+  const [rotationX, rotationY, rotationZ] = object.rotation;
+  const [scaleX, scaleY, scaleZ] = object.scale;
+  const objectVisible = object.visible;
 
   useEffect(() => {
     if (!controls) return;
@@ -109,7 +144,7 @@ export function useViewportPerformance(
       };
 
       const handleWheel = (): void => {
-        controls.zoomSpeed = zoomSpeedForDistance(camera.position.distanceTo(controls.target));
+        setControlZoomSpeed(controls, zoomSpeedForDistance(camera.position.distanceTo(controls.target)));
         startInteraction();
       };
 
@@ -131,18 +166,13 @@ export function useViewportPerformance(
       };
       viewportPerformanceEntries.set(scene, entry);
 
-      controls.zoomSpeed = zoomSpeedForDistance(camera.position.distanceTo(controls.target));
-      controls.zoomToCursor = true;
-      controls.minDistance = 0.08;
-      controls.maxDistance = 500;
-      controls.dampingFactor = 0.1;
+      configureControls(controls, zoomSpeedForDistance(camera.position.distanceTo(controls.target)));
       controls.addEventListener('start', startInteraction);
       controls.addEventListener('end', endInteraction);
       gl.domElement.addEventListener('wheel', handleWheel, { capture: true, passive: true });
 
       setPixelRatio(gl, preferredPixelRatio());
-      gl.shadowMap.autoUpdate = false;
-      gl.shadowMap.needsUpdate = true;
+      configureShadowMap(gl, false);
     }
 
     entry.references += 1;
@@ -157,34 +187,29 @@ export function useViewportPerformance(
       current.controls.removeEventListener('start', current.startInteraction);
       current.controls.removeEventListener('end', current.endInteraction);
       current.gl.domElement.removeEventListener('wheel', current.handleWheel, true);
-      current.controls.zoomSpeed = current.previousZoomSpeed;
-      current.controls.zoomToCursor = current.previousZoomToCursor;
-      current.controls.minDistance = current.previousMinDistance;
-      current.controls.maxDistance = current.previousMaxDistance;
-      current.controls.dampingFactor = current.previousDampingFactor;
-      current.gl.shadowMap.autoUpdate = current.previousShadowAutoUpdate;
-      current.gl.shadowMap.needsUpdate = true;
+      restoreControls(current);
+      configureShadowMap(current.gl, current.previousShadowAutoUpdate);
       setPixelRatio(current.gl, current.previousPixelRatio);
       viewportPerformanceEntries.delete(scene);
     };
   }, [camera, controls, gl, scene]);
 
   useEffect(() => {
-    gl.shadowMap.needsUpdate = true;
+    requestShadowUpdate(gl);
   }, [
     geometry,
     gl,
-    object.material.opacity,
-    object.material.paintTexture?.dataUrl,
-    object.position[0],
-    object.position[1],
-    object.position[2],
-    object.rotation[0],
-    object.rotation[1],
-    object.rotation[2],
-    object.scale[0],
-    object.scale[1],
-    object.scale[2],
-    object.visible
+    materialOpacity,
+    objectVisible,
+    paintTextureDataUrl,
+    positionX,
+    positionY,
+    positionZ,
+    rotationX,
+    rotationY,
+    rotationZ,
+    scaleX,
+    scaleY,
+    scaleZ
   ]);
 }
