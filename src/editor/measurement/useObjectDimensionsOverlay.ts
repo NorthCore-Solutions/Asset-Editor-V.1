@@ -61,6 +61,7 @@ export function calculateObjectDimensionLayout(
   const height = Math.max(0, maxY - minY);
   const depth = Math.max(0, maxZ - minZ);
   const maximumDimension = Math.max(length, height, depth, 0.1);
+  const labelScaleDimension = Math.max(length, height, depth, 0.001);
 
   return {
     min: new THREE.Vector3(minX, minY, minZ),
@@ -70,8 +71,8 @@ export function calculateObjectDimensionLayout(
     depth,
     offset: Math.max(0.12, maximumDimension * 0.08),
     labelLift: Math.max(0.055, maximumDimension * 0.025),
-    labelWidth: THREE.MathUtils.clamp(maximumDimension * 0.3, 0.34, 1.5),
-    labelHeight: THREE.MathUtils.clamp(maximumDimension * 0.1, 0.12, 0.5),
+    labelWidth: labelScaleDimension * 0.34,
+    labelHeight: labelScaleDimension * 0.12,
     dashSize: THREE.MathUtils.clamp(maximumDimension * 0.025, 0.035, 0.2),
     gapSize: THREE.MathUtils.clamp(maximumDimension * 0.018, 0.025, 0.14)
   };
