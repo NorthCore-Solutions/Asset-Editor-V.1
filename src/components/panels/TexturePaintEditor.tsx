@@ -74,6 +74,10 @@ function cameraViewForSurface(label: string): CameraView | null {
   return null;
 }
 
+function closeSurfacePicker(button: HTMLButtonElement): void {
+  button.closest('details')?.removeAttribute('open');
+}
+
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number): [number, number] {
   const bounds = canvas.getBoundingClientRect();
   return [
@@ -268,6 +272,11 @@ export function TexturePaintEditor({
       const view = cameraViewForSurface(atlas.islands[clamped]?.label ?? '');
       if (view) requestSurfaceCameraView(view);
     }
+  };
+
+  const chooseIsland = (nextIsland: number, button: HTMLButtonElement): void => {
+    changeIsland(nextIsland);
+    closeSurfacePicker(button);
   };
 
   const toggleSurfacePaint = (): void => {
@@ -550,16 +559,30 @@ export function TexturePaintEditor({
       )}
 
       <div className="paint-surface-block">
-        <div className="field-row">
+        <div className="field-row paint-surface-field">
           <label>Fläche</label>
-          <select value={selectedIsland} onChange={(event) => changeIsland(Number(event.target.value))}>
-            <option value={-1}>Fläche X · Gesamtübersicht</option>
-            {atlas.islands.map((island, islandIndex) => (
-              <option key={`${island.label}:${islandIndex}`} value={islandIndex}>
-                {surfaceDisplayLabel(islandIndex, island.label)}
-              </option>
-            ))}
-          </select>
+          <details className="paint-surface-picker">
+            <summary>{selectedSurfaceLabel}</summary>
+            <div className="paint-surface-options">
+              <button
+                type="button"
+                className={selectedIsland === -1 ? 'active' : ''}
+                onClick={(event) => chooseIsland(-1, event.currentTarget)}
+              >
+                Fläche X · Gesamtübersicht
+              </button>
+              {atlas.islands.map((island, islandIndex) => (
+                <button
+                  key={`${island.label}:${islandIndex}`}
+                  type="button"
+                  className={selectedIsland === islandIndex ? 'active' : ''}
+                  onClick={(event) => chooseIsland(islandIndex, event.currentTarget)}
+                >
+                  {surfaceDisplayLabel(islandIndex, island.label)}
+                </button>
+              ))}
+            </div>
+          </details>
         </div>
 
         <div className="field-row">
