@@ -1,0 +1,39 @@
+name: Refactor Check
+
+on:
+  push:
+    branches:
+      - refactor-safe-2026-08-04
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Record lint baseline
+        shell: bash
+        run: |
+          set +e
+          npm run lint > lint-report.txt 2>&1
+          status=$?
+          cat lint-report.txt
+          echo "lint_exit_code=$status" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "✖ [0-9]+ problems" lint-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          exit 0
