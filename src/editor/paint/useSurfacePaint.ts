@@ -22,39 +22,17 @@ interface SceneEnvironmentEntry {
   references: number;
 }
 
-interface OrbitToggleApi {
-  enabled: boolean;
+interface CenterHandlePatch {
+  group: THREE.Group;
+  position: THREE.Vector3;
+  originalCopy: (value: THREE.Vector3) => THREE.Vector3;
+  hadOwnCopy: boolean;
+  material: THREE.MeshBasicMaterial;
+  originalColor: THREE.Color;
+  originalOpacity: number;
 }
-
-interface TranslateMarkerDrag {
-  kind: 'translate';
-  pointerId: number;
-  objectId: string;
-  startPosition: THREE.Vector3;
-  plane: THREE.Plane;
-  startPlanePoint: THREE.Vector3;
-}
-
-interface ScaleMarkerDrag {
-  kind: 'scale';
-  pointerId: number;
-  objectId: string;
-  startPointerY: number;
-  startPosition: THREE.Vector3;
-  startScale: THREE.Vector3;
-  startQuaternion: THREE.Quaternion;
-  anchorLocal: THREE.Vector3;
-}
-
-type MarkerDrag = TranslateMarkerDrag | ScaleMarkerDrag;
 
 const sceneEnvironments = new WeakMap<THREE.Scene, SceneEnvironmentEntry>();
-const MARKER_SOURCE_DIAMETER = 0.22;
-const MARKER_OUTLINE_DIAMETER = 0.3;
-const MARKER_HIT_DIAMETER = 0.42;
-const MARKER_MIN_DIAMETER = 0.08;
-const MARKER_CAMERA_OFFSET_FACTOR = 0.55;
-const SCALE_PIXELS_PER_FACTOR = 140;
 
 function normalizedHex(color: string): string | null {
   const raw = color.trim().replace(/^#/, '');
@@ -74,323 +52,131 @@ export function invertHexColor(color: string): string {
   return `#${inverted.toUpperCase()}`;
 }
 
-function stopPointerEvent(event: PointerEvent): void {
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
+function octahedronRadius(mesh: THREE.Mesh): number | null {
+  if (!(mesh.geometry instanceof THREE.OctahedronGeometry)) return null;
+  const parameters = mesh.geometry.parameters as { radius?: number };
+  return typeof parameters.radius === 'number' ? parameters.radius : null;
 }
 
-function useContrastCenterMarker(
+function findOriginalCenterScaleHandle(scene: THREE.Scene): {
+  group: THREE.Group;
+  material: THREE.MeshBasicMaterial;
+} | null {
+  let result: { group: THREE.Group; material: THREE.MeshBasicMaterial } | null = null;
+
+  scene.traverse((candidate) => {
+    if (result || !(candidate instanceof THREE.Group) || candidate.children.length !== 2) return;
+    if (candidate.renderOrder !== Number.POSITIVE_INFINITY) return;
+
+    const meshes = candidate.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+    if (meshes.length !== 2) return;
+
+    const visual = meshes.find((mesh) => {
+      const material = mesh.material;
+      const radius = octahedronRadius(mesh);
+      return material instanceof THREE.MeshBasicMaterial
+        && material.opacity > 0.001
+        && radius !== null
+        && Math.abs(radius - 0.1) < 0.0001;
+    });
+    const hitArea = meshes.find((mesh) => {
+      const material = mesh.material;
+      const radius = octahedronRadius(mesh);
+      return material instanceof THREE.MeshBasicMaterial
+        && material.opacity <= 0.001
+        && radius !== null
+        && Math.abs(radius - 0.2) < 0.0001;
+    });
+
+    if (!visual || !hitArea || !(visual.material instanceof THREE.MeshBasicMaterial)) return;
+    result = { group: candidate, material: visual.material };
+  });
+
+  return result;
+}
+
+function useOriginalCenterScaleHandle(
   object: SceneObjectData,
   geometry: THREE.BufferGeometry,
   selected: boolean,
   paintModeEnabled: boolean
 ): void {
   const scene = useThree((state) => state.scene);
-  const camera = useThree((state) => state.camera);
-  const gl = useThree((state) => state.gl);
-  const controls = useThree((state) => state.controls) as unknown as OrbitToggleApi | undefined;
   const tool = useEditorStore((state) => state.tool);
   const selectedCount = useEditorStore((state) => state.selectedIds.length);
-  const snap = useEditorStore((state) => state.snap);
-  const updateObject = useEditorStore((state) => state.updateObject);
-  const beginTransaction = useEditorStore((state) => state.beginTransaction);
-  const endTransaction = useEditorStore((state) => state.endTransaction);
-  const dragRef = useRef<MarkerDrag | null>(null);
-  const disposalTimerRef = useRef<number | null>(null);
-  const latestRef = useRef({ object, selected, selectedCount, paintModeEnabled, tool, snap });
-  latestRef.current = { object, selected, selectedCount, paintModeEnabled, tool, snap };
-
-  const geometryMetrics = useMemo(() => {
+  const patchRef = useRef<CenterHandlePatch | null>(null);
+  const centerWorldRef = useRef(new THREE.Vector3());
+  const localCenter = useMemo(() => {
     geometry.computeBoundingBox();
-    const bounds = geometry.boundingBox?.clone()
-      ?? new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
-    const size = bounds.getSize(new THREE.Vector3());
-    return {
-      bounds,
-      localAverageSize: (Math.abs(size.x) + Math.abs(size.y) + Math.abs(size.z)) / 3,
-      localCenter: bounds.getCenter(new THREE.Vector3())
-    };
+    return geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
   }, [geometry]);
 
-  const marker = useMemo(() => {
-    const group = new THREE.Group();
+  const restorePatch = (): void => {
+    const patch = patchRef.current;
+    if (!patch) return;
 
-    const outlineGeometry = new THREE.OctahedronGeometry(MARKER_OUTLINE_DIAMETER / 2, 0);
-    const outlineMaterial = new THREE.MeshBasicMaterial({
-      color: '#000000',
-      transparent: true,
-      opacity: 0.92,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
-      fog: false
-    });
-    const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
-    outline.name = 'Kontrast-Mittelpunkt Kontur';
-    outline.renderOrder = 2004;
-    outline.frustumCulled = false;
-
-    const visualGeometry = new THREE.OctahedronGeometry(MARKER_SOURCE_DIAMETER / 2, 0);
-    const visualMaterial = new THREE.MeshBasicMaterial({
-      color: invertHexColor(object.material.color),
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
-      fog: false
-    });
-    const visual = new THREE.Mesh(visualGeometry, visualMaterial);
-    visual.name = 'Kontrast-Mittelpunkt sichtbar';
-    visual.renderOrder = 2005;
-    visual.frustumCulled = false;
-
-    const hitGeometry = new THREE.OctahedronGeometry(MARKER_HIT_DIAMETER / 2, 0);
-    const hitMaterial = new THREE.MeshBasicMaterial({
-      transparent: true,
-      opacity: 0,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
-      fog: false
-    });
-    const hit = new THREE.Mesh(hitGeometry, hitMaterial);
-    hit.name = 'Kontrast-Mittelpunkt Klickfläche';
-    hit.renderOrder = 2006;
-    hit.frustumCulled = false;
-
-    group.name = `Kontrast-Mittelpunkt: ${object.id}`;
-    group.renderOrder = 2005;
-    group.frustumCulled = false;
-    group.add(outline, visual, hit);
-    return group;
-  }, [object.id]);
-
-  useEffect(() => {
-    if (disposalTimerRef.current !== null) {
-      window.clearTimeout(disposalTimerRef.current);
-      disposalTimerRef.current = null;
+    if (patch.hadOwnCopy) {
+      patch.position.copy = patch.originalCopy;
+    } else {
+      delete (patch.position as unknown as {
+        copy?: (value: THREE.Vector3) => THREE.Vector3;
+      }).copy;
     }
-    scene.add(marker);
+    patch.material.color.copy(patch.originalColor);
+    patch.material.opacity = patch.originalOpacity;
+    patch.material.needsUpdate = true;
+    patchRef.current = null;
+  };
 
-    return () => {
-      scene.remove(marker);
-      disposalTimerRef.current = window.setTimeout(() => {
-        marker.traverse((entry) => {
-          if (!(entry instanceof THREE.Mesh)) return;
-          entry.geometry.dispose();
-          const materials = Array.isArray(entry.material) ? entry.material : [entry.material];
-          materials.forEach((material) => material.dispose());
-        });
-        marker.clear();
-        disposalTimerRef.current = null;
-      }, 0);
-    };
-  }, [marker, scene]);
-
-  useEffect(() => {
-    const visual = marker.getObjectByName('Kontrast-Mittelpunkt sichtbar');
-    if (!(visual instanceof THREE.Mesh)) return;
-    const material = visual.material;
-    if (material instanceof THREE.MeshBasicMaterial) {
-      material.color.set(invertHexColor(object.material.color));
-    }
-  }, [marker, object.material.color]);
-
-  useEffect(() => {
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-
-    const setRayFromPointer = (clientX: number, clientY: number): void => {
-      const bounds = gl.domElement.getBoundingClientRect();
-      pointer.set(
-        (clientX - bounds.left) / Math.max(1, bounds.width) * 2 - 1,
-        -((clientY - bounds.top) / Math.max(1, bounds.height)) * 2 + 1
-      );
-      raycaster.setFromCamera(pointer, camera);
-    };
-
-    const removeDragListeners = (): void => {
-      window.removeEventListener('pointermove', handlePointerMove, true);
-      window.removeEventListener('pointerup', finishDrag, true);
-      window.removeEventListener('pointercancel', finishDrag, true);
-      window.removeEventListener('blur', finishDrag, true);
-    };
-
-    const finishDrag = (event?: Event): void => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      if (event instanceof PointerEvent && event.pointerId !== drag.pointerId) return;
-      if (event instanceof PointerEvent) stopPointerEvent(event);
-
-      dragRef.current = null;
-      removeDragListeners();
-      try {
-        gl.domElement.releasePointerCapture(drag.pointerId);
-      } catch {
-        // Pointer-Capture kann bereits durch den Browser aufgehoben worden sein.
-      }
-      if (controls) controls.enabled = true;
-      endTransaction();
-    };
-
-    const handlePointerMove = (event: PointerEvent): void => {
-      const drag = dragRef.current;
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      stopPointerEvent(event);
-      const current = latestRef.current;
-      if (current.object.id !== drag.objectId) {
-        finishDrag(event);
-        return;
-      }
-
-      if (drag.kind === 'scale') {
-        const upwardPixels = drag.startPointerY - event.clientY;
-        let factor = Math.max(0.02, 1 + upwardPixels / SCALE_PIXELS_PER_FACTOR);
-        if (current.snap.enabled && current.snap.scale > 0) {
-          factor = Math.max(0.02, Math.round(factor / current.snap.scale) * current.snap.scale);
-        }
-        const nextScale = drag.startScale.clone().multiplyScalar(factor);
-        const localOffset = new THREE.Vector3(
-          drag.anchorLocal.x * (drag.startScale.x - nextScale.x),
-          drag.anchorLocal.y * (drag.startScale.y - nextScale.y),
-          drag.anchorLocal.z * (drag.startScale.z - nextScale.z)
-        ).applyQuaternion(drag.startQuaternion);
-        const nextPosition = drag.startPosition.clone().add(localOffset);
-        updateObject(drag.objectId, {
-          position: [nextPosition.x, nextPosition.y, nextPosition.z],
-          scale: [nextScale.x, nextScale.y, nextScale.z]
-        }, false);
-        return;
-      }
-
-      setRayFromPointer(event.clientX, event.clientY);
-      const currentPlanePoint = new THREE.Vector3();
-      if (!raycaster.ray.intersectPlane(drag.plane, currentPlanePoint)) return;
-      const nextPosition = drag.startPosition.clone().add(
-        currentPlanePoint.clone().sub(drag.startPlanePoint)
-      );
-      if (current.snap.enabled && current.snap.position > 0) {
-        nextPosition.set(
-          Math.round(nextPosition.x / current.snap.position) * current.snap.position,
-          Math.round(nextPosition.y / current.snap.position) * current.snap.position,
-          Math.round(nextPosition.z / current.snap.position) * current.snap.position
-        );
-      }
-      updateObject(drag.objectId, {
-        position: [nextPosition.x, nextPosition.y, nextPosition.z]
-      }, false);
-    };
-
-    const handlePointerDown = (event: PointerEvent): void => {
-      if (event.button !== 0 || dragRef.current) return;
-      const current = latestRef.current;
-      const active = current.selected
-        && current.selectedCount === 1
-        && !current.paintModeEnabled
-        && current.object.visible
-        && !current.object.locked
-        && (current.tool === 'translate' || current.tool === 'scale');
-      if (!active || !marker.visible) return;
-
-      marker.updateMatrixWorld(true);
-      setRayFromPointer(event.clientX, event.clientY);
-      if (raycaster.intersectObject(marker, true).length === 0) return;
-      stopPointerEvent(event);
-
-      if (current.tool === 'scale') {
-        const anchorLocal = geometryMetrics.localCenter.clone();
-        anchorLocal.y = geometryMetrics.bounds.min.y;
-        dragRef.current = {
-          kind: 'scale',
-          pointerId: event.pointerId,
-          objectId: current.object.id,
-          startPointerY: event.clientY,
-          startPosition: new THREE.Vector3(...current.object.position),
-          startScale: new THREE.Vector3(...current.object.scale),
-          startQuaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(...current.object.rotation)),
-          anchorLocal
-        };
-      } else {
-        const normal = camera.getWorldDirection(new THREE.Vector3()).normalize();
-        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, marker.position);
-        const startPlanePoint = new THREE.Vector3();
-        if (!raycaster.ray.intersectPlane(plane, startPlanePoint)) return;
-        dragRef.current = {
-          kind: 'translate',
-          pointerId: event.pointerId,
-          objectId: current.object.id,
-          startPosition: new THREE.Vector3(...current.object.position),
-          plane,
-          startPlanePoint
-        };
-      }
-
-      beginTransaction();
-      if (controls) controls.enabled = false;
-      try {
-        gl.domElement.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer-Capture ist nicht in jeder Browser-Situation verfügbar.
-      }
-      window.addEventListener('pointermove', handlePointerMove, true);
-      window.addEventListener('pointerup', finishDrag, true);
-      window.addEventListener('pointercancel', finishDrag, true);
-      window.addEventListener('blur', finishDrag, true);
-    };
-
-    gl.domElement.addEventListener('pointerdown', handlePointerDown, true);
-    return () => {
-      gl.domElement.removeEventListener('pointerdown', handlePointerDown, true);
-      finishDrag();
-      removeDragListeners();
-    };
-  }, [
-    beginTransaction,
-    camera,
-    controls,
-    endTransaction,
-    geometryMetrics,
-    gl,
-    marker,
-    updateObject
-  ]);
+  useEffect(() => () => restorePatch(), []);
 
   useFrame(() => {
-    const current = latestRef.current;
-    const visible = current.selected
-      && current.selectedCount === 1
-      && !current.paintModeEnabled
-      && current.object.visible
-      && !current.object.locked
-      && (current.tool === 'translate' || current.tool === 'scale');
-    marker.visible = visible;
-    if (!visible) return;
+    const active = selected
+      && selectedCount === 1
+      && !paintModeEnabled
+      && object.visible
+      && !object.locked
+      && tool === 'scale';
 
-    const transformedCenter = geometryMetrics.localCenter.clone()
-      .multiply(new THREE.Vector3(...current.object.scale))
-      .applyEuler(new THREE.Euler(...current.object.rotation));
-    marker.position
-      .set(...current.object.position)
-      .add(transformedCenter);
-    marker.quaternion.identity();
-
-    const averageWorldSize = geometryMetrics.localAverageSize * (
-      Math.abs(current.object.scale[0])
-      + Math.abs(current.object.scale[1])
-      + Math.abs(current.object.scale[2])
-    ) / 3;
-    const diameter = THREE.MathUtils.clamp(
-      averageWorldSize * 0.075,
-      MARKER_MIN_DIAMETER,
-      0.34
-    );
-    const towardCamera = camera.position.clone().sub(marker.position);
-    if (towardCamera.lengthSq() > 0.000001) {
-      marker.position.add(
-        towardCamera.normalize().multiplyScalar(diameter * MARKER_CAMERA_OFFSET_FACTOR)
-      );
+    if (!active) {
+      restorePatch();
+      return;
     }
-    marker.scale.setScalar(diameter / MARKER_SOURCE_DIAMETER);
+
+    centerWorldRef.current
+      .copy(localCenter)
+      .multiply(new THREE.Vector3(...object.scale))
+      .applyEuler(new THREE.Euler(...object.rotation))
+      .add(new THREE.Vector3(...object.position));
+
+    let patch = patchRef.current;
+    if (!patch || !patch.group.parent) {
+      restorePatch();
+      const found = findOriginalCenterScaleHandle(scene);
+      if (!found) return;
+
+      const position = found.group.position;
+      const originalCopy = position.copy;
+      const hadOwnCopy = Object.prototype.hasOwnProperty.call(position, 'copy');
+      position.copy = function copyGeometryCenter(this: THREE.Vector3): THREE.Vector3 {
+        return originalCopy.call(this, centerWorldRef.current);
+      };
+
+      patch = {
+        group: found.group,
+        position,
+        originalCopy,
+        hadOwnCopy,
+        material: found.material,
+        originalColor: found.material.color.clone(),
+        originalOpacity: found.material.opacity
+      };
+      patchRef.current = patch;
+    }
+
+    patch.material.color.set(invertHexColor(object.material.color));
+    patch.material.opacity = 1;
+    patch.material.needsUpdate = true;
   });
 }
 
@@ -490,7 +276,7 @@ export function useSurfacePaint(
   useNeutralMaterialEnvironment();
   useViewportPerformance(object, geometry);
   useObjectDimensionsOverlay(object, geometry);
-  useContrastCenterMarker(object, geometry, selected, settings.enabled);
+  useOriginalCenterScaleHandle(object, geometry, selected, settings.enabled);
   const binding = useSurfacePaintGrid(object, selected, settings, geometry);
   const visibleTexture = object.material.paintTexture ? binding.texture : null;
   useSceneMaterialSync(object, geometry, visibleTexture);
