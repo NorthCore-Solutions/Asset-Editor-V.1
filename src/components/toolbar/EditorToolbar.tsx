@@ -2,7 +2,10 @@ import {
   setDimensionOverlayVisible,
   useDimensionOverlayVisible
 } from '../../editor/measurement/dimensionOverlaySession';
-import { requestSurfaceCameraView } from '../../editor/paint/surfacePaintSession';
+import {
+  requestSurfaceCameraView,
+  setSurfacePaintSettings
+} from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
 import type { CameraView, TransformMode } from '../../types/editor';
 
@@ -27,6 +30,11 @@ export function EditorToolbar() {
   const requestCameraView = useEditorStore((state) => state.requestCameraView);
   const dimensionsVisible = useDimensionOverlayVisible();
 
+  const selectTool = (mode: TransformMode): void => {
+    setSurfacePaintSettings({ enabled: false, cameraView: null });
+    setTool(mode);
+  };
+
   const selectCameraView = (view: CameraView): void => {
     if (selectedIds.length === 1) {
       requestSurfaceCameraView(view);
@@ -37,7 +45,7 @@ export function EditorToolbar() {
 
   return (
     <div className="toolbar">
-      <div className="group">{tools.map((item) => <button key={item.mode} className={tool === item.mode ? 'active' : ''} title={item.key} onClick={() => setTool(item.mode)}>{item.label}</button>)}</div>
+      <div className="group">{tools.map((item) => <button key={item.mode} className={tool === item.mode ? 'active' : ''} title={item.key} onClick={() => selectTool(item.mode)}>{item.label}</button>)}</div>
       <div className="group">{views.map((item) => <button key={item.view} onClick={() => selectCameraView(item.view)}>{item.label}</button>)}</div>
       <div className="group">
         <label><input type="checkbox" checked={scene.gridVisible} onChange={(event) => setScene({ gridVisible: event.target.checked })} /> Raster</label>
