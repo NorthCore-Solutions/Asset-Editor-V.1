@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { StatusBar } from '../components/layout/StatusBar';
 import { ShapesPanel } from '../components/panels/ShapesPanel';
@@ -29,13 +29,12 @@ export function App() {
   const scene = useEditorStore((state) => state.scene);
   const loadProject = useEditorStore((state) => state.loadProject);
   const setMessage = useEditorStore((state) => state.setMessage);
-  const initialAutosave = useMemo(() => localStorage.getItem(AUTOSAVE_KEY), []);
-  const compactAtStart = useMemo(isCompactWorkspace, []);
+  const [initialAutosave] = useState(() => localStorage.getItem(AUTOSAVE_KEY));
   const [restoreOpen, setRestoreOpen] = useState(Boolean(initialAutosave));
-  const [compactWorkspace, setCompactWorkspace] = useState(compactAtStart);
-  const [inventoryCollapsed, setInventoryCollapsed] = useState(compactAtStart);
-  const [propertiesCollapsed, setPropertiesCollapsed] = useState(compactAtStart);
-  const [hierarchyCollapsed, setHierarchyCollapsed] = useState(compactAtStart);
+  const [compactWorkspace, setCompactWorkspace] = useState(isCompactWorkspace);
+  const [inventoryCollapsed, setInventoryCollapsed] = useState(isCompactWorkspace);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(isCompactWorkspace);
+  const [hierarchyCollapsed, setHierarchyCollapsed] = useState(isCompactWorkspace);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -55,9 +54,13 @@ export function App() {
       setHierarchyCollapsed(true);
     };
 
-    setCompactWorkspace(media.matches);
-    media.addEventListener('change', handleChange);
-    return () => media.removeEventListener('change', handleChange);
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', handleChange);
+      return () => media.removeEventListener('change', handleChange);
+    }
+
+    media.addListener(handleChange);
+    return () => media.removeListener(handleChange);
   }, []);
 
   const restore = () => {

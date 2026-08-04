@@ -9,12 +9,6 @@ interface PaintTextureGridData {
   windows: THREE.Vector4[];
 }
 
-type PaintTexture = THREE.Texture & {
-  userData: Record<string, unknown> & {
-    northcorePaintGrid?: PaintTextureGridData;
-  };
-};
-
 type PatchedMaterialPrototype = THREE.MeshStandardMaterial & {
   __northcorePaintGridInstalled?: boolean;
 };
@@ -33,9 +27,21 @@ function glslFloat(value: number): string {
   return formatted.includes('.') ? formatted : `${formatted}.0`;
 }
 
+function isPaintTextureGridData(value: unknown): value is PaintTextureGridData {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.signature === 'string'
+    && Array.isArray(candidate.islands)
+    && Array.isArray(candidate.windows);
+}
+
+function textureGridData(texture: THREE.Texture | null): PaintTextureGridData | undefined {
+  const value: unknown = texture?.userData[DATA_KEY];
+  return isPaintTextureGridData(value) ? value : undefined;
+}
+
 function gridData(material: THREE.MeshStandardMaterial): PaintTextureGridData | undefined {
-  const texture = material.map as PaintTexture | null;
-  return texture?.userData[DATA_KEY] as PaintTextureGridData | undefined;
+  return textureGridData(material.map);
 }
 
 function shaderBranches(data: PaintTextureGridData): string {
@@ -63,13 +69,12 @@ function shaderBranches(data: PaintTextureGridData): string {
 const prototype = THREE.MeshStandardMaterial.prototype as PatchedMaterialPrototype;
 
 if (!prototype.__northcorePaintGridInstalled) {
-  const originalProgramCacheKey = prototype.customProgramCacheKey;
-
   prototype.onBeforeCompile = function onBeforeCompileWithPaintGrid(
     this: THREE.MeshStandardMaterial,
     shader: ShaderParameters,
-    _renderer: ShaderRenderer
+    renderer: ShaderRenderer
   ): void {
+    void renderer;
     const data = gridData(this);
     if (!data) return;
 
@@ -104,7 +109,7 @@ if (!prototype.__northcorePaintGridInstalled) {
   prototype.customProgramCacheKey = function paintGridProgramCacheKey(
     this: THREE.MeshStandardMaterial
   ): string {
-    const originalKey = originalProgramCacheKey.call(this);
+    const originalKey = THREE.Material.prototype.customProgramCacheKey.call(this);
     const data = gridData(this);
     return data ? `${originalKey}|northcore-paint-grid:${data.signature}` : originalKey;
   };
@@ -117,8 +122,7 @@ export function configurePaintTextureGrid(
   atlas: SurfaceUvAtlas,
   metrics: SurfaceRasterMetric[]
 ): void {
-  const paintTexture = texture as PaintTexture;
-  const existing = paintTexture.userData[DATA_KEY] as PaintTextureGridData | undefined;
+  const existing = textureGridData(texture);
 
   if (
     existing
@@ -135,7 +139,7 @@ export function configurePaintTextureGrid(
     return;
   }
 
-  paintTexture.userData[DATA_KEY] = {
+  texture.userData[DATA_KEY] = {
     signature: atlas.signature,
     islands: atlas.islands.map((island) => ({ ...island })),
     windows: atlas.islands.map((_, index) => {
