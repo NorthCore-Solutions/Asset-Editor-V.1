@@ -6,6 +6,9 @@ import { useDimensionOverlayVisible } from './dimensionOverlaySession';
 
 const DIMENSION_COLOR = '#00E5FF';
 const LABEL_BACKGROUND = 'rgba(3, 20, 27, 0.9)';
+const LABEL_FONT = '600 38px Inter, system-ui, sans-serif';
+const REFERENCE_LABEL_WIDTH = 256;
+const REFERENCE_LABEL_HEIGHT = 96;
 
 export interface ObjectDimensionLayout {
   min: THREE.Vector3;
@@ -98,20 +101,26 @@ function createDimensionLabel(
   height: number
 ): { sprite: THREE.Sprite; dispose: () => void } {
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 96;
+  const measuringContext = canvas.getContext('2d');
+  if (!measuringContext) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
+
+  measuringContext.font = LABEL_FONT;
+  const textWidth = Math.ceil(measuringContext.measureText(text).width);
+  canvas.width = Math.max(72, textWidth + 32);
+  canvas.height = 64;
+
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D-Kontext für Maßbeschriftung nicht verfügbar.');
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  drawRoundedRectangle(context, 4, 4, canvas.width - 8, canvas.height - 8, 18);
+  drawRoundedRectangle(context, 1, 1, canvas.width - 2, canvas.height - 2, 10);
   context.fillStyle = LABEL_BACKGROUND;
   context.fill();
-  context.lineWidth = 4;
+  context.lineWidth = 2;
   context.strokeStyle = DIMENSION_COLOR;
   context.stroke();
   context.fillStyle = '#C9FBFF';
-  context.font = '600 38px Inter, system-ui, sans-serif';
+  context.font = LABEL_FONT;
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText(text, canvas.width * 0.5, canvas.height * 0.51);
@@ -133,7 +142,11 @@ function createDimensionLabel(
 
   const sprite = new THREE.Sprite(material);
   sprite.position.copy(position);
-  sprite.scale.set(width, height, 1);
+  sprite.scale.set(
+    width * (canvas.width / REFERENCE_LABEL_WIDTH),
+    height * (canvas.height / REFERENCE_LABEL_HEIGHT),
+    1
+  );
   sprite.renderOrder = 2001;
   sprite.frustumCulled = false;
   sprite.raycast = () => undefined;
