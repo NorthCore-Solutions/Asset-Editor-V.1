@@ -157,19 +157,17 @@ function useSceneMaterialSync(
   const scene = useThree((state) => state.scene);
 
   useEffect(() => {
-    let mesh: THREE.Mesh | null = null;
-    scene.traverse((candidate) => {
-      if (!mesh && candidate instanceof THREE.Mesh && candidate.geometry === geometry) {
-        mesh = candidate;
-      }
-    });
-    if (!mesh) return;
+    const candidate = scene.getObjectByProperty('geometry', geometry);
+    if (!(candidate instanceof THREE.Mesh)) return;
+    const mesh = candidate;
 
     const opacity = THREE.MathUtils.clamp(object.material.opacity, 0, 1);
     const roughness = THREE.MathUtils.clamp(object.material.roughness, 0, 1);
     const metalness = THREE.MathUtils.clamp(object.material.metalness, 0, 1);
     const transparent = opacity < 0.999;
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const materials: THREE.Material[] = Array.isArray(mesh.material)
+      ? mesh.material
+      : [mesh.material];
 
     materials.forEach((material) => {
       if (!(material instanceof THREE.MeshStandardMaterial)) return;
