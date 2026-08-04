@@ -133,26 +133,54 @@ function findOriginalCenterScaleHandle(scene: THREE.Scene): {
   return result;
 }
 
-function findOriginalTranslateCenterHandles(scene: THREE.Scene): {
-  handles: THREE.Mesh[];
-  material: THREE.MeshBasicMaterial | null;
-} {
-  const handles: THREE.Mesh[] = [];
-  let material: THREE.MeshBasicMaterial | null = null;
+function isEffectivelyVisible(object: THREE.Object3D, scene: THREE.Scene): boolean {
+  let current: THREE.Object3D | null = object;
+  while (current && current !== scene) {
+    if (!current.visible) return false;
+    current = current.parent;
+  }
+  return true;
+}
+
+function transformControlsRootForHandle(
+  handle: THREE.Object3D,
+  scene: THREE.Scene
+): THREE.Object3D | null {
+  let current = handle.parent;
+  let topmost: THREE.Object3D | null = null;
+
+  while (current && current !== scene) {
+    topmost = current;
+    const root = current as THREE.Object3D & { isTransformControlsRoot?: boolean };
+    if (root.isTransformControlsRoot || current.constructor.name === 'TransformControlsRoot') {
+      return current;
+    }
+    current = current.parent;
+  }
+
+  return topmost;
+}
+
+function findOriginalTranslateGizmo(scene: THREE.Scene): {
+  root: THREE.Object3D;
+  material: THREE.MeshBasicMaterial;
+} | null {
+  let result: { root: THREE.Object3D; material: THREE.MeshBasicMaterial } | null = null;
 
   scene.traverse((candidate) => {
-    if (!(candidate instanceof THREE.Mesh) || candidate.name !== 'XYZ') return;
-    const radius = octahedronRadius(candidate);
-    if (radius === null || (Math.abs(radius - 0.1) >= 0.0001 && Math.abs(radius - 0.2) >= 0.0001)) return;
-    if (!(candidate.material instanceof THREE.MeshBasicMaterial)) return;
+    if (result || !(candidate instanceof THREE.Mesh) || candidate.name !== 'XYZ') return;
+    if (!isEffectivelyVisible(candidate, scene)) return;
 
-    handles.push(candidate);
-    if (Math.abs(radius - 0.1) < 0.0001 && candidate.material.opacity > 0.001) {
-      material = candidate.material;
-    }
+    const radius = octahedronRadius(candidate);
+    if (radius === null || Math.abs(radius - 0.1) >= 0.0001) return;
+    if (!(candidate.material instanceof THREE.MeshBasicMaterial) || candidate.material.opacity <= 0.001) return;
+
+    const root = transformControlsRootForHandle(candidate, scene);
+    if (!root) return;
+    result = { root, material: candidate.material };
   });
 
-  return { handles, material };
+  return result;
 }
 
 function useOriginalCenterScaleHandle(
@@ -221,7 +249,7 @@ function useOriginalCenterScaleHandle(
   });
 }
 
-function useOriginalTranslateCenterHandle(
+function useOriginalTranslateGizmoCenter(
   object: SceneObjectData,
   geometry: THREE.BufferGeometry,
   selected: boolean,
@@ -230,7 +258,7 @@ function useOriginalTranslateCenterHandle(
   const scene = useThree((state) => state.scene);
   const tool = useEditorStore((state) => state.tool);
   const selectedCount = useEditorStore((state) => state.selectedIds.length);
-  const patchesRef = useRef<PositionCopyPatch[]>([]);
+  const patchRef = useRef<PositionCopyPatch | null>(null);
   const materialRef = useRef<{
     material: THREE.MeshBasicMaterial;
     color: THREE.Color;
@@ -242,9 +270,12 @@ function useOriginalTranslateCenterHandle(
     return geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
   }, [geometry]);
 
-  const restorePatches = (): void => {
-    patchesRef.current.forEach(restorePositionCopy);
-    patchesRef.current = [];
+  const restorePatch = (): void => {
+    const patch = patchRef.current;
+    if (patch) {
+      restorePositionCopy(patch);
+      patchRef.current = null;
+    }
 
     const storedMaterial = materialRef.current;
     if (storedMaterial) {
@@ -255,7 +286,7 @@ function useOriginalTranslateCenterHandle(
     }
   };
 
-  useEffect(() => () => restorePatches(), []);
+  useEffect(() => () => restorePatch(), []);
 
   useFrame(() => {
     const active = selected
@@ -266,27 +297,24 @@ function useOriginalTranslateCenterHandle(
       && tool === 'translate';
 
     if (!active) {
-      restorePatches();
+      restorePatch();
       return;
     }
 
     geometryCenterWorld(centerWorldRef.current, localCenter, object);
 
-    const patchesInvalid = patchesRef.current.length === 0
-      || patchesRef.current.some((patch) => !patch.target.parent);
-    if (patchesInvalid) {
-      restorePatches();
-      const found = findOriginalTranslateCenterHandles(scene);
-      if (found.handles.length === 0) return;
+    const patch = patchRef.current;
+    if (!patch || !patch.target.parent) {
+      restorePatch();
+      const found = findOriginalTranslateGizmo(scene);
+      if (!found) return;
 
-      patchesRef.current = found.handles.map((handle) => patchPositionCopy(handle, centerWorldRef));
-      if (found.material) {
-        materialRef.current = {
-          material: found.material,
-          color: found.material.color.clone(),
-          opacity: found.material.opacity
-        };
-      }
+      patchRef.current = patchPositionCopy(found.root, centerWorldRef);
+      materialRef.current = {
+        material: found.material,
+        color: found.material.color.clone(),
+        opacity: found.material.opacity
+      };
     }
 
     const storedMaterial = materialRef.current;
@@ -395,7 +423,7 @@ export function useSurfacePaint(
   useViewportPerformance(object, geometry);
   useObjectDimensionsOverlay(object, geometry);
   useOriginalCenterScaleHandle(object, geometry, selected, settings.enabled);
-  useOriginalTranslateCenterHandle(object, geometry, selected, settings.enabled);
+  useOriginalTranslateGizmoCenter(object, geometry, selected, settings.enabled);
   const binding = useSurfacePaintGrid(object, selected, settings, geometry);
   const visibleTexture = object.material.paintTexture ? binding.texture : null;
   useSceneMaterialSync(object, geometry, visibleTexture);
