@@ -50,7 +50,10 @@ type MarkerDrag = TranslateMarkerDrag | ScaleMarkerDrag;
 
 const sceneEnvironments = new WeakMap<THREE.Scene, SceneEnvironmentEntry>();
 const MARKER_SOURCE_DIAMETER = 0.22;
+const MARKER_OUTLINE_DIAMETER = 0.3;
 const MARKER_HIT_DIAMETER = 0.42;
+const MARKER_MIN_DIAMETER = 0.08;
+const MARKER_CAMERA_OFFSET_FACTOR = 0.55;
 const SCALE_PIXELS_PER_FACTOR = 140;
 
 function normalizedHex(color: string): string | null {
@@ -111,6 +114,22 @@ function useContrastCenterMarker(
 
   const marker = useMemo(() => {
     const group = new THREE.Group();
+
+    const outlineGeometry = new THREE.OctahedronGeometry(MARKER_OUTLINE_DIAMETER / 2, 0);
+    const outlineMaterial = new THREE.MeshBasicMaterial({
+      color: '#000000',
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      fog: false
+    });
+    const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
+    outline.name = 'Kontrast-Mittelpunkt Kontur';
+    outline.renderOrder = 2004;
+    outline.frustumCulled = false;
+
     const visualGeometry = new THREE.OctahedronGeometry(MARKER_SOURCE_DIAMETER / 2, 0);
     const visualMaterial = new THREE.MeshBasicMaterial({
       color: invertHexColor(object.material.color),
@@ -141,7 +160,7 @@ function useContrastCenterMarker(
     group.name = `Kontrast-Mittelpunkt: ${object.id}`;
     group.renderOrder = 2005;
     group.frustumCulled = false;
-    group.add(visual, hit);
+    group.add(outline, visual, hit);
     return group;
   }, [object.id]);
 
@@ -345,12 +364,23 @@ function useContrastCenterMarker(
       .set(...current.object.position)
       .add(transformedCenter);
     marker.quaternion.identity();
+
     const averageWorldSize = geometryMetrics.localAverageSize * (
       Math.abs(current.object.scale[0])
       + Math.abs(current.object.scale[1])
       + Math.abs(current.object.scale[2])
     ) / 3;
-    const diameter = THREE.MathUtils.clamp(averageWorldSize * 0.064, 0.035, 0.32);
+    const diameter = THREE.MathUtils.clamp(
+      averageWorldSize * 0.075,
+      MARKER_MIN_DIAMETER,
+      0.34
+    );
+    const towardCamera = camera.position.clone().sub(marker.position);
+    if (towardCamera.lengthSq() > 0.000001) {
+      marker.position.add(
+        towardCamera.normalize().multiplyScalar(diameter * MARKER_CAMERA_OFFSET_FACTOR)
+      );
+    }
     marker.scale.setScalar(diameter / MARKER_SOURCE_DIAMETER);
   });
 }
