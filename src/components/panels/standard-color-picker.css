@@ -1,25 +1,25 @@
 .standard-color-picker {
   position: relative;
-  margin-top: 7px;
+  margin: 7px 0 18px;
 }
 
 .standard-color-row-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 26px;
+  min-height: 22px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .standard-color-all-button {
   height: auto;
-  padding: 2px 0;
+  padding: 1px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--silver);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .standard-color-all-button:hover {
@@ -31,8 +31,8 @@
 .standard-color-preview {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 7px;
-  margin-top: 5px;
+  gap: 6px;
+  margin-top: 4px;
 }
 
 .standard-color-preview-swatch,
@@ -46,7 +46,7 @@
 }
 
 .standard-color-preview-swatch {
-  max-width: 34px;
+  max-width: 26px;
   justify-self: center;
 }
 
