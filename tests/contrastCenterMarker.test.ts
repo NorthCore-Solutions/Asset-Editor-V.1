@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { invertHexColor } from '../src/editor/paint/useSurfacePaint';
+import { invertHexColor } from '../src/utils/color';
 
 describe('Kontrastfarbener Mittelpunkt', () => {
   it('invertiert helle und dunkle Grundfarben', () => {
