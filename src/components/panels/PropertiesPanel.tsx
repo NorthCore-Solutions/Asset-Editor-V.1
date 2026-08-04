@@ -7,7 +7,11 @@ import {
   supportsGeometryRounding
 } from '../../geometry/rounding';
 import { FULL_SURFACE_UV_ATLAS, getSurfaceUvAtlas } from '../../geometry/uvAtlas';
-import { getSurfaceRasterMetrics } from '../../editor/paint/surfacePaintGrid';
+import {
+  createPaintTextureData,
+  getSurfaceRasterMetrics,
+  loadSurfaceCanvases
+} from '../../editor/paint/surfacePaintGrid';
 import { setSurfacePaintSettings, subscribeSurfacePaint } from '../../editor/paint/surfacePaintSession';
 import { useEditorStore } from '../../store/editorStore';
 import type { MaterialData, PaintTextureData, Vec3 } from '../../types/editor';
@@ -22,104 +26,6 @@ interface PropertiesPanelProps {
 type ColorTarget = 'base' | 'paint';
 
 const round = (value: number) => Number(value.toFixed(3));
-
-function hexRgb(color: string): [number, number, number] {
-  const normalized = color.replace('#', '');
-  return [
-    Number.parseInt(normalized.slice(0, 2), 16),
-    Number.parseInt(normalized.slice(2, 4), 16),
-    Number.parseInt(normalized.slice(4, 6), 16)
-  ];
-}
-
-function recolorDataUrl(
-  dataUrl: string,
-  width: number,
-  height: number,
-  previousColor: string,
-  nextColor: string
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, width);
-      canvas.height = Math.max(1, height);
-      const context = canvas.getContext('2d', { willReadFrequently: true });
-      if (!context) {
-        reject(new Error('2D-Kontext für Grundfarbenänderung nicht verfügbar.'));
-        return;
-      }
-
-      context.imageSmoothingEnabled = false;
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      const previous = hexRgb(previousColor);
-      const next = hexRgb(nextColor);
-      const tolerance = 3;
-
-      for (let offset = 0; offset < pixels.data.length; offset += 4) {
-        const red = pixels.data[offset] ?? 0;
-        const green = pixels.data[offset + 1] ?? 0;
-        const blue = pixels.data[offset + 2] ?? 0;
-        const alpha = pixels.data[offset + 3] ?? 0;
-        const matchesBackground = alpha > 0
-          && Math.abs(red - previous[0]) <= tolerance
-          && Math.abs(green - previous[1]) <= tolerance
-          && Math.abs(blue - previous[2]) <= tolerance;
-        if (!matchesBackground) continue;
-
-        pixels.data[offset] = next[0];
-        pixels.data[offset + 1] = next[1];
-        pixels.data[offset + 2] = next[2];
-      }
-
-      context.putImageData(pixels, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
-    };
-
-    image.onerror = () => reject(new Error('Bemalung konnte für die Grundfarbenänderung nicht geladen werden.'));
-    image.src = dataUrl;
-  });
-}
-
-async function recolorTextureBackground(
-  texture: PaintTextureData,
-  previousColor: string,
-  nextColor: string
-): Promise<PaintTextureData> {
-  const surfaceGrid = texture.surfaceGrid;
-  const displayPromise = recolorDataUrl(
-    texture.dataUrl,
-    texture.width,
-    texture.height,
-    previousColor,
-    nextColor
-  );
-  const sourcePromise = surfaceGrid?.sourceDataUrl && surfaceGrid.sourceWidth && surfaceGrid.sourceHeight
-    ? recolorDataUrl(
-        surfaceGrid.sourceDataUrl,
-        surfaceGrid.sourceWidth,
-        surfaceGrid.sourceHeight,
-        previousColor,
-        nextColor
-      )
-    : Promise.resolve(undefined);
-  const [dataUrl, sourceDataUrl] = await Promise.all([displayPromise, sourcePromise]);
-
-  return {
-    ...texture,
-    dataUrl,
-    surfaceGrid: surfaceGrid
-      ? {
-          ...surfaceGrid,
-          baseColor: nextColor.toUpperCase(),
-          ...(sourceDataUrl ? { sourceDataUrl } : {})
-        }
-      : undefined
-  };
-}
 
 function VectorEditor({ label, value, unit, onChange }: { label: string; value: Vec3; unit?: 'deg'; onChange: (value: Vec3) => void }) {
   const shown = value.map((item) => round(unit === 'deg' ? item * 180 / Math.PI : item)) as Vec3;
@@ -280,7 +186,9 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
       return;
     }
 
-    void recolorTextureBackground(paintTexture, previousColor, normalized)
+    const { atlas, metrics } = paintSurface;
+    void loadSurfaceCanvases(paintTexture, atlas, metrics, normalized)
+      .then((layers) => createPaintTextureData(layers, atlas, metrics, normalized))
       .then((updatedTexture) => {
         const currentObject = useEditorStore.getState().objects.find((item) => item.id === object.id);
         const currentDataUrl = currentObject?.material.paintTexture?.dataUrl;

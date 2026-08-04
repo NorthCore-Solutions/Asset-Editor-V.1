@@ -20,6 +20,7 @@ import {
 } from './surfaceAtlasSizing';
 
 export const PAINT_PIXELS_PER_WORLD_UNIT = 32;
+export const PAINT_BASE_ALPHA = 254;
 const MAX_SURFACE_PIXELS = 384;
 const EPSILON = 0.000001;
 const INTEGER_PIXEL_TOLERANCE = 0.0001;
@@ -312,12 +313,68 @@ function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   return context;
 }
 
+export function recolorSurfaceBasePixels(
+  image: ImageData,
+  previousColor: string,
+  nextColor: string,
+  version: 1 | 2
+): void {
+  const previous = hexToRgba(previousColor);
+  const next = hexToRgba(nextColor);
+  const tolerance = 3;
+
+  for (let offset = 0; offset < image.data.length; offset += 4) {
+    const red = image.data[offset] ?? 0;
+    const green = image.data[offset + 1] ?? 0;
+    const blue = image.data[offset + 2] ?? 0;
+    const alpha = image.data[offset + 3] ?? 0;
+    const isBasePixel = version === 2
+      ? alpha === PAINT_BASE_ALPHA
+      : alpha > 0
+        && Math.abs(red - previous.r) <= tolerance
+        && Math.abs(green - previous.g) <= tolerance
+        && Math.abs(blue - previous.b) <= tolerance;
+    if (!isBasePixel) continue;
+
+    image.data[offset] = next.r;
+    image.data[offset + 1] = next.g;
+    image.data[offset + 2] = next.b;
+    image.data[offset + 3] = PAINT_BASE_ALPHA;
+  }
+}
+
+function recolorSurfaceBaseCanvas(
+  canvas: HTMLCanvasElement,
+  previousColor: string,
+  nextColor: string,
+  version: 1 | 2
+): void {
+  const context = canvasContext(canvas);
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  recolorSurfaceBasePixels(image, previousColor, nextColor, version);
+  context.putImageData(image, 0, 0);
+}
+
+function makeSurfaceBaseOpaque(canvas: HTMLCanvasElement): void {
+  const context = canvasContext(canvas);
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  let changed = false;
+
+  for (let offset = 3; offset < image.data.length; offset += 4) {
+    if (image.data[offset] !== PAINT_BASE_ALPHA) continue;
+    image.data[offset] = 255;
+    changed = true;
+  }
+
+  if (changed) context.putImageData(image, 0, 0);
+}
+
 export function createFilledSurfaceCanvas(width: number, height: number, color: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, width);
   canvas.height = Math.max(1, height);
   canvasContext(canvas).putImageData(
-    createFilledImageData(canvas.width, canvas.height, hexToRgba(color)),
+    createFilledImageData(canvas.width, canvas.height, hexToRgba(color, PAINT_BASE_ALPHA)),
     0,
     0
   );
@@ -367,6 +424,7 @@ export function createVisibleSurfaceCanvas(
     canvas.width,
     canvas.height
   );
+  makeSurfaceBaseOpaque(canvas);
   return canvas;
 }
 
@@ -429,11 +487,10 @@ export async function loadSurfaceCanvases(
   }
 
   const storedGrid = texture.surfaceGrid;
-  const compatibleGrid = storedGrid?.version === 1
+  const compatibleGrid = (storedGrid?.version === 1 || storedGrid?.version === 2)
     && storedGrid.atlasSignature === atlas.signature
     && storedGrid.surfaces.length === atlas.islands.length;
   const compatibleSource = compatibleGrid
-    && storedGrid.baseColor?.toUpperCase() === baseColor.toUpperCase()
     && Boolean(storedGrid.sourceDataUrl)
     && Boolean(storedGrid.sourceWidth)
     && Boolean(storedGrid.sourceHeight);
@@ -469,6 +526,12 @@ export async function loadSurfaceCanvases(
       0,
       storedWidth,
       storedHeight
+    );
+    recolorSurfaceBaseCanvas(
+      extracted,
+      storedGrid?.baseColor ?? baseColor,
+      baseColor,
+      storedGrid?.version ?? 1
     );
     return resizeSurfaceCanvas(extracted, metric, baseColor);
   });
@@ -513,7 +576,8 @@ export function composeSurfaceAtlasCanvas(
   surfaces: HTMLCanvasElement[],
   atlas: SurfaceUvAtlas,
   metrics: SurfaceRasterMetric[],
-  baseColor: string
+  baseColor: string,
+  preserveBaseMarker = false
 ): HTMLCanvasElement {
   const layout = surfaceAtlasPixelLayout(metrics, atlas);
   const canvas = document.createElement('canvas');
@@ -550,6 +614,7 @@ export function composeSurfaceAtlasCanvas(
     );
   });
 
+  if (!preserveBaseMarker) makeSurfaceBaseOpaque(canvas);
   return canvas;
 }
 
@@ -567,9 +632,9 @@ export function createPaintTextureData(
     coverageU: 1,
     coverageV: 1
   }));
-  const sourceCanvas = composeSurfaceAtlasCanvas(surfaces, atlas, sourceMetrics, baseColor);
+  const sourceCanvas = composeSurfaceAtlasCanvas(surfaces, atlas, sourceMetrics, baseColor, true);
   const surfaceGrid: PaintSurfaceGridData = {
-    version: 1,
+    version: 2,
     atlasSignature: atlas.signature,
     pixelsPerWorldUnit: PAINT_PIXELS_PER_WORLD_UNIT,
     baseColor: baseColor.toUpperCase(),
