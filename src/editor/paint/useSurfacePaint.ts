@@ -97,6 +97,7 @@ function useContrastCenterMarker(
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
   const dragRef = useRef<MarkerDrag | null>(null);
+  const disposalTimerRef = useRef<number | null>(null);
   const latestRef = useRef({ object, selected, selectedCount, paintModeEnabled, tool, snap });
   latestRef.current = { object, selected, selectedCount, paintModeEnabled, tool, snap };
 
@@ -165,16 +166,24 @@ function useContrastCenterMarker(
   }, [object.id]);
 
   useEffect(() => {
+    if (disposalTimerRef.current !== null) {
+      window.clearTimeout(disposalTimerRef.current);
+      disposalTimerRef.current = null;
+    }
     scene.add(marker);
+
     return () => {
       scene.remove(marker);
-      marker.traverse((entry) => {
-        if (!(entry instanceof THREE.Mesh)) return;
-        entry.geometry.dispose();
-        const materials = Array.isArray(entry.material) ? entry.material : [entry.material];
-        materials.forEach((material) => material.dispose());
-      });
-      marker.clear();
+      disposalTimerRef.current = window.setTimeout(() => {
+        marker.traverse((entry) => {
+          if (!(entry instanceof THREE.Mesh)) return;
+          entry.geometry.dispose();
+          const materials = Array.isArray(entry.material) ? entry.material : [entry.material];
+          materials.forEach((material) => material.dispose());
+        });
+        marker.clear();
+        disposalTimerRef.current = null;
+      }, 0);
     };
   }, [marker, scene]);
 
