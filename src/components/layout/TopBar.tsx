@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { buildProjectFile, deserializeProject, downloadTextFile, safeFilename, serializeProject } from '../../persistence/projectFile';
+import { isNativeAndroid, overwriteNativeFile, saveBlobAs, type SavedFileReference } from '../../platform/nativeFileDialog';
+import { buildProjectFile, deserializeProject, safeFilename, serializeProject } from '../../persistence/projectFile';
 import { useEditorStore } from '../../store/editorStore';
 import { ExportDialog } from '../dialogs/ExportDialog';
 
@@ -8,7 +9,7 @@ interface WritableFileStreamLike {
   close: () => Promise<void>;
 }
 
-interface FileHandleLike {
+interface BrowserFileHandleLike {
   name: string;
   createWritable: () => Promise<WritableFileStreamLike>;
 }
@@ -21,24 +22,23 @@ interface SaveFilePickerWindow extends Window {
       description: string;
       accept: Record<string, string[]>;
     }>;
-  }) => Promise<FileHandleLike>;
+  }) => Promise<BrowserFileHandleLike>;
 }
 
-function downloadScreenshot(projectName: string): Promise<boolean> {
+type StoredFileTarget =
+  | { kind: 'browser'; handle: BrowserFileHandleLike }
+  | { kind: 'native'; uri: string; name: string };
+
+async function saveScreenshot(projectName: string): Promise<SavedFileReference | null> {
   const canvas = document.querySelector<HTMLCanvasElement>('.viewport canvas');
-  if (!canvas) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      if (!blob) { resolve(false); return; }
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${safeFilename(projectName)}-preview.png`;
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      resolve(true);
-    }, 'image/png');
+  if (!canvas) return null;
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, 'image/png');
   });
+  if (!blob) return null;
+
+  return saveBlobAs(blob, `${safeFilename(projectName)}-preview.png`, 'image/png');
 }
 
 function closeMenus(): void {
@@ -47,7 +47,7 @@ function closeMenus(): void {
 
 export function TopBar() {
   const inputRef = useRef<HTMLInputElement>(null);
-  const fileHandleRef = useRef<FileHandleLike | null>(null);
+  const fileTargetRef = useRef<StoredFileTarget | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const project = useEditorStore((state) => state.project);
   const scene = useEditorStore((state) => state.scene);
@@ -72,7 +72,7 @@ export function TopBar() {
     return serializeProject({ project: file.project, scene: file.scene, objects: file.objects });
   };
 
-  const writeFile = async (handle: FileHandleLike, content: string): Promise<void> => {
+  const writeBrowserFile = async (handle: BrowserFileHandleLike, content: string): Promise<void> => {
     const writable = await handle.createWritable();
     await writable.write(content);
     await writable.close();
@@ -81,10 +81,18 @@ export function TopBar() {
   const saveAs = async (): Promise<void> => {
     const content = serializeCurrentProject();
     const filename = `${safeFilename(project.name)}.ncae.json`;
+    const blob = new Blob([content], { type: 'application/json' });
     const pickerWindow = window as SaveFilePickerWindow;
 
     try {
-      if (pickerWindow.showSaveFilePicker) {
+      if (isNativeAndroid()) {
+        const saved = await saveBlobAs(blob, filename, 'application/json');
+        if (!saved?.uri) return;
+
+        fileTargetRef.current = { kind: 'native', uri: saved.uri, name: saved.name };
+        markSaved();
+        setMessage(`Gespeichert unter: ${saved.name}`);
+      } else if (pickerWindow.showSaveFilePicker) {
         const handle = await pickerWindow.showSaveFilePicker({
           suggestedName: filename,
           excludeAcceptAllOption: false,
@@ -93,15 +101,17 @@ export function TopBar() {
             accept: { 'application/json': ['.json'] }
           }]
         });
-        await writeFile(handle, content);
-        fileHandleRef.current = handle;
+        await writeBrowserFile(handle, content);
+        fileTargetRef.current = { kind: 'browser', handle };
         markSaved();
         setMessage(`Gespeichert unter: ${handle.name}`);
       } else {
-        downloadTextFile(content, filename);
-        fileHandleRef.current = null;
+        const saved = await saveBlobAs(blob, filename, 'application/json');
+        if (!saved) return;
+
+        fileTargetRef.current = null;
         markSaved();
-        setMessage(`Heruntergeladen: ${filename}`);
+        setMessage(`Heruntergeladen: ${saved.name}`);
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -112,16 +122,22 @@ export function TopBar() {
   };
 
   const save = async (): Promise<void> => {
-    const handle = fileHandleRef.current;
-    if (!handle) {
+    const target = fileTargetRef.current;
+    if (!target) {
       await saveAs();
       return;
     }
 
     try {
-      await writeFile(handle, serializeCurrentProject());
+      const content = serializeCurrentProject();
+      if (target.kind === 'native') {
+        await overwriteNativeFile(target.uri, new Blob([content], { type: 'application/json' }));
+        setMessage(`Gespeichert: ${target.name}`);
+      } else {
+        await writeBrowserFile(target.handle, content);
+        setMessage(`Gespeichert: ${target.handle.name}`);
+      }
       markSaved();
-      setMessage(`Gespeichert: ${handle.name}`);
     } catch (error) {
       setMessage(error instanceof Error ? `Speichern fehlgeschlagen: ${error.message}` : 'Speichern fehlgeschlagen');
     } finally {
@@ -132,7 +148,7 @@ export function TopBar() {
   const load = async (file: File) => {
     try {
       loadProject(deserializeProject(await file.text()));
-      fileHandleRef.current = null;
+      fileTargetRef.current = null;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Projektdatei konnte nicht geladen werden.');
     }
@@ -144,7 +160,7 @@ export function TopBar() {
         <details className="menu" onMouseLeave={(event) => event.currentTarget.removeAttribute('open')}>
           <summary>Datei</summary>
           <div className="menu-popover">
-            <button onClick={() => { fileHandleRef.current = null; newProject(); closeMenus(); }}>Neu</button>
+            <button onClick={() => { fileTargetRef.current = null; newProject(); closeMenus(); }}>Neu</button>
             <button onClick={() => { inputRef.current?.click(); closeMenus(); }}>Öffnen…</button>
             <button onClick={() => { void save(); }}>Speichern</button>
             <button onClick={() => { void saveAs(); }}>Speichern unter…</button>
@@ -172,7 +188,16 @@ export function TopBar() {
           <summary>Export</summary>
           <div className="menu-popover">
             <button onClick={() => { setExportOpen(true); closeMenus(); }}>GLB exportieren…</button>
-            <button onClick={() => { void downloadScreenshot(project.name).then((saved) => setMessage(saved ? 'Screenshot gespeichert' : 'Screenshot konnte nicht erstellt werden')); closeMenus(); }}>Screenshot als PNG</button>
+            <button onClick={() => {
+              void saveScreenshot(project.name)
+                .then((saved) => {
+                  if (saved) setMessage(`Screenshot gespeichert: ${saved.name}`);
+                })
+                .catch((error: unknown) => {
+                  setMessage(error instanceof Error ? `Screenshot fehlgeschlagen: ${error.message}` : 'Screenshot konnte nicht erstellt werden');
+                });
+              closeMenus();
+            }}>Screenshot als PNG</button>
           </div>
         </details>
         <input className="project-name" aria-label="Projektname" value={project.name} onChange={(event) => setProjectName(event.target.value)} />
