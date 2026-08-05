@@ -86,7 +86,7 @@ function cachedSceneTopology(
     const topology = { localBounds, anchors };
     topologyCache.set(key, topology);
     if (topologyCache.size > TOPOLOGY_CACHE_LIMIT) {
-      const oldestKey = topologyCache.keys().next().value as string | undefined;
+      const oldestKey = topologyCache.keys().next().value;
       if (oldestKey) topologyCache.delete(oldestKey);
     }
     return {
