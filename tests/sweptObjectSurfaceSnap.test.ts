@@ -109,12 +109,12 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
 });
 
 describe('gleiche Durchquerungsbedingung für alle Elemente', () => {
-  it.each(SHAPE_DEFINITIONS)("stoppt '$label' als bewegtes Element am Würfel", ({ type }) => {
-    const { target, targetBounds, previous, candidate } = crossingSetup(type, 'box');
+  it.each(SHAPE_DEFINITIONS)("stoppt '$label' als bewegtes Element auf der ersten überlappenden Bahn", ({ type }) => {
+    const { target, previous, candidate } = crossingSetup(type, 'box');
     const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
 
     expect(result.targetId).toBe(target.id);
-    expectStopsAtFirstLeftSurface(candidate, targetBounds, result.position);
+    expectStopsDuringCrossing(previous, candidate, result.position);
   });
 
   it.each(SHAPE_DEFINITIONS)("stoppt eine Kugel an '$label' auf ihrer tatsächlichen Ziehbahn", ({ type }) => {
