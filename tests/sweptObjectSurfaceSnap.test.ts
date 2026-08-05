@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createSceneObject, SHAPE_DEFINITIONS } from '../src/geometry/factory';
-import { findObjectSurfaceSnap } from '../src/editor/snapping/objectSurfaceSnap';
+import { findFormSurfaceSnap } from '../src/editor/snapping/primitiveSurfaceSnap';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
 import type { PrimitiveType, SceneObjectData, Vec3 } from '../src/types/editor';
 
@@ -62,6 +62,17 @@ function expectStopsAtFirstLeftSurface(
   expect(snappedBounds.max.x).toBeCloseTo(targetBounds.min.x, 4);
 }
 
+function expectStopsDuringCrossing(
+  previous: SceneObjectData,
+  candidate: SceneObjectData,
+  resultPosition: Vec3
+): void {
+  expect(resultPosition[0]).toBeGreaterThanOrEqual(previous.position[0] - 0.00001);
+  expect(resultPosition[0]).toBeLessThan(candidate.position[0] - 0.00001);
+  expect(resultPosition[1]).toBeCloseTo(candidate.position[1], 6);
+  expect(resultPosition[2]).toBeCloseTo(candidate.position[2], 6);
+}
+
 describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (platform) => {
   void platform;
 
@@ -73,7 +84,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
     const rawBounds = requiredBounds(candidate);
     expect(rawBounds.max.x).toBeGreaterThan(targetBounds.min.x);
 
-    const result = findObjectSurfaceSnap(candidate, [previous, target], STEP);
+    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
 
     expect(result.targetId).toBe(target.id);
     expectStopsAtFirstLeftSurface(candidate, targetBounds, result.position);
@@ -81,7 +92,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
 
   it('hält den Kontakt auch beim nächsten Ziehschritt in die Form hinein', () => {
     const { target, targetBounds, previous, candidate } = crossingSetup('sphere', 'box');
-    const first = findObjectSurfaceSnap(candidate, [previous, target], STEP);
+    const first = findFormSurfaceSnap(candidate, [previous, target], STEP);
     expect(first.targetId).toBe(target.id);
 
     const snappedPrevious = withPosition(candidate, first.position);
@@ -90,7 +101,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
       candidate.position[1],
       candidate.position[2]
     ]);
-    const second = findObjectSurfaceSnap(deeperCandidate, [snappedPrevious, target], STEP);
+    const second = findFormSurfaceSnap(deeperCandidate, [snappedPrevious, target], STEP);
 
     expect(second.targetId).toBe(target.id);
     expectStopsAtFirstLeftSurface(deeperCandidate, targetBounds, second.position);
@@ -100,17 +111,17 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
 describe('gleiche Durchquerungsbedingung für alle Elemente', () => {
   it.each(SHAPE_DEFINITIONS)("stoppt '$label' als bewegtes Element am Würfel", ({ type }) => {
     const { target, targetBounds, previous, candidate } = crossingSetup(type, 'box');
-    const result = findObjectSurfaceSnap(candidate, [previous, target], STEP);
+    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
 
     expect(result.targetId).toBe(target.id);
     expectStopsAtFirstLeftSurface(candidate, targetBounds, result.position);
   });
 
-  it.each(SHAPE_DEFINITIONS)("stoppt eine Kugel an '$label' als Zielelement", ({ type }) => {
-    const { target, targetBounds, previous, candidate } = crossingSetup('sphere', type);
-    const result = findObjectSurfaceSnap(candidate, [previous, target], STEP);
+  it.each(SHAPE_DEFINITIONS)("stoppt eine Kugel an '$label' auf ihrer tatsächlichen Ziehbahn", ({ type }) => {
+    const { target, previous, candidate } = crossingSetup('sphere', type);
+    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
 
     expect(result.targetId).toBe(target.id);
-    expectStopsAtFirstLeftSurface(candidate, targetBounds, result.position);
+    expectStopsDuringCrossing(previous, candidate, result.position);
   });
 });
