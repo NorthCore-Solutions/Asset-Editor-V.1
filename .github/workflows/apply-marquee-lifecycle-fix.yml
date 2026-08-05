@@ -1,6 +1,7 @@
 name: Apply Marquee Lifecycle Fix
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
