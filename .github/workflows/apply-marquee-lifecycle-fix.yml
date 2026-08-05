@@ -1,6 +1,10 @@
 name: Apply Marquee Lifecycle Fix
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-marquee-lifecycle-fix.yml'
   workflow_dispatch:
 
 permissions:
@@ -46,130 +50,130 @@ jobs:
 
           replacement = r'''  const registerSelectionApi = useCallback((api: SelectionApi) => { selectionApiRef.current = api; }, []);
 
-  const stopMarqueeEvent = useCallback((event: Event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-  }, []);
+          const stopMarqueeEvent = useCallback((event: Event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+          }, []);
 
-  const removeMarqueeListeners = useCallback(() => {
-    const listeners = marqueeListenersRef.current;
-    if (!listeners) return;
+          const removeMarqueeListeners = useCallback(() => {
+            const listeners = marqueeListenersRef.current;
+            if (!listeners) return;
 
-    window.removeEventListener('pointermove', listeners.pointerMove, true);
-    window.removeEventListener('pointerup', listeners.finish, true);
-    window.removeEventListener('pointercancel', listeners.finish, true);
-    window.removeEventListener('blur', listeners.finish, true);
-    marqueeListenersRef.current = null;
-  }, []);
+            window.removeEventListener('pointermove', listeners.pointerMove, true);
+            window.removeEventListener('pointerup', listeners.finish, true);
+            window.removeEventListener('pointercancel', listeners.finish, true);
+            window.removeEventListener('blur', listeners.finish, true);
+            marqueeListenersRef.current = null;
+          }, []);
 
-  const handleMarqueeMove = useCallback((event: PointerEvent) => {
-    const current = marqueeRef.current;
-    const viewport = viewportRef.current;
-    if (!current || !viewport || event.pointerId !== current.pointerId) return;
+          const handleMarqueeMove = useCallback((event: PointerEvent) => {
+            const current = marqueeRef.current;
+            const viewport = viewportRef.current;
+            if (!current || !viewport || event.pointerId !== current.pointerId) return;
 
-    stopMarqueeEvent(event);
-    const bounds = viewport.getBoundingClientRect();
-    const next = {
-      ...current,
-      currentX: Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
-      currentY: Math.max(0, Math.min(bounds.height, event.clientY - bounds.top))
-    };
-    marqueeRef.current = next;
-    setMarquee(next);
-  }, [stopMarqueeEvent]);
+            stopMarqueeEvent(event);
+            const bounds = viewport.getBoundingClientRect();
+            const next = {
+              ...current,
+              currentX: Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+              currentY: Math.max(0, Math.min(bounds.height, event.clientY - bounds.top))
+            };
+            marqueeRef.current = next;
+            setMarquee(next);
+          }, [stopMarqueeEvent]);
 
-  const finishMarquee = useCallback((event?: Event) => {
-    const current = marqueeRef.current;
-    const viewport = viewportRef.current;
-    if (!current || !viewport) return;
-    if (event instanceof PointerEvent && event.pointerId !== current.pointerId) return;
-    if (event) stopMarqueeEvent(event);
+          const finishMarquee = useCallback((event?: Event) => {
+            const current = marqueeRef.current;
+            const viewport = viewportRef.current;
+            if (!current || !viewport) return;
+            if (event instanceof PointerEvent && event.pointerId !== current.pointerId) return;
+            if (event) stopMarqueeEvent(event);
 
-    const startedFromAndroidButton = marqueeFromAndroidButtonRef.current;
-    removeMarqueeListeners();
-    marqueeRef.current = null;
-    marqueeFromAndroidButtonRef.current = false;
-    setMarquee(null);
-    if (startedFromAndroidButton) setAndroidMarqueeArmed(false);
+            const startedFromAndroidButton = marqueeFromAndroidButtonRef.current;
+            removeMarqueeListeners();
+            marqueeRef.current = null;
+            marqueeFromAndroidButtonRef.current = false;
+            setMarquee(null);
+            if (startedFromAndroidButton) setAndroidMarqueeArmed(false);
 
-    const width = Math.abs(current.currentX - current.startX);
-    const height = Math.abs(current.currentY - current.startY);
-    suppressNextClickRef.current = true;
-    if (width < 4 || height < 4) return;
+            const width = Math.abs(current.currentX - current.startX);
+            const height = Math.abs(current.currentY - current.startY);
+            suppressNextClickRef.current = true;
+            if (width < 4 || height < 4) return;
 
-    const viewportBounds = viewport.getBoundingClientRect();
-    const rect: SelectionRect = {
-      left: viewportBounds.left + Math.min(current.startX, current.currentX),
-      top: viewportBounds.top + Math.min(current.startY, current.currentY),
-      right: viewportBounds.left + Math.max(current.startX, current.currentX),
-      bottom: viewportBounds.top + Math.max(current.startY, current.currentY)
-    };
-    const ids = selectionApiRef.current?.idsInRect(rect) ?? [];
-    selectMany(ids, event instanceof PointerEvent && event.shiftKey);
-  }, [removeMarqueeListeners, selectMany, stopMarqueeEvent]);
+            const viewportBounds = viewport.getBoundingClientRect();
+            const rect: SelectionRect = {
+              left: viewportBounds.left + Math.min(current.startX, current.currentX),
+              top: viewportBounds.top + Math.min(current.startY, current.currentY),
+              right: viewportBounds.left + Math.max(current.startX, current.currentX),
+              bottom: viewportBounds.top + Math.max(current.startY, current.currentY)
+            };
+            const ids = selectionApiRef.current?.idsInRect(rect) ?? [];
+            selectMany(ids, event instanceof PointerEvent && event.shiftKey);
+          }, [removeMarqueeListeners, selectMany, stopMarqueeEvent]);
 
-  useEffect(() => () => {
-    removeMarqueeListeners();
-    marqueeRef.current = null;
-    marqueeFromAndroidButtonRef.current = false;
-  }, [removeMarqueeListeners]);
+          useEffect(() => () => {
+            removeMarqueeListeners();
+            marqueeRef.current = null;
+            marqueeFromAndroidButtonRef.current = false;
+          }, [removeMarqueeListeners]);
 
-  useEffect(() => {
-    if (!paintSettings.enabled || !androidMarqueeArmed) return;
-    // Der Android-Auswahlmodus darf im Malmodus nicht aktiv bleiben.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAndroidMarqueeArmed(false);
-  }, [androidMarqueeArmed, paintSettings.enabled]);
+          useEffect(() => {
+            if (!paintSettings.enabled || !androidMarqueeArmed) return;
+            // Der Android-Auswahlmodus darf im Malmodus nicht aktiv bleiben.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setAndroidMarqueeArmed(false);
+          }, [androidMarqueeArmed, paintSettings.enabled]);
 
-  const startMarquee = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const target = event.target;
-    if (target instanceof Element && target.closest('[data-android-marquee-button="true"]')) return;
-    viewportRef.current?.focus();
-    const androidMarquee = isAndroidMarqueePointer(nativeAndroid, androidMarqueeArmed, event.pointerType);
-    if (
-      paintSettings.enabled
-      || event.button !== 0
-      || (!event.ctrlKey && !androidMarquee)
-      || !viewportRef.current
-      || marqueeRef.current
-    ) return;
+          const startMarquee = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+            const target = event.target;
+            if (target instanceof Element && target.closest('[data-android-marquee-button="true"]')) return;
+            viewportRef.current?.focus();
+            const androidMarquee = isAndroidMarqueePointer(nativeAndroid, androidMarqueeArmed, event.pointerType);
+            if (
+              paintSettings.enabled
+              || event.button !== 0
+              || (!event.ctrlKey && !androidMarquee)
+              || !viewportRef.current
+              || marqueeRef.current
+            ) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    event.nativeEvent.stopImmediatePropagation();
+            event.preventDefault();
+            event.stopPropagation();
+            event.nativeEvent.stopImmediatePropagation();
 
-    const bounds = viewportRef.current.getBoundingClientRect();
-    const state: MarqueeState = {
-      pointerId: event.pointerId,
-      startX: event.clientX - bounds.left,
-      startY: event.clientY - bounds.top,
-      currentX: event.clientX - bounds.left,
-      currentY: event.clientY - bounds.top
-    };
-    marqueeRef.current = state;
-    marqueeFromAndroidButtonRef.current = androidMarquee;
-    suppressNextClickRef.current = false;
-    setMarquee(state);
+            const bounds = viewportRef.current.getBoundingClientRect();
+            const state: MarqueeState = {
+              pointerId: event.pointerId,
+              startX: event.clientX - bounds.left,
+              startY: event.clientY - bounds.top,
+              currentX: event.clientX - bounds.left,
+              currentY: event.clientY - bounds.top
+            };
+            marqueeRef.current = state;
+            marqueeFromAndroidButtonRef.current = androidMarquee;
+            suppressNextClickRef.current = false;
+            setMarquee(state);
 
-    removeMarqueeListeners();
-    const listeners = {
-      pointerMove: handleMarqueeMove,
-      finish: finishMarquee
-    };
-    marqueeListenersRef.current = listeners;
-    window.addEventListener('pointermove', listeners.pointerMove, true);
-    window.addEventListener('pointerup', listeners.finish, true);
-    window.addEventListener('pointercancel', listeners.finish, true);
-    window.addEventListener('blur', listeners.finish, true);
-  }, [
-    androidMarqueeArmed,
-    finishMarquee,
-    handleMarqueeMove,
-    nativeAndroid,
-    paintSettings.enabled,
-    removeMarqueeListeners
-  ]);'''
+            removeMarqueeListeners();
+            const listeners = {
+              pointerMove: handleMarqueeMove,
+              finish: finishMarquee
+            };
+            marqueeListenersRef.current = listeners;
+            window.addEventListener('pointermove', listeners.pointerMove, true);
+            window.addEventListener('pointerup', listeners.finish, true);
+            window.addEventListener('pointercancel', listeners.finish, true);
+            window.addEventListener('blur', listeners.finish, true);
+          }, [
+            androidMarqueeArmed,
+            finishMarquee,
+            handleMarqueeMove,
+            nativeAndroid,
+            paintSettings.enabled,
+            removeMarqueeListeners
+          ]);'''
 
           content = content[:start] + replacement + content[end:]
           path.write_text(content, encoding='utf-8')
@@ -187,13 +191,12 @@ jobs:
       - name: Build web app
         run: npm run build
 
-      - name: Commit verified fix and remove temporary workflow
+      - name: Commit verified fix
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/apply-marquee-lifecycle-fix.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/editor/viewport/EditorViewport.tsx .github/workflows/apply-marquee-lifecycle-fix.yml
+          git add src/editor/viewport/EditorViewport.tsx
           git commit -m "Auswahlrahmen-Listener zuverlässig bereinigen"
           git push origin HEAD:main
