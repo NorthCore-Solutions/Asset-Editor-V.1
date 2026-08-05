@@ -8,6 +8,8 @@ import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData, SnapSettings, TransformMode } from '../../types/editor';
 import { useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePaint';
 import type { SurfacePaintSettings } from '../paint/surfacePaintSession';
+import { isNativeAndroid } from '../../platform/nativeFileDialog';
+import { AndroidTouchZoomControls } from './AndroidTouchZoomControls';
 import { PrimitiveSnapPattern } from './PrimitiveSnapPattern';
 
 interface OrbitControlApi {
@@ -954,6 +956,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
   const select = useEditorStore((state) => state.select);
   const [transformDragging, setTransformDragging] = useState(false);
   const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
+  const nativeAndroid = isNativeAndroid();
   const selectedObjects = objects.filter((object) => selectedIds.includes(object.id));
   const groupMovable = !paintSettings.enabled
     && selectedObjects.length > 1
@@ -1001,12 +1004,13 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
         enabled={!transformDragging && !selectionActive}
         enablePan={!paintSettings.enabled}
         enableRotate={!paintSettings.enabled}
-        enableZoom
+        enableZoom={!nativeAndroid}
         zoomToCursor
         enableDamping
         dampingFactor={0.08}
         mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }}
       />
+      <AndroidTouchZoomControls active={nativeAndroid && !transformDragging && !selectionActive} />
       <KeyboardCameraControls active={!paintSettings.enabled && keyboardActive && !transformDragging && !selectionActive} />
       <CameraController active />
       <SelectionBridge registry={registry} onReady={onSelectionApi} />
