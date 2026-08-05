@@ -1,62 +1,14 @@
 import * as THREE from 'three';
-import { createGeometry } from '../../geometry/factory';
-import type { SceneObjectData } from '../../types/editor';
+
+export {
+  combineWorldBounds,
+  worldBoundsFromObject3D,
+  worldBoundsFromSceneObject
+} from '../spatial/worldBounds';
 
 export interface ZoomTargetBounds {
   focus: THREE.Vector3;
   minimumDepth: number;
-}
-
-function hasFiniteBounds(bounds: THREE.Box3): boolean {
-  return [
-    bounds.min.x,
-    bounds.min.y,
-    bounds.min.z,
-    bounds.max.x,
-    bounds.max.y,
-    bounds.max.z
-  ].every(Number.isFinite) && !bounds.isEmpty();
-}
-
-export function worldBoundsFromSceneObject(object: SceneObjectData): THREE.Box3 | null {
-  const geometry = createGeometry({ type: object.type, geometry: object.geometry });
-
-  try {
-    geometry.computeBoundingBox();
-    const localBounds = geometry.boundingBox?.clone();
-    if (!localBounds || !hasFiniteBounds(localBounds)) return null;
-
-    const worldMatrix = new THREE.Matrix4().compose(
-      new THREE.Vector3(...object.position),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(...object.rotation)),
-      new THREE.Vector3(...object.scale)
-    );
-    const worldBounds = localBounds.applyMatrix4(worldMatrix);
-    return hasFiniteBounds(worldBounds) ? worldBounds : null;
-  } finally {
-    geometry.dispose();
-  }
-}
-
-export function worldBoundsFromObject3D(root: THREE.Object3D): THREE.Box3 | null {
-  root.updateWorldMatrix(true, true);
-  const worldBounds = new THREE.Box3().setFromObject(root, true);
-  return hasFiniteBounds(worldBounds) ? worldBounds : null;
-}
-
-export function combineWorldBounds(
-  entries: Iterable<THREE.Box3 | null | undefined>
-): THREE.Box3 | null {
-  const combined = new THREE.Box3();
-  let hasEntry = false;
-
-  for (const entry of entries) {
-    if (!entry || !hasFiniteBounds(entry)) continue;
-    combined.union(entry);
-    hasEntry = true;
-  }
-
-  return hasEntry && hasFiniteBounds(combined) ? combined : null;
 }
 
 export function zoomTargetFromWorldBounds(

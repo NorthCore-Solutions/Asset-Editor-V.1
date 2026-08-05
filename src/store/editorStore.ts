@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { createSceneObject } from '../geometry/factory';
-import { findAvailableFormPlacement } from '../editor/snapping/formSpawnPlacement';
-import { isFormType } from '../editor/snapping/primitiveSurfaceSnap';
+import {
+  findAvailableObjectGroupTranslation,
+  findAvailableObjectPlacement
+} from '../editor/placement/objectPlacement';
 import { snapPosition } from '../editor/snapping/positionSnap';
 import type { CameraView, MaterialData, PrimitiveType, ProjectFile, SceneObjectData, SceneSettings, Snapshot, SnapSettings, TransformMode, Vec3 } from '../types/editor';
 
@@ -9,11 +11,6 @@ const clone = <T,>(value: T): T => structuredClone(value);
 const now = () => new Date().toISOString();
 const defaultProject = () => ({ name: 'Unbenanntes Asset', createdAt: now(), updatedAt: now() });
 const defaultScene = (): SceneSettings => ({ background: '#11161A', gridVisible: true, axesVisible: true, gridSize: 1 });
-
-const snapHorizontalPosition = (position: Vec3, snap: SnapSettings): Vec3 => {
-  const snapped = snapPosition(position, snap);
-  return [snapped[0], position[1], snapped[2]];
-};
 
 type EditorSnapshot = Snapshot & { selectedIds: string[] };
 
@@ -145,13 +142,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addObject: (type) => set((state) => {
     const object = createSceneObject(type, state.objects.map((item) => item.id));
-    const selectedTarget = state.selectedId
-      ? state.objects.find((item) => item.id === state.selectedId && isFormType(item.type))
-      : undefined;
-
-    object.position = isFormType(type)
-      ? findAvailableFormPlacement(object, state.objects, state.snap.position, selectedTarget?.id)
-      : snapHorizontalPosition(object.position, state.snap);
+    object.position = findAvailableObjectPlacement(
+      object,
+      state.objects,
+      state.snap.position,
+      state.selectedId ?? undefined
+    );
 
     return {
       ...withHistory(state),
@@ -183,29 +179,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const targets = id ? [id] : state.selectedIds;
     const sources = state.objects.filter((item) => targets.includes(item.id));
     if (sources.length === 0) return state;
+
+    const preferredTargetId = id ?? state.selectedId ?? sources.at(-1)?.id;
+    const translation = findAvailableObjectGroupTranslation(
+      sources,
+      state.objects,
+      state.snap.position,
+      preferredTargetId
+    );
     const groupId = sources.length > 1 ? crypto.randomUUID() : undefined;
-    const duplicates = sources.map((source) => {
-      const duplicate: SceneObjectData = {
-        ...clone(source),
-        id: crypto.randomUUID(),
-        name: `${source.name} Kopie`,
-        parentId: groupId
-      };
+    const duplicates = sources.map((source): SceneObjectData => ({
+      ...clone(source),
+      id: crypto.randomUUID(),
+      name: `${source.name} Kopie`,
+      parentId: groupId,
+      position: [
+        source.position[0] + translation[0],
+        source.position[1] + translation[1],
+        source.position[2] + translation[2]
+      ]
+    }));
 
-      if (sources.length === 1 && isFormType(source.type)) {
-        duplicate.position = findAvailableFormPlacement(
-          duplicate,
-          state.objects,
-          state.snap.position,
-          source.id
-        );
-      } else {
-        const offsetPosition: Vec3 = [source.position[0] + 0.35, source.position[1], source.position[2] + 0.35];
-        duplicate.position = snapHorizontalPosition(offsetPosition, state.snap);
-      }
-
-      return duplicate;
-    });
     return {
       ...withHistory(state),
       objects: [...state.objects, ...duplicates],
