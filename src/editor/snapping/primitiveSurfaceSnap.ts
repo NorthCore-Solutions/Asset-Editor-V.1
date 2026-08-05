@@ -1,18 +1,57 @@
-import type { PrimitiveType } from '../../types/editor';
+import type { PrimitiveType, SceneObjectData, Vec3 } from '../../types/editor';
+import {
+  findObjectSurfaceSnap as findNearbyObjectSurfaceSnap,
+  surfaceSnapTargetFromObject3D,
+  surfaceSnapTargetFromSceneObject,
+  type ObjectSurfaceSnapResult,
+  type SurfaceSnapTarget
+} from './objectSurfaceSnap';
+import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
 
 export type {
   ObjectSurfaceSnapResult as FormSurfaceSnapResult,
   SurfaceSnapTarget
-} from './objectSurfaceSnap';
+};
 
 export {
-  findObjectSurfaceSnap,
-  findObjectSurfaceSnap as findFormSurfaceSnap,
-  snapObjectToObjectSurfaces,
-  snapObjectToObjectSurfaces as snapFormToFormSurfaces,
   surfaceSnapTargetFromObject3D,
   surfaceSnapTargetFromSceneObject
-} from './objectSurfaceSnap';
+};
+
+export function findFormSurfaceSnap(
+  source: SceneObjectData,
+  objects: SceneObjectData[],
+  positionStep: number,
+  additionalTargets: readonly SurfaceSnapTarget[] = []
+): ObjectSurfaceSnapResult {
+  const swept = findSweptObjectSurfaceSnap(
+    source,
+    objects,
+    positionStep,
+    additionalTargets
+  );
+  if (swept) return swept;
+
+  return findNearbyObjectSurfaceSnap(
+    source,
+    objects.filter((object) => object.id !== source.id),
+    positionStep,
+    additionalTargets
+  );
+}
+
+export const findObjectSurfaceSnap = findFormSurfaceSnap;
+
+export function snapFormToFormSurfaces(
+  source: SceneObjectData,
+  objects: SceneObjectData[],
+  positionStep: number,
+  additionalTargets: readonly SurfaceSnapTarget[] = []
+): Vec3 {
+  return findFormSurfaceSnap(source, objects, positionStep, additionalTargets).position;
+}
+
+export const snapObjectToObjectSurfaces = snapFormToFormSurfaces;
 
 /**
  * Kompatibilitätsfunktion für bestehende Viewport-Aufrufstellen.
