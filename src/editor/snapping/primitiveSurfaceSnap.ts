@@ -203,13 +203,13 @@ function createLock(
 ): TranslationSnapLock | null {
   if (!result.targetId) return null;
 
-  const correction = subtract(result.position, evaluatedSource.position);
+  const awayFromSurface = subtract(evaluatedSource.position, result.position);
   const oppositeMovement = subtract(previous.position, evaluatedSource.position);
   return {
     targetId: result.targetId,
     rawOrigin: [...rawSource.position] as Vec3,
     acceptedOrigin: [...result.position] as Vec3,
-    releaseDirection: normalize(correction, oppositeMovement)
+    releaseDirection: normalize(awayFromSurface, oppositeMovement)
   };
 }
 
