@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/android-marquee-button
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
