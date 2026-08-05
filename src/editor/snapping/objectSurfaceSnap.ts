@@ -28,15 +28,6 @@ export interface SurfaceSnapTarget {
   anchors: SurfaceSnapAnchor[];
 }
 
-interface SweptSnapResult {
-  correction: THREE.Vector3;
-  targetId: string;
-  distance: number;
-  travel: number;
-  lateralDistance: number;
-  normalAlignment: number;
-}
-
 function finiteBounds(bounds: THREE.Box3): boolean {
   return [
     bounds.min.x,
@@ -216,149 +207,11 @@ function nearbyAnchors(
   return result;
 }
 
-function anchorsInsideBounds(
-  hash: Map<string, SurfaceSnapAnchor[]>,
-  bounds: THREE.Box3,
-  cellSize: number
-): SurfaceSnapAnchor[] {
-  const minimumX = hashCoordinate(bounds.min.x, cellSize);
-  const minimumY = hashCoordinate(bounds.min.y, cellSize);
-  const minimumZ = hashCoordinate(bounds.min.z, cellSize);
-  const maximumX = hashCoordinate(bounds.max.x, cellSize);
-  const maximumY = hashCoordinate(bounds.max.y, cellSize);
-  const maximumZ = hashCoordinate(bounds.max.z, cellSize);
-  const result: SurfaceSnapAnchor[] = [];
-
-  for (let x = minimumX; x <= maximumX; x += 1) {
-    for (let y = minimumY; y <= maximumY; y += 1) {
-      for (let z = minimumZ; z <= maximumZ; z += 1) {
-        const bucket = hash.get(hashKey(x, y, z));
-        if (bucket) result.push(...bucket);
-      }
-    }
-  }
-  return result;
-}
-
 function anchorsCanMeet(
   source: SurfaceSnapAnchor,
   target: SurfaceSnapAnchor
 ): boolean {
   return source.normal.dot(target.normal) <= -0.12;
-}
-
-function unchangedRotationAndScale(
-  source: SceneObjectData,
-  previous: SceneObjectData
-): boolean {
-  return source.rotation.every((value, index) => (
-    Math.abs(value - (previous.rotation[index] ?? value)) <= EPSILON
-  )) && source.scale.every((value, index) => (
-    Math.abs(value - (previous.scale[index] ?? value)) <= EPSILON
-  ));
-}
-
-function previousTranslatedSource(
-  source: SceneObjectData,
-  objects: readonly SceneObjectData[]
-): SceneObjectData | null {
-  const previous = objects.find((object) => object.id === source.id);
-  if (!previous || previous.type !== source.type || !unchangedRotationAndScale(source, previous)) {
-    return null;
-  }
-
-  const movement = new THREE.Vector3(...source.position).sub(new THREE.Vector3(...previous.position));
-  return movement.lengthSq() > EPSILON * EPSILON ? previous : null;
-}
-
-function sweptSnapAcrossTargets(
-  source: SceneObjectData,
-  previous: SceneObjectData,
-  sourceTarget: SurfaceSnapTarget,
-  targets: readonly SurfaceSnapTarget[],
-  positionStep: number
-): SweptSnapResult | null {
-  const previousMatrix = matrixForSceneObject(previous);
-  const previousAnchors = transformSurfaceSnapAnchors(sourceTarget.anchors, previousMatrix);
-  const currentAnchors = transformSurfaceSnapAnchors(sourceTarget.anchors, sourceTarget.matrixWorld);
-  const movement = new THREE.Vector3(...source.position).sub(new THREE.Vector3(...previous.position));
-  const movementLength = movement.length();
-  if (movementLength <= EPSILON || previousAnchors.length !== currentAnchors.length) return null;
-
-  const direction = movement.clone().divideScalar(movementLength);
-  const tangentialTolerance = Math.max(0.08, Math.abs(positionStep) * 0.9);
-  const supportTolerance = Math.max(0.01, Math.abs(positionStep) * 0.08);
-  const hashCellSize = Math.max(0.1, tangentialTolerance);
-  const sourceLead = currentAnchors.reduce(
-    (maximum, anchor) => Math.max(maximum, anchor.position.dot(direction)),
-    Number.NEGATIVE_INFINITY
-  );
-  let best: SweptSnapResult | null = null;
-
-  for (const target of targets) {
-    if (target.id === source.id || !target.visible || target.anchors.length === 0) continue;
-
-    const targetWorldAnchors = transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
-    const targetNear = targetWorldAnchors.reduce(
-      (minimum, anchor) => Math.min(minimum, anchor.position.dot(direction)),
-      Number.POSITIVE_INFINITY
-    );
-    const targetHash = buildAnchorHash(targetWorldAnchors, hashCellSize);
-    const targetBounds = expandedWorldBounds(target, tangentialTolerance);
-
-    for (let index = 0; index < currentAnchors.length; index += 1) {
-      const currentAnchor = currentAnchors[index];
-      const previousAnchor = previousAnchors[index];
-      if (!currentAnchor || !previousAnchor) continue;
-      if (sourceLead - currentAnchor.position.dot(direction) > supportTolerance) continue;
-
-      const segment = currentAnchor.position.clone().sub(previousAnchor.position);
-      const segmentLengthSquared = segment.lengthSq();
-      if (segmentLengthSquared <= EPSILON * EPSILON) continue;
-
-      const segmentBounds = new THREE.Box3()
-        .setFromPoints([previousAnchor.position, currentAnchor.position])
-        .expandByScalar(tangentialTolerance);
-      if (!segmentBounds.intersectsBox(targetBounds)) continue;
-      segmentBounds.intersect(targetBounds);
-
-      for (const targetAnchor of anchorsInsideBounds(targetHash, segmentBounds, hashCellSize)) {
-        if (targetAnchor.position.dot(direction) - targetNear > supportTolerance) continue;
-
-        const relative = targetAnchor.position.clone().sub(previousAnchor.position);
-        const travel = relative.dot(segment) / segmentLengthSquared;
-        if (travel < -EPSILON || travel > 1 + EPSILON) continue;
-
-        const closestPoint = previousAnchor.position.clone().addScaledVector(segment, travel);
-        const lateralDistance = closestPoint.distanceTo(targetAnchor.position);
-        if (lateralDistance > tangentialTolerance + EPSILON) continue;
-
-        const correction = targetAnchor.position.clone().sub(currentAnchor.position);
-        const distance = correction.length();
-        const normalAlignment = currentAnchor.normal.dot(targetAnchor.normal);
-        const betterTravel = !best || travel < best.travel - EPSILON;
-        const equalTravelBetterLateral = best
-          && Math.abs(travel - best.travel) <= EPSILON
-          && lateralDistance < best.lateralDistance - EPSILON;
-        const equalContactBetterNormals = best
-          && Math.abs(travel - best.travel) <= EPSILON
-          && Math.abs(lateralDistance - best.lateralDistance) <= EPSILON
-          && normalAlignment < best.normalAlignment;
-        if (!betterTravel && !equalTravelBetterLateral && !equalContactBetterNormals) continue;
-
-        best = {
-          correction,
-          targetId: target.id,
-          distance,
-          travel,
-          lateralDistance,
-          normalAlignment
-        };
-      }
-    }
-  }
-
-  return best;
 }
 
 export function findObjectSurfaceSnap(
@@ -389,25 +242,6 @@ export function findObjectSurfaceSnap(
     ...additionalTargets
   ];
   const sourcePosition = new THREE.Vector3(...source.position);
-  const previousSource = previousTranslatedSource(source, objects);
-  if (previousSource) {
-    const sweptResult = sweptSnapAcrossTargets(
-      source,
-      previousSource,
-      sourceTarget,
-      targets,
-      positionStep
-    );
-    if (sweptResult) {
-      const snappedPosition = sourcePosition.clone().add(sweptResult.correction);
-      return {
-        position: [snappedPosition.x, snappedPosition.y, snappedPosition.z],
-        targetId: sweptResult.targetId,
-        distance: sweptResult.distance
-      };
-    }
-  }
-
   let bestCorrection: THREE.Vector3 | null = null;
   let bestTargetId: string | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
