@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { EDITOR_VERSION } from '../../app/version';
 import { isNativeAndroid, overwriteNativeFile, saveBlobAs, type SavedFileReference } from '../../platform/nativeFileDialog';
 import { buildProjectFile, deserializeProject, safeFilename, serializeProject } from '../../persistence/projectFile';
 import { useEditorStore } from '../../store/editorStore';
@@ -201,7 +202,7 @@ export function TopBar() {
           </div>
         </details>
         <input className="project-name" aria-label="Projektname" value={project.name} onChange={(event) => setProjectName(event.target.value)} />
-        <div className="brand">NorthCore Asset Editor 0.1</div>
+        <div className="brand">NorthCore Asset Editor {EDITOR_VERSION}</div>
         <input
           ref={inputRef}
           type="file"
