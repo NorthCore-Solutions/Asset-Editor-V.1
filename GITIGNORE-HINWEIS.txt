@@ -1,5 +1,0 @@
-# Falls .vscode pauschal ignoriert wird, diese Ausnahmen in .gitignore ergänzen:
-!.vscode/
-!.vscode/launch.json
-!.vscode/tasks.json
-!.vscode/settings.json
