@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { LiveUpdate } from '@capawesome/capacitor-live-update';
 
-const LIVE_UPDATE_MANIFEST_URL = 'https://northcore-eu.de/updates/asset-editor/beta/manifest.json';
+const LIVE_UPDATE_MANIFEST_URL = 'https://updates.northcore-eu.de/asset-editor/beta/manifest.json';
 const MANIFEST_TIMEOUT_MS = 10_000;
 const BUNDLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/i;
