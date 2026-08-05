@@ -209,17 +209,9 @@ function nearbyAnchors(
 
 function anchorsCanMeet(
   source: SurfaceSnapAnchor,
-  target: SurfaceSnapAnchor,
-  correction: THREE.Vector3,
-  distance: number
+  target: SurfaceSnapAnchor
 ): boolean {
-  const normalAlignment = source.normal.dot(target.normal);
-  if (normalAlignment > -0.12) return false;
-  if (distance <= EPSILON) return true;
-
-  const direction = correction.clone().multiplyScalar(1 / distance);
-  return source.normal.dot(direction) > 0.04
-    && target.normal.dot(direction) < -0.04;
+  return source.normal.dot(target.normal) <= -0.12;
 }
 
 export function findObjectSurfaceSnap(
@@ -271,7 +263,7 @@ export function findObjectSurfaceSnap(
         const correction = targetAnchor.position.clone().sub(sourceAnchor.position);
         const distance = correction.length();
         if (distance > worldThreshold + EPSILON) continue;
-        if (!anchorsCanMeet(sourceAnchor, targetAnchor, correction, distance)) continue;
+        if (!anchorsCanMeet(sourceAnchor, targetAnchor)) continue;
 
         const normalAlignment = sourceAnchor.normal.dot(targetAnchor.normal);
         const betterDistance = distance < bestDistance - EPSILON;
