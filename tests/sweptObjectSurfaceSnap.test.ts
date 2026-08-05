@@ -63,6 +63,8 @@ function expectStopsAtFirstLeftSurface(
 }
 
 describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (platform) => {
+  void platform;
+
   it.each([
     ['Kugel zu Würfel', 'sphere', 'box'],
     ['Kugel zu Zylinder', 'sphere', 'cylinder']
