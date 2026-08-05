@@ -24,7 +24,8 @@ function sampledAnchors(anchors: readonly SurfaceSnapAnchor[]): SurfaceSnapAncho
   const result: SurfaceSnapAnchor[] = [];
   const stride = anchors.length / MAX_SAMPLES_PER_ELEMENT;
   for (let index = 0; index < MAX_SAMPLES_PER_ELEMENT; index += 1) {
-    result.push(anchors[Math.floor(index * stride)]);
+    const anchor = anchors[Math.floor(index * stride)];
+    if (anchor) result.push(anchor);
   }
   return result;
 }
@@ -41,7 +42,9 @@ function sourceForTargetAnchor(
   source.position = [0, 0, 0];
   source.scale = [0.12, 0.12, 0.12];
   const sourceTarget = surfaceSnapTargetFromSceneObject(source, STEP);
-  if (!sourceTarget) throw new Error('Keine Snap-Topologie für Testkugel.');
+  if (!sourceTarget || sourceTarget.anchors.length === 0) {
+    throw new Error('Keine Snap-Topologie für Testkugel.');
+  }
 
   const sourceAnchor = sourceTarget.anchors.reduce((best, candidate) =>
     candidate.normal.dot(targetAnchor.normal) < best.normal.dot(targetAnchor.normal)
@@ -111,17 +114,18 @@ describe('gemeinsame geometrische Snap-Topologie', () => {
       const worldAnchors = transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
       for (const targetAnchor of sampledAnchors(worldAnchors)) {
         const { source } = sourceForTargetAnchor(targetAnchor);
+        const inverseTargetMatrix = target.matrixWorld.clone().invert();
         const singleAnchorTarget: SurfaceSnapTarget = {
           ...target,
           localBounds: new THREE.Box3(
-            targetAnchor.position.clone().addScalar(-0.001).applyMatrix4(target.matrixWorld.clone().invert()),
-            targetAnchor.position.clone().addScalar(0.001).applyMatrix4(target.matrixWorld.clone().invert())
+            targetAnchor.position.clone().addScalar(-0.001).applyMatrix4(inverseTargetMatrix),
+            targetAnchor.position.clone().addScalar(0.001).applyMatrix4(inverseTargetMatrix)
           ),
           matrixWorld: target.matrixWorld.clone(),
           anchors: [{
-            position: targetAnchor.position.clone().applyMatrix4(target.matrixWorld.clone().invert()),
+            position: targetAnchor.position.clone().applyMatrix4(inverseTargetMatrix),
             normal: targetAnchor.normal.clone().applyMatrix3(
-              new THREE.Matrix3().getNormalMatrix(target.matrixWorld.clone().invert())
+              new THREE.Matrix3().getNormalMatrix(inverseTargetMatrix)
             ).normalize()
           }]
         };
@@ -143,9 +147,12 @@ describe.each(['Desktop', 'Android'])('identische Voraussetzungen auf %s', (plat
       const target = surfaceSnapTargetFromSceneObject(targetObject, STEP);
       expect(target).not.toBeNull();
       if (!target) continue;
-      const [targetAnchor] = sampledAnchors(
+      const targetAnchor = sampledAnchors(
         transformSurfaceSnapAnchors(target.anchors, target.matrixWorld)
-      );
+      ).at(0);
+      expect(targetAnchor).toBeDefined();
+      if (!targetAnchor) continue;
+
       const { source } = sourceForTargetAnchor(targetAnchor);
       const result = findObjectSurfaceSnap(source, [targetObject], STEP);
       expect(result.targetId).toBe(targetObject.id);
@@ -170,7 +177,10 @@ describe('importierte Elemente', () => {
 
     const targetAnchor = sampledAnchors(
       transformSurfaceSnapAnchors(target.anchors, target.matrixWorld)
-    )[0];
+    ).at(0);
+    expect(targetAnchor).toBeDefined();
+    if (!targetAnchor) return;
+
     const { source } = sourceForTargetAnchor(targetAnchor);
     const result = findObjectSurfaceSnap(source, [], STEP, [target]);
     expect(result.targetId).toBe('imported');
