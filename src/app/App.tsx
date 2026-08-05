@@ -13,6 +13,7 @@ import '../styles/panel-collapse.css';
 import '../styles/tablet.css';
 import { useEditorShortcuts } from '../editor/shortcuts/useEditorShortcuts';
 import { AUTOSAVE_KEY, buildProjectFile, deserializeProject, serializeProject } from '../persistence/projectFile';
+import { initializeLiveUpdates } from '../platform/liveUpdate';
 import { useEditorStore } from '../store/editorStore';
 
 const TABLET_MEDIA_QUERY = '(max-width: 1180px), (pointer: coarse) and (max-width: 1400px)';
@@ -35,6 +36,13 @@ export function App() {
   const [inventoryCollapsed, setInventoryCollapsed] = useState(isCompactWorkspace);
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(isCompactWorkspace);
   const [hierarchyCollapsed, setHierarchyCollapsed] = useState(isCompactWorkspace);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      void initializeLiveUpdates();
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
