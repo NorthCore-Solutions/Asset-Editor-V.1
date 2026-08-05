@@ -1,10 +1,18 @@
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
+import {
+  buildGeometrySurfaceSnapAnchors,
+  transformSurfaceSnapAnchors,
+  type SurfaceSnapAnchor
+} from './surfaceSnapTopology';
 
-const AXES = ['x', 'y', 'z'] as const;
-const BOUNDS_EPSILON = 0.000001;
-type Axis = (typeof AXES)[number];
+const EPSILON = 0.000001;
+const TOPOLOGY_CACHE_LIMIT = 256;
+const topologyCache = new Map<string, {
+  localBounds: THREE.Box3;
+  anchors: SurfaceSnapAnchor[];
+}>();
 
 export interface ObjectSurfaceSnapResult {
   position: Vec3;
@@ -17,198 +25,202 @@ export interface SurfaceSnapTarget {
   visible: boolean;
   localBounds: THREE.Box3;
   matrixWorld: THREE.Matrix4;
+  anchors: SurfaceSnapAnchor[];
 }
 
-interface ScaleInteraction {
-  active: boolean;
-  direction: THREE.Vector3 | null;
+function finiteBounds(bounds: THREE.Box3): boolean {
+  return [
+    bounds.min.x,
+    bounds.min.y,
+    bounds.min.z,
+    bounds.max.x,
+    bounds.max.y,
+    bounds.max.z
+  ].every(Number.isFinite) && !bounds.isEmpty();
 }
 
-interface ChangedScaleAxis {
-  axis: Axis;
-  delta: number;
-}
-
-const axisValue = (vector: THREE.Vector3, axis: Axis): number => vector[axis];
-const setAxisValue = (vector: THREE.Vector3, axis: Axis, value: number): void => {
-  vector[axis] = value;
-};
-
-const boxCorners = (box: THREE.Box3): THREE.Vector3[] => [
-  new THREE.Vector3(box.min.x, box.min.y, box.min.z),
-  new THREE.Vector3(box.min.x, box.min.y, box.max.z),
-  new THREE.Vector3(box.min.x, box.max.y, box.min.z),
-  new THREE.Vector3(box.min.x, box.max.y, box.max.z),
-  new THREE.Vector3(box.max.x, box.min.y, box.min.z),
-  new THREE.Vector3(box.max.x, box.min.y, box.max.z),
-  new THREE.Vector3(box.max.x, box.max.y, box.min.z),
-  new THREE.Vector3(box.max.x, box.max.y, box.max.z)
-];
-
-const hasFiniteBounds = (bounds: THREE.Box3): boolean => [
-  bounds.min.x,
-  bounds.min.y,
-  bounds.min.z,
-  bounds.max.x,
-  bounds.max.y,
-  bounds.max.z
-].every(Number.isFinite) && !bounds.isEmpty();
-
-const matrixForSceneObject = (object: SceneObjectData): THREE.Matrix4 => {
-  const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...object.rotation));
+function matrixForSceneObject(object: SceneObjectData): THREE.Matrix4 {
   return new THREE.Matrix4().compose(
     new THREE.Vector3(...object.position),
-    quaternion,
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...object.rotation)),
     new THREE.Vector3(...object.scale)
   );
-};
+}
 
-const localBoundsForSceneObject = (object: SceneObjectData): THREE.Box3 | null => {
+function geometryCacheKey(object: SceneObjectData, cellSize: number): string {
+  return JSON.stringify({
+    type: object.type,
+    geometry: object.geometry,
+    scale: object.scale.map((value) => Number(Math.abs(value).toFixed(6))),
+    cellSize: Number(Math.abs(cellSize).toFixed(6))
+  });
+}
+
+function cachedSceneTopology(
+  object: SceneObjectData,
+  cellSize: number
+): { localBounds: THREE.Box3; anchors: SurfaceSnapAnchor[] } | null {
+  const key = geometryCacheKey(object, cellSize);
+  const cached = topologyCache.get(key);
+  if (cached) {
+    topologyCache.delete(key);
+    topologyCache.set(key, cached);
+    return {
+      localBounds: cached.localBounds.clone(),
+      anchors: cached.anchors
+    };
+  }
+
   const geometry = createGeometry(object);
   try {
     geometry.computeBoundingBox();
-    const bounds = geometry.boundingBox?.clone();
-    return bounds && hasFiniteBounds(bounds) ? bounds : null;
+    const localBounds = geometry.boundingBox?.clone();
+    if (!localBounds || !finiteBounds(localBounds)) return null;
+    const anchors = buildGeometrySurfaceSnapAnchors(
+      geometry,
+      cellSize,
+      new THREE.Vector3(...object.scale)
+    );
+    if (anchors.length === 0) return null;
+
+    const topology = { localBounds, anchors };
+    topologyCache.set(key, topology);
+    if (topologyCache.size > TOPOLOGY_CACHE_LIMIT) {
+      const oldestKey = topologyCache.keys().next().value as string | undefined;
+      if (oldestKey) topologyCache.delete(oldestKey);
+    }
+    return {
+      localBounds: localBounds.clone(),
+      anchors
+    };
   } finally {
     geometry.dispose();
   }
-};
+}
 
-export function surfaceSnapTargetFromSceneObject(object: SceneObjectData): SurfaceSnapTarget | null {
-  const localBounds = localBoundsForSceneObject(object);
-  if (!localBounds) return null;
+export function surfaceSnapTargetFromSceneObject(
+  object: SceneObjectData,
+  cellSize: number = 0.25
+): SurfaceSnapTarget | null {
+  const topology = cachedSceneTopology(object, cellSize);
+  if (!topology) return null;
   return {
     id: object.id,
     visible: object.visible,
-    localBounds,
-    matrixWorld: matrixForSceneObject(object)
+    localBounds: topology.localBounds,
+    matrixWorld: matrixForSceneObject(object),
+    anchors: topology.anchors
   };
+}
+
+function matrixScale(matrix: THREE.Matrix4): THREE.Vector3 {
+  const scale = new THREE.Vector3();
+  matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+  return scale;
 }
 
 export function surfaceSnapTargetFromObject3D(
   root: THREE.Object3D,
-  id: string = root.uuid
+  id: string = root.uuid,
+  cellSize: number = 0.25
 ): SurfaceSnapTarget | null {
   root.updateWorldMatrix(true, true);
   const inverseRootMatrix = root.matrixWorld.clone().invert();
   const localBounds = new THREE.Box3().makeEmpty();
+  const anchors: SurfaceSnapAnchor[] = [];
 
   root.traverseVisible((child) => {
     const mesh = child as THREE.Mesh<THREE.BufferGeometry>;
     if (!mesh.isMesh || !mesh.geometry) return;
 
-    mesh.geometry.computeBoundingBox();
-    const geometryBounds = mesh.geometry.boundingBox;
-    if (!geometryBounds || !hasFiniteBounds(geometryBounds)) return;
-
+    const childAnchors = buildGeometrySurfaceSnapAnchors(
+      mesh.geometry,
+      cellSize,
+      matrixScale(mesh.matrixWorld)
+    );
     const meshToRoot = inverseRootMatrix.clone().multiply(mesh.matrixWorld);
-    for (const corner of boxCorners(geometryBounds)) {
-      localBounds.expandByPoint(corner.applyMatrix4(meshToRoot));
+    const transformed = transformSurfaceSnapAnchors(childAnchors, meshToRoot);
+    for (const anchor of transformed) {
+      anchors.push(anchor);
+      localBounds.expandByPoint(anchor.position);
     }
   });
 
-  if (!hasFiniteBounds(localBounds)) return null;
+  if (!finiteBounds(localBounds) || anchors.length === 0) return null;
   return {
     id,
     visible: root.visible,
     localBounds,
-    matrixWorld: root.matrixWorld.clone()
+    matrixWorld: root.matrixWorld.clone(),
+    anchors
   };
 }
 
-const overlapsWithTolerance = (
-  source: THREE.Box3,
-  target: THREE.Box3,
-  axis: Axis,
-  tolerance: number
-): boolean => axisValue(source.max, axis) >= axisValue(target.min, axis) - tolerance
-  && axisValue(source.min, axis) <= axisValue(target.max, axis) + tolerance;
+function expandedWorldBounds(target: SurfaceSnapTarget, amount: number): THREE.Box3 {
+  return target.localBounds.clone().applyMatrix4(target.matrixWorld).expandByScalar(amount);
+}
 
-const overlapsWithoutGap = (source: THREE.Box3, target: THREE.Box3, axis: Axis): boolean =>
-  Math.min(axisValue(source.max, axis), axisValue(target.max, axis))
-    - Math.max(axisValue(source.min, axis), axisValue(target.min, axis)) >= -BOUNDS_EPSILON;
+function hashCoordinate(value: number, cellSize: number): number {
+  return Math.floor(value / cellSize);
+}
 
-const snapInsideTargetGrid = (value: number, minimum: number, step: number): number => {
-  if (!Number.isFinite(step) || step <= 0) return value;
-  return minimum + Math.round((value - minimum) / step) * step;
-};
+function hashKey(x: number, y: number, z: number): string {
+  return `${x}:${y}:${z}`;
+}
 
-const gridPlanes = (minimum: number, maximum: number, step: number): number[] => {
-  if (!Number.isFinite(step) || step <= 0 || maximum <= minimum) return [minimum, maximum];
-
-  const planes = [minimum];
-  const count = Math.min(2048, Math.floor((maximum - minimum) / step));
-  for (let index = 1; index <= count; index += 1) {
-    const coordinate = minimum + index * step;
-    if (coordinate >= maximum - BOUNDS_EPSILON) break;
-    planes.push(coordinate);
+function buildAnchorHash(
+  anchors: readonly SurfaceSnapAnchor[],
+  cellSize: number
+): Map<string, SurfaceSnapAnchor[]> {
+  const hash = new Map<string, SurfaceSnapAnchor[]>();
+  for (const anchor of anchors) {
+    const key = hashKey(
+      hashCoordinate(anchor.position.x, cellSize),
+      hashCoordinate(anchor.position.y, cellSize),
+      hashCoordinate(anchor.position.z, cellSize)
+    );
+    const bucket = hash.get(key);
+    if (bucket) bucket.push(anchor);
+    else hash.set(key, [anchor]);
   }
-  planes.push(maximum);
-  return planes;
-};
+  return hash;
+}
 
-const localAxisVector = (axis: Axis): THREE.Vector3 => {
-  if (axis === 'x') return new THREE.Vector3(1, 0, 0);
-  if (axis === 'y') return new THREE.Vector3(0, 1, 0);
-  return new THREE.Vector3(0, 0, 1);
-};
+function nearbyAnchors(
+  hash: Map<string, SurfaceSnapAnchor[]>,
+  position: THREE.Vector3,
+  cellSize: number
+): SurfaceSnapAnchor[] {
+  const centerX = hashCoordinate(position.x, cellSize);
+  const centerY = hashCoordinate(position.y, cellSize);
+  const centerZ = hashCoordinate(position.z, cellSize);
+  const result: SurfaceSnapAnchor[] = [];
 
-const matrixScale = (matrix: THREE.Matrix4): THREE.Vector3 => {
-  const scale = new THREE.Vector3();
-  matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
-  return new THREE.Vector3(
-    Math.max(0.0001, Math.abs(scale.x)),
-    Math.max(0.0001, Math.abs(scale.y)),
-    Math.max(0.0001, Math.abs(scale.z))
-  );
-};
-
-const detectScaleInteraction = (source: SceneObjectData, objects: SceneObjectData[]): ScaleInteraction => {
-  const storedSource = objects.find((object) => object.id === source.id);
-  if (!storedSource) return { active: false, direction: null };
-
-  const scaleDeltas: Vec3 = [
-    source.scale[0] - storedSource.scale[0],
-    source.scale[1] - storedSource.scale[1],
-    source.scale[2] - storedSource.scale[2]
-  ];
-  const changedAxes: ChangedScaleAxis[] = AXES
-    .map((axis, index): ChangedScaleAxis => ({ axis, delta: scaleDeltas[index] ?? 0 }))
-    .filter((entry) => Math.abs(entry.delta) > BOUNDS_EPSILON)
-    .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
-
-  const [dominant, secondary] = changedAxes;
-  if (!dominant) return { active: false, direction: null };
-
-  const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...source.rotation));
-  const positionDelta = new THREE.Vector3(
-    source.position[0] - storedSource.position[0],
-    source.position[1] - storedSource.position[1],
-    source.position[2] - storedSource.position[2]
-  );
-
-  if (!secondary || Math.abs(dominant.delta) > Math.abs(secondary.delta) * 1.8) {
-    const worldAxis = localAxisVector(dominant.axis).applyQuaternion(quaternion).normalize();
-    const positionAlongAxis = positionDelta.dot(worldAxis);
-    const side = Math.abs(positionAlongAxis) > BOUNDS_EPSILON
-      ? Math.sign(positionAlongAxis / dominant.delta)
-      : 1;
-    return {
-      active: true,
-      direction: worldAxis.multiplyScalar(side || 1).normalize()
-    };
+  for (let x = centerX - 1; x <= centerX + 1; x += 1) {
+    for (let y = centerY - 1; y <= centerY + 1; y += 1) {
+      for (let z = centerZ - 1; z <= centerZ + 1; z += 1) {
+        const bucket = hash.get(hashKey(x, y, z));
+        if (bucket) result.push(...bucket);
+      }
+    }
   }
+  return result;
+}
 
-  const averageScaleDelta = changedAxes.reduce((sum, entry) => sum + entry.delta, 0) / changedAxes.length;
-  if (positionDelta.lengthSq() > BOUNDS_EPSILON * BOUNDS_EPSILON) {
-    const direction = positionDelta.normalize();
-    if (averageScaleDelta < 0) direction.multiplyScalar(-1);
-    return { active: true, direction };
-  }
+function anchorsCanMeet(
+  source: SurfaceSnapAnchor,
+  target: SurfaceSnapAnchor,
+  correction: THREE.Vector3,
+  distance: number
+): boolean {
+  const normalAlignment = source.normal.dot(target.normal);
+  if (normalAlignment > -0.12) return false;
+  if (distance <= EPSILON) return true;
 
-  const fallback = localAxisVector(dominant.axis).applyQuaternion(quaternion).normalize();
-  return { active: true, direction: fallback };
-};
+  const direction = correction.clone().multiplyScalar(1 / distance);
+  return source.normal.dot(direction) > 0.04
+    && target.normal.dot(direction) < -0.04;
+}
 
 export function findObjectSurfaceSnap(
   source: SceneObjectData,
@@ -221,146 +233,67 @@ export function findObjectSurfaceSnap(
     targetId: null,
     distance: Number.POSITIVE_INFINITY
   };
-  const sourceTarget = surfaceSnapTargetFromSceneObject(source);
+  const worldThreshold = Math.max(0.4, Math.abs(positionStep) * 2);
+  const sourceTarget = surfaceSnapTargetFromSceneObject(source, positionStep);
   if (!sourceTarget) return unchanged;
 
-  const sourceWorldCorners = boxCorners(sourceTarget.localBounds)
-    .map((corner) => corner.applyMatrix4(sourceTarget.matrixWorld));
-  const sourcePosition = new THREE.Vector3(...source.position);
-  const worldThreshold = Math.max(0.4, Math.abs(positionStep) * 2);
-  const scaleInteraction = detectScaleInteraction(source, objects);
+  const sourceWorldAnchors = transformSurfaceSnapAnchors(
+    sourceTarget.anchors,
+    sourceTarget.matrixWorld
+  );
+  const sourceWorldBounds = expandedWorldBounds(sourceTarget, worldThreshold);
   const targets = [
     ...objects.flatMap((object) => {
-      const target = surfaceSnapTargetFromSceneObject(object);
+      const target = surfaceSnapTargetFromSceneObject(object, positionStep);
       return target ? [target] : [];
     }),
     ...additionalTargets
   ];
-  let bestPosition: THREE.Vector3 | null = null;
+  const sourcePosition = new THREE.Vector3(...source.position);
+  let bestCorrection: THREE.Vector3 | null = null;
   let bestTargetId: string | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
+  let bestNormalAlignment = Number.POSITIVE_INFINITY;
 
   for (const target of targets) {
-    if (target.id === source.id || !target.visible || !hasFiniteBounds(target.localBounds)) continue;
+    if (
+      target.id === source.id
+      || !target.visible
+      || target.anchors.length === 0
+      || !sourceWorldBounds.intersectsBox(expandedWorldBounds(target, worldThreshold))
+    ) continue;
 
-    const targetBounds = target.localBounds;
-    const targetMatrix = target.matrixWorld;
-    const inverseTargetMatrix = targetMatrix.clone().invert();
-    const sourceInTarget = new THREE.Box3().setFromPoints(
-      sourceWorldCorners.map((corner) => corner.clone().applyMatrix4(inverseTargetMatrix))
-    );
-    const targetScale = matrixScale(targetMatrix);
+    const targetWorldAnchors = transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
+    const targetHash = buildAnchorHash(targetWorldAnchors, worldThreshold);
 
-    if (scaleInteraction.active && scaleInteraction.direction) {
-      const targetOriginWorld = new THREE.Vector3(0, 0, 0).applyMatrix4(targetMatrix);
-      const localOrigin = targetOriginWorld.clone().applyMatrix4(inverseTargetMatrix);
-      const localDirectionPerWorld = targetOriginWorld
-        .clone()
-        .add(scaleInteraction.direction)
-        .applyMatrix4(inverseTargetMatrix)
-        .sub(localOrigin);
+    for (const sourceAnchor of sourceWorldAnchors) {
+      for (const targetAnchor of nearbyAnchors(targetHash, sourceAnchor.position, worldThreshold)) {
+        const correction = targetAnchor.position.clone().sub(sourceAnchor.position);
+        const distance = correction.length();
+        if (distance > worldThreshold + EPSILON) continue;
+        if (!anchorsCanMeet(sourceAnchor, targetAnchor, correction, distance)) continue;
 
-      for (const axis of AXES) {
-        const directionComponent = axisValue(localDirectionPerWorld, axis);
-        if (Math.abs(directionComponent) < BOUNDS_EPSILON) continue;
+        const normalAlignment = sourceAnchor.normal.dot(targetAnchor.normal);
+        const betterDistance = distance < bestDistance - EPSILON;
+        const equalDistanceBetterNormals = Math.abs(distance - bestDistance) <= EPSILON
+          && normalAlignment < bestNormalAlignment;
+        if (!betterDistance && !equalDistanceBetterNormals) continue;
 
-        const localThreshold = worldThreshold * Math.abs(directionComponent);
-        const otherAxes = AXES.filter((candidate) => candidate !== axis);
-        if (!otherAxes.every((otherAxis) => overlapsWithTolerance(
-          sourceInTarget,
-          targetBounds,
-          otherAxis,
-          localThreshold * 0.75
-        ))) continue;
-
-        const activeSourceFace = directionComponent > 0
-          ? axisValue(sourceInTarget.max, axis)
-          : axisValue(sourceInTarget.min, axis);
-        const localStep = positionStep > 0
-          ? positionStep / axisValue(targetScale, axis)
-          : 0;
-
-        for (const plane of gridPlanes(
-          axisValue(targetBounds.min, axis),
-          axisValue(targetBounds.max, axis),
-          localStep
-        )) {
-          const localDistance = plane - activeSourceFace;
-          const worldDistanceAlongDrag = localDistance / directionComponent;
-          const distance = Math.abs(worldDistanceAlongDrag);
-          if (distance > worldThreshold || distance >= bestDistance) continue;
-
-          bestDistance = distance;
-          bestPosition = sourcePosition
-            .clone()
-            .addScaledVector(scaleInteraction.direction, worldDistanceAlongDrag);
-          bestTargetId = target.id;
-        }
-      }
-
-      continue;
-    }
-
-    const sourceCenter = sourceInTarget.getCenter(new THREE.Vector3());
-    for (const axis of AXES) {
-      const axisScale = axisValue(targetScale, axis);
-      const localThreshold = worldThreshold / axisScale;
-      const otherAxes = AXES.filter((candidate) => candidate !== axis);
-      if (!otherAxes.every((otherAxis) => overlapsWithTolerance(
-        sourceInTarget,
-        targetBounds,
-        otherAxis,
-        localThreshold * 0.75
-      ))) continue;
-
-      const faceOffsets = [
-        axisValue(targetBounds.min, axis) - axisValue(sourceInTarget.max, axis),
-        axisValue(targetBounds.max, axis) - axisValue(sourceInTarget.min, axis)
-      ];
-
-      for (const faceOffset of faceOffsets) {
-        if (Math.abs(faceOffset) > localThreshold) continue;
-        if (
-          Math.abs(faceOffset) <= BOUNDS_EPSILON
-          && !otherAxes.every((otherAxis) => overlapsWithoutGap(sourceInTarget, targetBounds, otherAxis))
-        ) continue;
-
-        const localOffset = new THREE.Vector3();
-        setAxisValue(localOffset, axis, faceOffset);
-
-        for (const otherAxis of otherAxes) {
-          const localStep = positionStep > 0 ? positionStep / axisValue(targetScale, otherAxis) : 0;
-          const snappedCenter = snapInsideTargetGrid(
-            axisValue(sourceCenter, otherAxis),
-            axisValue(targetBounds.min, otherAxis),
-            localStep
-          );
-          const gridCorrection = snappedCenter - axisValue(sourceCenter, otherAxis);
-          const maximumGridCorrection = localStep > 0 ? localStep * 0.55 : 0;
-          if (localStep > 0 && Math.abs(gridCorrection) <= maximumGridCorrection) {
-            setAxisValue(localOffset, otherAxis, gridCorrection);
-          }
-        }
-
-        const targetOriginWorld = new THREE.Vector3(0, 0, 0).applyMatrix4(targetMatrix);
-        const offsetWorld = localOffset.clone().applyMatrix4(targetMatrix).sub(targetOriginWorld);
-        const distance = offsetWorld.length();
-        if (distance >= bestDistance) continue;
-
-        bestDistance = distance;
-        bestPosition = sourcePosition.clone().add(offsetWorld);
+        bestCorrection = correction;
         bestTargetId = target.id;
+        bestDistance = distance;
+        bestNormalAlignment = normalAlignment;
       }
     }
   }
 
-  return bestPosition
-    ? {
-      position: [bestPosition.x, bestPosition.y, bestPosition.z],
-      targetId: bestTargetId,
-      distance: bestDistance
-    }
-    : unchanged;
+  if (!bestCorrection) return unchanged;
+  const snappedPosition = sourcePosition.add(bestCorrection);
+  return {
+    position: [snappedPosition.x, snappedPosition.y, snappedPosition.z],
+    targetId: bestTargetId,
+    distance: bestDistance
+  };
 }
 
 export function snapObjectToObjectSurfaces(
