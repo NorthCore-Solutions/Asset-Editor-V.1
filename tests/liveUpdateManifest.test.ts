@@ -4,7 +4,7 @@ import { parseLiveUpdateManifest } from '../src/platform/liveUpdate';
 const validManifest = {
   schemaVersion: 1,
   bundleId: '2-2026.08.05.1',
-  downloadUrl: 'https://northcore-eu.de/updates/asset-editor/beta/bundles/2-2026.08.05.1.zip',
+  downloadUrl: 'https://updates.northcore-eu.de/asset-editor/beta/bundles/2-2026.08.05.1.zip',
   checksum: 'a'.repeat(64),
   signature: 'c2lnbmF0dXJl',
   minimumNativeVersionCode: 2,
