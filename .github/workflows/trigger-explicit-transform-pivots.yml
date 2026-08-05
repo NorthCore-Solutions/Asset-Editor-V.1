@@ -1,0 +1,32 @@
+name: Trigger Explicit Transform Pivots
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/trigger-explicit-transform-pivots.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Trigger pivot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\n# triggered by %s\n' "$GITHUB_RUN_ID" >> .github/workflows/apply-explicit-transform-pivots.yml
+          rm .github/workflows/trigger-explicit-transform-pivots.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/apply-explicit-transform-pivots.yml .github/workflows/trigger-explicit-transform-pivots.yml
+          git commit -m "Transformations-Pivot-Prüfung starten"
+          git push origin HEAD:main
