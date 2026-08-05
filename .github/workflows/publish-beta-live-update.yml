@@ -143,7 +143,13 @@ jobs:
           git worktree add "$pages_dir" origin/gh-pages
 
           mkdir -p "$pages_dir/asset-editor/beta/bundles"
-          cp "$LIVE_UPDATE_ZIP_PATH" "$pages_dir/asset-editor/beta/bundles/$bundle_id.zip"
+          existing_bundle="$pages_dir/asset-editor/beta/bundles/$bundle_id.zip"
+          if [[ -e "$existing_bundle" ]]; then
+            echo "Bundle-ID wurde bereits veröffentlicht und darf nicht überschrieben werden: $bundle_id" >&2
+            exit 1
+          fi
+
+          cp "$LIVE_UPDATE_ZIP_PATH" "$existing_bundle"
           cp "$LIVE_UPDATE_MANIFEST_PATH" "$pages_dir/asset-editor/beta/manifest.json"
           touch "$pages_dir/.nojekyll"
 
