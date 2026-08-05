@@ -56,7 +56,8 @@ function gridCoordinates(minimum: number, maximum: number, step: number): number
     if (value >= maximum - EPSILON) break;
     values.push(value);
   }
-  if (maximum - values[values.length - 1] > EPSILON) values.push(maximum);
+  const lastValue = values.at(-1) ?? minimum;
+  if (maximum - lastValue > EPSILON) values.push(maximum);
   return values;
 }
 
@@ -148,7 +149,8 @@ function deduplicateAnchors(
   const reduced: SurfaceSnapAnchor[] = [];
   const stride = result.length / maxAnchors;
   for (let index = 0; index < maxAnchors; index += 1) {
-    reduced.push(result[Math.floor(index * stride)]);
+    const anchor = result[Math.floor(index * stride)];
+    if (anchor) reduced.push(anchor);
   }
   return reduced;
 }
@@ -176,7 +178,7 @@ export function buildGeometrySurfaceSnapAnchors(
   if (!bounds || bounds.isEmpty()) return [];
 
   const localStep = localSurfaceSnapStep(cellSize, objectScale);
-  const grids = [
+  const grids: [number[], number[], number[]] = [
     gridCoordinates(bounds.min.x, bounds.max.x, localStep.x),
     gridCoordinates(bounds.min.y, bounds.max.y, localStep.y),
     gridCoordinates(bounds.min.z, bounds.max.z, localStep.z)
@@ -186,27 +188,39 @@ export function buildGeometrySurfaceSnapAnchors(
   const anchors: SurfaceSnapAnchor[] = [];
 
   for (let triangle = 0; triangle < triangleCount; triangle += 1) {
-    const vertexIndices = [0, 1, 2].map((offset) =>
-      triangleVertexIndex(index, triangle * 3 + offset)
-    );
-    const trianglePositions = vertexIndices.map((vertexIndex) =>
-      new THREE.Vector3().fromBufferAttribute(positions, vertexIndex)
-    ) as [THREE.Vector3, THREE.Vector3, THREE.Vector3];
+    const vertexIndices: [number, number, number] = [
+      triangleVertexIndex(index, triangle * 3),
+      triangleVertexIndex(index, triangle * 3 + 1),
+      triangleVertexIndex(index, triangle * 3 + 2)
+    ];
+    const trianglePositions: [THREE.Vector3, THREE.Vector3, THREE.Vector3] = [
+      new THREE.Vector3().fromBufferAttribute(positions, vertexIndices[0]),
+      new THREE.Vector3().fromBufferAttribute(positions, vertexIndices[1]),
+      new THREE.Vector3().fromBufferAttribute(positions, vertexIndices[2])
+    ];
     const faceNormal = trianglePositions[1].clone().sub(trianglePositions[0])
       .cross(trianglePositions[2].clone().sub(trianglePositions[0]));
     if (faceNormal.lengthSq() <= EPSILON * EPSILON) continue;
     faceNormal.normalize();
 
-    const triangleNormals = vertexIndices.map((vertexIndex) => {
+    const normalForVertex = (vertexIndex: number): THREE.Vector3 => {
       if (!normals || normals.itemSize < 3 || vertexIndex >= normals.count) return faceNormal.clone();
       const normal = new THREE.Vector3().fromBufferAttribute(normals, vertexIndex);
       return normal.lengthSq() > EPSILON * EPSILON ? normal.normalize() : faceNormal.clone();
-    }) as [THREE.Vector3, THREE.Vector3, THREE.Vector3];
+    };
+    const triangleNormals: [THREE.Vector3, THREE.Vector3, THREE.Vector3] = [
+      normalForVertex(vertexIndices[0]),
+      normalForVertex(vertexIndices[1]),
+      normalForVertex(vertexIndices[2])
+    ];
 
     for (let vertex = 0; vertex < 3; vertex += 1) {
+      const position = trianglePositions[vertex];
+      const normal = triangleNormals[vertex];
+      if (!position || !normal) continue;
       anchors.push({
-        position: trianglePositions[vertex].clone(),
-        normal: triangleNormals[vertex].clone()
+        position: position.clone(),
+        normal: normal.clone()
       });
     }
 
