@@ -98,6 +98,25 @@ function rememberTranslationStep(
   });
 }
 
+function statelessTranslationSnap(
+  source: SceneObjectData,
+  previous: SceneObjectData,
+  objects: SceneObjectData[],
+  positionStep: number,
+  additionalTargets: readonly SurfaceSnapTarget[]
+): ObjectSurfaceSnapResult {
+  if (sameVector(source.position, previous.position)) {
+    return unchangedResult(source, previous.position);
+  }
+
+  return findSweptObjectSurfaceSnap(
+    source,
+    objects,
+    positionStep,
+    additionalTargets
+  ) ?? unchangedResult(source);
+}
+
 export function resetFormSurfaceSnapSessions(): void {
   translationSnapSessions.clear();
 }
@@ -112,20 +131,29 @@ export function findFormSurfaceSnap(
 
   if (previous && sameRotationAndScale(source, previous)) {
     const transactionToken = currentTransactionToken();
+    if (!transactionToken) {
+      translationSnapSessions.delete(source.id);
+      return statelessTranslationSnap(
+        source,
+        previous,
+        objects,
+        positionStep,
+        additionalTargets
+      );
+    }
+
     const incrementalSource = incrementalTranslationSource(
       source,
       previous,
       transactionToken
     );
-
-    const result = sameVector(incrementalSource.position, previous.position)
-      ? unchangedResult(incrementalSource, previous.position)
-      : findSweptObjectSurfaceSnap(
-        incrementalSource,
-        objects,
-        positionStep,
-        additionalTargets
-      ) ?? unchangedResult(incrementalSource);
+    const result = statelessTranslationSnap(
+      incrementalSource,
+      previous,
+      objects,
+      positionStep,
+      additionalTargets
+    );
 
     rememberTranslationStep(source, result.position, transactionToken);
     return result;
