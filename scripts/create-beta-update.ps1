@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PrivateKeyPath,
 
-    [string]$BaseUrl = 'https://northcore-eu.de/updates/asset-editor/beta',
+    [string]$BaseUrl = 'https://updates.northcore-eu.de/asset-editor/beta',
     [int]$NativeVersionCode = 2,
     [string]$OutputDirectory = 'live-update-output'
 )
