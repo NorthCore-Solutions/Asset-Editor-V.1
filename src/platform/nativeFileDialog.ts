@@ -41,7 +41,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
     const end = Math.min(offset + chunkSize, bytes.length);
     let chunk = '';
     for (let index = offset; index < end; index += 1) {
-      chunk += String.fromCharCode(bytes[index]);
+      chunk += String.fromCharCode(bytes[index] ?? 0);
     }
     binary += chunk;
   }
