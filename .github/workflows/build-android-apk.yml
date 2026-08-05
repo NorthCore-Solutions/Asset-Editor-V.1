@@ -14,13 +14,16 @@ on:
       - '.github/apk-build-trigger'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -45,6 +48,17 @@ jobs:
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug
+
+      - name: Store current APK in repository
+        if: github.event_name == 'pull_request' && github.head_ref == 'build/android-apk-2026-08-05'
+        run: |
+          mkdir -p apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk apk/NorthCore-Asset-Editor-latest.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f apk/NorthCore-Asset-Editor-latest.apk
+          git commit -m "Aktuelle Android-APK bereitstellen"
+          git push origin HEAD:main
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
