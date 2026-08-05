@@ -22,22 +22,8 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Apply pivot cleanup
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PYRUN'
-          from pathlib import Path
-          import textwrap
-
-          workflow = Path('.github/workflows/apply-explicit-transform-pivots.yml').read_text(encoding='utf-8')
-          start_marker = "          python - <<'PY'\n"
-          end_marker = "\n          PY"
-          start = workflow.index(start_marker) + len(start_marker)
-          end = workflow.index(end_marker, start)
-          script = textwrap.dedent(workflow[start:end])
-          exec(compile(script, 'pivot-cleanup.py', 'exec'), {'__name__': '__main__'})
-          PYRUN
+      - name: Apply explicit transform pivots
+        run: python .github/scripts/apply_explicit_transform_pivots.py
 
       - name: Install dependencies
         run: npm ci
@@ -55,10 +41,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/apply-explicit-transform-pivots.yml
+          rm .github/scripts/apply_explicit_transform_pivots.py
           rm .github/workflows/trigger-explicit-transform-pivots.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/editor/paint/useSurfacePaint.ts src/editor/viewport/EditorViewport.tsx .github/workflows/apply-explicit-transform-pivots.yml .github/workflows/trigger-explicit-transform-pivots.yml
+          git add src/editor/paint/useSurfacePaint.ts src/editor/viewport/EditorViewport.tsx .github/scripts/apply_explicit_transform_pivots.py .github/workflows/trigger-explicit-transform-pivots.yml
           git commit -m "Transformations-Pivots explizit verwalten"
           git push origin HEAD:main
