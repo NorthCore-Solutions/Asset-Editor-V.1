@@ -1,6 +1,7 @@
 name: Build Android APK
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -10,7 +11,6 @@ on:
       - 'package-lock.json'
       - 'capacitor.config.*'
       - '.github/workflows/build-android-apk.yml'
-      - '.github/apk-build-trigger'
 
 permissions:
   contents: read
