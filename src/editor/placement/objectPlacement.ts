@@ -190,7 +190,9 @@ export function findAvailableObjectGroupTranslation(
   positionStep: number,
   preferredTargetId?: string
 ): Vec3 {
-  const sourceBounds = combineWorldBounds(sources.map(worldBoundsFromSceneObject));
+  const sourceBounds = combineWorldBounds(
+    sources.map((source) => worldBoundsFromSceneObject(source))
+  );
   if (!sourceBounds) return [0, 0, 0];
 
   const translation = findAvailableBoundsTranslation(
