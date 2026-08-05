@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createSceneObject } from '../src/geometry/factory';
 import {
@@ -6,6 +6,7 @@ import {
   resetFormSurfaceSnapSessions
 } from '../src/editor/snapping/primitiveSurfaceSnap';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
+import { useEditorStore } from '../src/store/editorStore';
 import type { SceneObjectData, Vec3 } from '../src/types/editor';
 
 const STEP = 0.25;
@@ -56,13 +57,27 @@ function acceptedSource(
   return withPosition(rawSource, acceptedPosition);
 }
 
-beforeEach(() => resetFormSurfaceSnapSessions());
+function beginViewportDrag(objects: SceneObjectData[]): void {
+  useEditorStore.setState({ objects, transactionStart: null });
+  useEditorStore.getState().beginTransaction();
+}
+
+beforeEach(() => {
+  resetFormSurfaceSnapSessions();
+  useEditorStore.setState({ objects: [], transactionStart: null });
+});
+
+afterEach(() => {
+  useEditorStore.setState({ objects: [], transactionStart: null });
+  resetFormSurfaceSnapSessions();
+});
 
 describe.each(['Desktop', 'Android'])('mehrstufiger Formen-Snap im Viewport auf %s', (platform) => {
   void platform;
 
   it('löst sich nach einem Snap sofort wieder, sobald der Pointer zurückgezogen wird', () => {
     const { target, previous, targetBounds } = boxGapSetup(0.2);
+    beginViewportDrag([previous, target]);
 
     const rawApproach = withPosition(previous, [
       previous.position[0] + 0.15,
@@ -107,6 +122,8 @@ describe.each(['Desktop', 'Android'])('mehrstufiger Formen-Snap im Viewport auf 
 
   it('verschiebt nach dem Einrasten seitlich ab der sichtbaren Elementposition', () => {
     const { target, previous } = boxGapSetup(0.2);
+    beginViewportDrag([previous, target]);
+
     const rawApproach = withPosition(previous, [
       previous.position[0] + 0.15,
       previous.position[1],
