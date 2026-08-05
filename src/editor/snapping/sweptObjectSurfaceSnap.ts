@@ -14,6 +14,7 @@ const EPSILON = 0.000001;
 const MIN_APPROACH_ALIGNMENT = 0.12;
 const MAX_CAPTURE_DISTANCE = 0.12;
 const MAX_TANGENTIAL_TOLERANCE = 0.16;
+const THIN_DIMENSION = 0.0001;
 
 interface SweepCandidate {
   position: Vec3;
@@ -22,6 +23,11 @@ interface SweepCandidate {
   travel: number;
   lateralDistance: number;
   normalAlignment: number;
+}
+
+interface ContactNormals {
+  source: THREE.Vector3;
+  target: THREE.Vector3;
 }
 
 function matrixForSceneObject(object: SceneObjectData): THREE.Matrix4 {
@@ -115,6 +121,11 @@ function worldBounds(target: SurfaceSnapTarget, padding: number): THREE.Box3 {
     .expandByScalar(padding);
 }
 
+function isThinTarget(target: SurfaceSnapTarget): boolean {
+  const size = target.localBounds.getSize(new THREE.Vector3());
+  return Math.min(Math.abs(size.x), Math.abs(size.y), Math.abs(size.z)) <= THIN_DIMENSION;
+}
+
 function targetsForSweep(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
@@ -143,16 +154,28 @@ function betterCandidate(
   return candidate.normalAlignment < current.normalAlignment;
 }
 
-function opposingAndApproaching(
+function contactNormals(
   sourceAnchor: SurfaceSnapAnchor,
   targetAnchor: SurfaceSnapAnchor,
+  direction: THREE.Vector3,
+  sourceIsThin: boolean,
+  targetIsThin: boolean
+): ContactNormals {
+  return {
+    source: sourceIsThin ? direction.clone() : sourceAnchor.normal,
+    target: targetIsThin ? direction.clone().negate() : targetAnchor.normal
+  };
+}
+
+function opposingAndApproaching(
+  normals: ContactNormals,
   direction: THREE.Vector3
 ): boolean {
-  const normalAlignment = sourceAnchor.normal.dot(targetAnchor.normal);
+  const normalAlignment = normals.source.dot(normals.target);
   if (normalAlignment > -0.12) return false;
 
-  const sourceApproach = direction.dot(sourceAnchor.normal);
-  const targetApproach = direction.dot(targetAnchor.normal);
+  const sourceApproach = direction.dot(normals.source);
+  const targetApproach = direction.dot(normals.target);
   return sourceApproach >= MIN_APPROACH_ALIGNMENT
     && targetApproach <= -MIN_APPROACH_ALIGNMENT;
 }
@@ -196,12 +219,14 @@ export function findSweptObjectSurfaceSnap(
   );
   const hashCellSize = Math.max(0.08, tangentialTolerance);
   const broadPhasePadding = tangentialTolerance + captureDistance;
+  const sourceIsThin = isThinTarget(sourceTarget);
   const targets = targetsForSweep(source, objects, positionStep, additionalTargets);
   let best: SweepCandidate | null = null;
 
   for (const target of targets) {
     if (!target.visible || target.anchors.length === 0) continue;
 
+    const targetIsThin = isThinTarget(target);
     const targetAnchors = transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
     const targetHash = buildAnchorHash(targetAnchors, hashCellSize);
     const expandedTargetBounds = worldBounds(target, broadPhasePadding);
@@ -218,26 +243,33 @@ export function findSweptObjectSurfaceSnap(
       segmentBounds.intersect(expandedTargetBounds);
 
       for (const targetAnchor of anchorsInsideBounds(targetHash, segmentBounds, hashCellSize)) {
-        if (!opposingAndApproaching(currentAnchor, targetAnchor, direction)) continue;
+        const normals = contactNormals(
+          currentAnchor,
+          targetAnchor,
+          direction,
+          sourceIsThin,
+          targetIsThin
+        );
+        if (!opposingAndApproaching(normals, direction)) continue;
 
         const previousDelta = previousAnchor.position.clone().sub(targetAnchor.position);
         const currentDelta = currentAnchor.position.clone().sub(targetAnchor.position);
-        const previousSeparation = previousDelta.dot(targetAnchor.normal);
-        const currentSeparation = currentDelta.dot(targetAnchor.normal);
+        const previousSeparation = previousDelta.dot(normals.target);
+        const currentSeparation = currentDelta.dot(normals.target);
         const separationChange = currentSeparation - previousSeparation;
         if (separationChange >= -EPSILON) continue;
         if (previousSeparation < -captureDistance - EPSILON) continue;
         if (currentSeparation > captureDistance + EPSILON) continue;
 
-        const approachAlongTargetNormal = direction.dot(targetAnchor.normal);
+        const approachAlongTargetNormal = direction.dot(normals.target);
         if (approachAlongTargetNormal >= -MIN_APPROACH_ALIGNMENT) continue;
 
         const correctionAlongMovement = -currentSeparation / approachAlongTargetNormal;
         const contactPoint = currentAnchor.position.clone()
           .addScaledVector(direction, correctionAlongMovement);
         const contactDelta = contactPoint.sub(targetAnchor.position);
-        const normalComponent = targetAnchor.normal.clone()
-          .multiplyScalar(contactDelta.dot(targetAnchor.normal));
+        const normalComponent = normals.target.clone()
+          .multiplyScalar(contactDelta.dot(normals.target));
         const lateralDistance = contactDelta.sub(normalComponent).length();
         if (lateralDistance > tangentialTolerance + EPSILON) continue;
 
@@ -254,7 +286,7 @@ export function findSweptObjectSurfaceSnap(
           distance: Math.abs(correctionAlongMovement),
           travel,
           lateralDistance,
-          normalAlignment: currentAnchor.normal.dot(targetAnchor.normal)
+          normalAlignment: normals.source.dot(normals.target)
         };
         if (betterCandidate(candidate, best)) best = candidate;
       }
