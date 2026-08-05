@@ -9,29 +9,27 @@ interface AndroidMarqueeButtonProps {
 
 export function AndroidMarqueeButton({ active, disabled, onToggle }: AndroidMarqueeButtonProps) {
   const previousActiveRef = useRef(active);
-  const manualToggleRef = useRef(false);
+  const manuallyDisabledRef = useRef(false);
 
   useEffect(() => {
     const wasActive = previousActiveRef.current;
     previousActiveRef.current = active;
 
-    if (!wasActive && active) {
-      manualToggleRef.current = false;
+    if (disabled) {
+      manuallyDisabledRef.current = false;
       return;
     }
 
-    if (!wasActive || active) return;
-
-    if (disabled || manualToggleRef.current) {
-      manualToggleRef.current = false;
+    if (active) {
+      if (manuallyDisabledRef.current) queueMicrotask(onToggle);
       return;
     }
 
-    queueMicrotask(onToggle);
+    if (wasActive && !manuallyDisabledRef.current) queueMicrotask(onToggle);
   }, [active, disabled, onToggle]);
 
   const handleToggle = () => {
-    manualToggleRef.current = true;
+    manuallyDisabledRef.current = active;
     onToggle();
   };
 
