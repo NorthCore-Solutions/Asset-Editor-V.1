@@ -10,6 +10,11 @@ interface AndroidMarqueeButtonProps {
 export function AndroidMarqueeButton({ active, disabled, onToggle }: AndroidMarqueeButtonProps) {
   const previousActiveRef = useRef(active);
   const manuallyDisabledRef = useRef(false);
+  const onToggleRef = useRef(onToggle);
+
+  useEffect(() => {
+    onToggleRef.current = onToggle;
+  }, [onToggle]);
 
   useEffect(() => {
     const wasActive = previousActiveRef.current;
@@ -20,17 +25,14 @@ export function AndroidMarqueeButton({ active, disabled, onToggle }: AndroidMarq
       return;
     }
 
-    if (active) {
-      if (manuallyDisabledRef.current) queueMicrotask(onToggle);
-      return;
+    if (wasActive && !active && !manuallyDisabledRef.current) {
+      queueMicrotask(() => onToggleRef.current());
     }
+  }, [active, disabled]);
 
-    if (wasActive && !manuallyDisabledRef.current) queueMicrotask(onToggle);
-  }, [active, disabled, onToggle]);
-
-  const handleToggle = () => {
+  const handlePointerDown = () => {
     manuallyDisabledRef.current = active;
-    onToggle();
+    onToggleRef.current();
   };
 
   return (
@@ -41,7 +43,15 @@ export function AndroidMarqueeButton({ active, disabled, onToggle }: AndroidMarq
       aria-label="Bereich auswählen"
       aria-pressed={active}
       disabled={disabled}
-      onClick={handleToggle}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handlePointerDown();
+      }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
     >
       <svg aria-hidden="true" viewBox="0 0 24 24">
         <rect x="3.5" y="4.5" width="17" height="13" rx="1.5" />
