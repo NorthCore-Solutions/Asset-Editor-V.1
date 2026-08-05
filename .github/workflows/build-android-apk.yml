@@ -2,6 +2,10 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/scale-handle-main-trigger'
   pull_request:
     branches: [main]
     paths:
@@ -38,7 +42,7 @@ jobs:
           cache: gradle
 
       - name: Increase scale handles and restore negative center color
-        if: github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05')
         shell: python
         run: |
           from pathlib import Path
@@ -157,18 +161,18 @@ const CORNER_SCALE_HITBOX_SIZE = 2.2;
         run: npm ci
 
       - name: Run tests
-        if: github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05')
         run: npm test
 
       - name: Build web app
         run: npm run build
 
       - name: Run lint
-        if: github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05')
         run: npm run lint
 
       - name: Verify limited scale-handle changes
-        if: github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05')
         shell: bash
         run: |
           grep -q "CENTER_SCALE_VISUAL_RADIUS = 0.15" src/editor/viewport/EditorViewport.tsx
@@ -181,7 +185,7 @@ const CORNER_SCALE_HITBOX_SIZE = 2.2;
           git diff --check
 
       - name: Commit scale-handle correction to main
-        if: github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'build/scale-handle-visibility-2026-08-05')
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
