@@ -1,4 +1,4 @@
-# NorthCore Asset Editor
+# NorthCore Asset Editor (Beta)
 
 Lokaler, browserbasierter 3D-Editor für einfache Low-Poly-Game-Assets. Objekte werden aus geometrischen Grundformen zusammengesetzt, lokal als versionierte JSON-Projekte gespeichert und als GLB für Godot oder Blender exportiert.
 
