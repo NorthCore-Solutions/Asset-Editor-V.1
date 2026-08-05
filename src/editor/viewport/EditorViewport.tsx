@@ -1002,6 +1002,7 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
         enablePan={!paintSettings.enabled}
         enableRotate={!paintSettings.enabled}
         enableZoom
+        zoomToCursor
         enableDamping
         dampingFactor={0.08}
         mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }}
