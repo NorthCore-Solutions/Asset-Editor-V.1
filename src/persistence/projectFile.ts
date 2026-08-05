@@ -67,7 +67,9 @@ function validateSurfaceGridLayer(
 
 function validateSurfaceGrid(value: unknown, objectIndex: number): PaintSurfaceGridData {
   if (!isObject(value)) throw new Error(`Objekt ${objectIndex + 1}: Flächenraster der Bemalung ist ungültig.`);
-  if (value.version !== 1) throw new Error(`Objekt ${objectIndex + 1}: Unbekannte Flächenraster-Version.`);
+  if (value.version !== 1 && value.version !== 2) {
+    throw new Error(`Objekt ${objectIndex + 1}: Unbekannte Flächenraster-Version.`);
+  }
   if (typeof value.atlasSignature !== 'string' || value.atlasSignature.length === 0) {
     throw new Error(`Objekt ${objectIndex + 1}: Atlas-Signatur der Bemalung fehlt.`);
   }
@@ -91,7 +93,7 @@ function validateSurfaceGrid(value: unknown, objectIndex: number): PaintSurfaceG
   }
 
   return {
-    version: 1,
+    version: value.version,
     atlasSignature: value.atlasSignature,
     pixelsPerWorldUnit: value.pixelsPerWorldUnit,
     ...(value.baseColor !== undefined ? { baseColor: value.baseColor.toUpperCase() } : {}),
