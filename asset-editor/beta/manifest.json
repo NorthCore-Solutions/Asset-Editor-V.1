@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "bundleId": "2-2026.08.05.8",
-  "downloadUrl": "https://updates.northcore-eu.de/asset-editor/beta/bundles/2-2026.08.05.8.zip",
-  "checksum": "18215af0aebd8422464b90a74d637de5e05537d4297b0f8c1989a38634f18f59",
-  "signature": "m9WKNvqRuSi//ZnMAxqc45Mi4yxoR2k4wmch4twBQXqD+Xdb96m9JaHnTgo+awVOkGm37lQdSIwOB+Hh5s19e0AT8RgQvuT1TT77WMhTVJ0ub1BaqBUPMfn3o0bVsTUDaIDaxPBtpfep5fcWaIgIAPo9f0Izh1/3WpshLB8ZvQjch+BgQnf7r0L84hgm8V/0p1d7nE0y93CmIdl8HbouHrZUD0WFyxG12HMq3VZjgXxyuYWMZpxkIX3Ze0gOjOlM7SvsQ7PVZXAX8QC/4ljn6hAqsP3sBRDJI4BDGByIkyqxbSmxn5gL23VSDxHRSeZIwTxo3W5vJ37eL21Fh5CC163yHhi0jo7p1siLeD9jV7dcAE9WOupXZppQAUFJzJ6knPWn5HWd/Rrs+QtJPaJywNIXjd176CyQv1vDsVAZijo63VLuFBT0q2eT0AJg7zJmdpI/Knw6mqVfoMFGRsXgdLS0bX5o93Q2N371Tg0EUra2DK2nfSsm9f6lM6eIFn81",
+  "bundleId": "2-2026.08.05.9",
+  "downloadUrl": "https://updates.northcore-eu.de/asset-editor/beta/bundles/2-2026.08.05.9.zip",
+  "checksum": "26007de1a175dbda16f4eb76a2d1e69b86248a997626d946820e22a350feee24",
+  "signature": "hJ+sVnGSV+Q69SHWtLETg7f4409ddlzP9nFkgJg2+SOTbNeCvsf38AnVIV2NzkiHuNNo9o+Yp+GZHwPztFrLXANB29V1ceFMkB2OirxCeRNUx1Cxr0n71Q9WcCJaR2TwXQdC3zZzcKX305rxq2whzXmLNuZOeoPIwHqPIWOwMXHRGgf3cE7byXUY1BB6XnpkOEOClT7JLRBLkxwywSmhQpgFDMRPsPTIObtEbERhmq4/ZrBdCyD2gkNwoCkTWp5rFOnsczRTxGftxC+BsIbsJQ8LPmJvCz8RasFqaxCasWibq7+oNNduFqtF3YnYZrbzLc3Vd4I0InfGIDsfc4QUPiiO6TDQc1wA+fQnhbeKA/qEk7tSJGabXA5yaEjIg1ANuIvZ8AQDX4X19098VzZhKKxS6rI57OnMd0i2Me3/HnZ8UEtf+l3hg9v3+4hZAB/T4ynFHmK3cVqftGF2EIoRp59PNQEoZ7BGf39d/yfSA0+0SEKUuJUlIZvUucDvtWkI",
   "minimumNativeVersionCode": 2,
   "maximumNativeVersionCode": 2
 }
