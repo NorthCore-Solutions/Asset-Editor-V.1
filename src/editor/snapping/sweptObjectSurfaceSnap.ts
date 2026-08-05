@@ -172,11 +172,6 @@ export function findSweptObjectSurfaceSnap(
   const direction = movement.clone().divideScalar(movementLength);
   const tangentialTolerance = Math.max(0.08, Math.abs(positionStep) * 0.9);
   const hashCellSize = Math.max(0.1, tangentialTolerance);
-  const leadingTolerance = Math.max(0.00001, movementLength * 0.000001);
-  const currentLead = currentAnchors.reduce(
-    (maximum, anchor) => Math.max(maximum, anchor.position.dot(direction)),
-    Number.NEGATIVE_INFINITY
-  );
   const targets = targetsForSweep(source, objects, positionStep, additionalTargets);
   let best: SweepCandidate | null = null;
 
@@ -191,7 +186,6 @@ export function findSweptObjectSurfaceSnap(
       const currentAnchor = currentAnchors[index];
       const previousAnchor = previousAnchors[index];
       if (!currentAnchor || !previousAnchor) continue;
-      if (currentLead - currentAnchor.position.dot(direction) > leadingTolerance) continue;
 
       const segmentBounds = new THREE.Box3()
         .setFromPoints([previousAnchor.position, currentAnchor.position])
@@ -210,7 +204,8 @@ export function findSweptObjectSurfaceSnap(
         if (lateralDistance > tangentialTolerance + EPSILON) continue;
 
         const targetProjection = targetAnchor.position.dot(direction);
-        const correctionAlongMovement = targetProjection - currentLead;
+        const currentProjection = currentAnchor.position.dot(direction);
+        const correctionAlongMovement = targetProjection - currentProjection;
         if (correctionAlongMovement > EPSILON) continue;
 
         const correctedPosition = sourcePosition.clone()
