@@ -53,6 +53,30 @@ function crossingSetup(sourceType: PrimitiveType, targetType: PrimitiveType) {
   return { target, targetBounds, previous, candidate };
 }
 
+function boxGapSetup(gap: number) {
+  const target = createSceneObject('box');
+  target.id = 'target-box';
+  const targetBounds = requiredBounds(target);
+
+  const source = createSceneObject('box');
+  source.id = 'source-box';
+  const sourceBounds = requiredBounds(source);
+  const previous = withPosition(source, [
+    source.position[0] + targetBounds.min.x - gap - sourceBounds.max.x,
+    source.position[1],
+    source.position[2]
+  ]);
+
+  return { target, targetBounds, previous };
+}
+
+function expectUnchanged(candidate: SceneObjectData, result: ReturnType<typeof findFormSurfaceSnap>) {
+  expect(result.targetId).toBeNull();
+  expect(result.position[0]).toBeCloseTo(candidate.position[0], 6);
+  expect(result.position[1]).toBeCloseTo(candidate.position[1], 6);
+  expect(result.position[2]).toBeCloseTo(candidate.position[2], 6);
+}
+
 function expectStopsAtFirstLeftSurface(
   source: SceneObjectData,
   targetBounds: THREE.Box3,
@@ -105,6 +129,52 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
 
     expect(second.targetId).toBe(target.id);
     expectStopsAtFirstLeftSurface(deeperCandidate, targetBounds, second.position);
+  });
+
+  it('lässt ein eingerastetes Element wieder von der Fläche wegziehen', () => {
+    const { target, previous } = boxGapSetup(0);
+    const candidate = withPosition(previous, [
+      previous.position[0] - 0.35,
+      previous.position[1],
+      previous.position[2]
+    ]);
+
+    expectUnchanged(candidate, findFormSurfaceSnap(candidate, [previous, target], STEP));
+  });
+
+  it('lässt ein Element nahe an einer Fläche seitlich vorbeiziehen', () => {
+    const { target, previous } = boxGapSetup(0.05);
+    const candidate = withPosition(previous, [
+      previous.position[0],
+      previous.position[1] + 0.4,
+      previous.position[2]
+    ]);
+
+    expectUnchanged(candidate, findFormSurfaceSnap(candidate, [previous, target], STEP));
+  });
+
+  it('greift bei bloßer Nähe außerhalb der Kontaktzone nicht ein', () => {
+    const { target, previous } = boxGapSetup(0.35);
+    const candidate = withPosition(previous, [
+      previous.position[0] + 0.15,
+      previous.position[1],
+      previous.position[2]
+    ]);
+
+    expectUnchanged(candidate, findFormSurfaceSnap(candidate, [previous, target], STEP));
+  });
+
+  it('rastet bei gezielter Annäherung innerhalb der Kontaktzone ein', () => {
+    const { target, targetBounds, previous } = boxGapSetup(0.2);
+    const candidate = withPosition(previous, [
+      previous.position[0] + 0.15,
+      previous.position[1],
+      previous.position[2]
+    ]);
+    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
+
+    expect(result.targetId).toBe(target.id);
+    expectStopsAtFirstLeftSurface(candidate, targetBounds, result.position);
   });
 });
 
