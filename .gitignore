@@ -7,3 +7,6 @@ android/.gradle/
 android/local.properties
 android/app/build/
 android/build/
+live-update-output/
+.live-update-keys/
+*.pem
