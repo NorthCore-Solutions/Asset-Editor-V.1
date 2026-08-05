@@ -2,10 +2,6 @@ name: Apply Marquee Lifecycle Fix
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/apply-marquee-lifecycle-fix.yml'
 
 permissions:
   contents: write
@@ -27,8 +23,9 @@ jobs:
           cache: npm
 
       - name: Patch marquee listener lifecycle
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path('src/editor/viewport/EditorViewport.tsx')
@@ -176,6 +173,7 @@ jobs:
 
           content = content[:start] + replacement + content[end:]
           path.write_text(content, encoding='utf-8')
+          PY
 
       - name: Install dependencies
         run: npm ci
