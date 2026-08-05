@@ -1,6 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { SceneObjectData } from '../../types/editor';
+import {
+  buildGeometrySurfaceSnapAnchors,
+  createSurfaceSnapPointsGeometry
+} from '../snapping/surfaceSnapTopology';
 
 const vertexShader = `
   varying vec3 vLocalPosition;
@@ -71,11 +75,28 @@ interface PrimitiveSnapPatternProps {
 }
 
 export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }: PrimitiveSnapPatternProps) {
+  const scaleX = object.scale[0];
+  const scaleY = object.scale[1];
+  const scaleZ = object.scale[2];
+  const objectScale = useMemo(
+    () => new THREE.Vector3(scaleX, scaleY, scaleZ),
+    [scaleX, scaleY, scaleZ]
+  );
   const bounds = useMemo(() => {
     geometry.computeBoundingBox();
     return geometry.boundingBox?.clone()
       ?? new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
   }, [geometry]);
+  const anchors = useMemo(
+    () => buildGeometrySurfaceSnapAnchors(geometry, cellSize, objectScale),
+    [cellSize, geometry, objectScale]
+  );
+  const pointsGeometry = useMemo(
+    () => createSurfaceSnapPointsGeometry(anchors),
+    [anchors]
+  );
+
+  useEffect(() => () => pointsGeometry.dispose(), [pointsGeometry]);
 
   const uniforms = useMemo(() => ({
     uColor: { value: new THREE.Color('#EFFF00') },
@@ -83,37 +104,49 @@ export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }
     uBoundsMax: { value: bounds.max.clone() },
     uObjectScale: {
       value: new THREE.Vector3(
-        Math.max(0.0001, Math.abs(object.scale[0])),
-        Math.max(0.0001, Math.abs(object.scale[1])),
-        Math.max(0.0001, Math.abs(object.scale[2]))
+        Math.max(0.0001, Math.abs(scaleX)),
+        Math.max(0.0001, Math.abs(scaleY)),
+        Math.max(0.0001, Math.abs(scaleZ))
       )
     },
     uCellSize: { value: Math.max(0.05, Math.abs(cellSize)) },
-    uOpacity: { value: highlighted ? 0.76 : 0.32 }
-  }), [bounds, cellSize, highlighted, object.scale]);
+    uOpacity: { value: highlighted ? 0.46 : 0.16 }
+  }), [bounds, cellSize, highlighted, scaleX, scaleY, scaleZ]);
+  const pointSize = Math.min(0.075, Math.max(0.025, Math.abs(cellSize) * 0.12));
 
   return (
-    <mesh
-      geometry={geometry}
+    <group
       position={object.position}
       rotation={object.rotation}
       scale={object.scale}
       visible={object.visible}
-      renderOrder={900}
-      raycast={() => undefined}
     >
-      <shaderMaterial
-        uniforms={uniforms}
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-        transparent
-        depthTest
-        depthWrite={false}
-        side={THREE.DoubleSide}
-        polygonOffset
-        polygonOffsetFactor={-2}
-        polygonOffsetUnits={-2}
-      />
-    </mesh>
+      <mesh geometry={geometry} renderOrder={900} raycast={() => undefined}>
+        <shaderMaterial
+          uniforms={uniforms}
+          vertexShader={vertexShader}
+          fragmentShader={fragmentShader}
+          transparent
+          depthTest
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          polygonOffset
+          polygonOffsetFactor={-2}
+          polygonOffsetUnits={-2}
+        />
+      </mesh>
+      <points geometry={pointsGeometry} renderOrder={901} raycast={() => undefined}>
+        <pointsMaterial
+          color="#EFFF00"
+          size={highlighted ? pointSize * 1.35 : pointSize}
+          sizeAttenuation
+          transparent
+          opacity={highlighted ? 0.96 : 0.62}
+          depthTest
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </points>
+    </group>
   );
 }
