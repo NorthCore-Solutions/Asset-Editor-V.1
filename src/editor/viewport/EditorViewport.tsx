@@ -10,6 +10,8 @@ import { useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePai
 import type { SurfacePaintSettings } from '../paint/surfacePaintSession';
 import { isNativeAndroid } from '../../platform/nativeFileDialog';
 import { AndroidTouchZoomControls } from './AndroidTouchZoomControls';
+import { AndroidMarqueeButton } from './AndroidMarqueeButton';
+import { isAndroidMarqueePointer } from './androidMarqueeSelection';
 import { PrimitiveSnapPattern } from './PrimitiveSnapPattern';
 
 interface OrbitControlApi {
@@ -1026,9 +1028,12 @@ export function EditorViewport() {
   const registry = useRef(new Map<string, THREE.Mesh>());
   const selectionApiRef = useRef<SelectionApi | null>(null);
   const marqueeRef = useRef<MarqueeState | null>(null);
+  const marqueeFromAndroidButtonRef = useRef(false);
   const suppressNextClickRef = useRef(false);
+  const nativeAndroid = isNativeAndroid();
   const [keyboardActive, setKeyboardActive] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+  const [androidMarqueeArmed, setAndroidMarqueeArmed] = useState(false);
 
   const registerSelectionApi = useCallback((api: SelectionApi) => { selectionApiRef.current = api; }, []);
 
@@ -1066,9 +1071,12 @@ export function EditorViewport() {
     if (!current || !viewport) return;
     if (event instanceof PointerEvent && event.pointerId !== current.pointerId) return;
     if (event) stopMarqueeEvent(event);
+    const startedFromAndroidButton = marqueeFromAndroidButtonRef.current;
     removeMarqueeListeners();
     marqueeRef.current = null;
+    marqueeFromAndroidButtonRef.current = false;
     setMarquee(null);
+    if (startedFromAndroidButton) setAndroidMarqueeArmed(false);
 
     const width = Math.abs(current.currentX - current.startX);
     const height = Math.abs(current.currentY - current.startY);
@@ -1088,9 +1096,25 @@ export function EditorViewport() {
 
   useEffect(() => () => removeMarqueeListeners(), [removeMarqueeListeners]);
 
+  useEffect(() => {
+    if (!paintSettings.enabled || !androidMarqueeArmed) return;
+    // Der Android-Auswahlmodus darf im Malmodus nicht aktiv bleiben.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAndroidMarqueeArmed(false);
+  }, [androidMarqueeArmed, paintSettings.enabled]);
+
   const startMarquee = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-android-marquee-button="true"]')) return;
     viewportRef.current?.focus();
-    if (paintSettings.enabled || event.button !== 0 || !event.ctrlKey || !viewportRef.current) return;
+    const androidMarquee = isAndroidMarqueePointer(nativeAndroid, androidMarqueeArmed, event.pointerType);
+    if (
+      paintSettings.enabled
+      || event.button !== 0
+      || (!event.ctrlKey && !androidMarquee)
+      || !viewportRef.current
+      || marqueeRef.current
+    ) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1105,6 +1129,7 @@ export function EditorViewport() {
       currentY: event.clientY - bounds.top
     };
     marqueeRef.current = state;
+    marqueeFromAndroidButtonRef.current = androidMarquee;
     suppressNextClickRef.current = false;
     setMarquee(state);
     window.addEventListener('pointermove', handleMarqueeMove, true);
@@ -1147,12 +1172,22 @@ export function EditorViewport() {
       >
         <EditorScene
           keyboardActive={keyboardActive}
-          selectionActive={Boolean(marquee)}
+          selectionActive={Boolean(marquee) || androidMarqueeArmed}
           registry={registry}
           onSelectionApi={registerSelectionApi}
           paintSettings={paintSettings}
         />
       </Canvas>
+      {nativeAndroid && (
+        <AndroidMarqueeButton
+          active={androidMarqueeArmed}
+          disabled={paintSettings.enabled}
+          onToggle={() => {
+            viewportRef.current?.focus();
+            setAndroidMarqueeArmed((current) => !current);
+          }}
+        />
+      )}
       {marquee && <div className="selection-marquee" style={marqueeStyle} />}
       {paintSettings.enabled && (
         <div style={{
