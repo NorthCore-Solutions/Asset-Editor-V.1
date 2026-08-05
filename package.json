@@ -12,7 +12,7 @@
     "app:sync": "npm run build && cap sync android",
     "app:open": "cap open android",
     "app:android": "npm run app:sync && cap open android",
-    "app:apk": "npm run app:sync && cd android && ./gradlew assembleDebug"
+    "app:apk": "npm run app:sync && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
