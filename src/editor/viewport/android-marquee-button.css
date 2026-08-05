@@ -1,0 +1,72 @@
+.android-marquee-button {
+  position: absolute;
+  z-index: 45;
+  left: calc(var(--inventory-panel-width) + 12px);
+  bottom: calc(var(--hierarchy-panel-height) + 12px);
+  display: grid;
+  grid-template-columns: 22px auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 92px;
+  height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: rgba(26, 33, 38, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  color: var(--silver);
+  font-size: 12px;
+  font-weight: 700;
+  touch-action: manipulation;
+  transition:
+    left 160ms ease-out,
+    bottom 160ms ease-out,
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.android-marquee-button svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.android-marquee-button rect {
+  stroke-dasharray: 3 2;
+}
+
+.android-marquee-button.active {
+  border-color: var(--green-accent);
+  background: rgba(44, 82, 58, 0.96);
+  color: #effff4;
+  box-shadow: 0 0 0 2px rgba(114, 185, 138, 0.22), 0 6px 18px rgba(0, 0, 0, 0.32);
+}
+
+.workspace.inventory-collapsed .android-marquee-button {
+  left: 44px;
+}
+
+.workspace.hierarchy-collapsed .android-marquee-button {
+  bottom: 44px;
+}
+
+@media (max-width: 1180px), (pointer: coarse) and (max-width: 1400px) {
+  .workspace.inventory-collapsed .android-marquee-button {
+    left: 56px;
+  }
+
+  .workspace.hierarchy-collapsed .android-marquee-button {
+    bottom: 56px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .android-marquee-button {
+    transition: none;
+  }
+}
