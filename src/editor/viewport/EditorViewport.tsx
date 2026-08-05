@@ -94,6 +94,10 @@ interface MarqueeState {
 const CAMERA_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const GRID_EXTENT = 400;
 const SCALE_HANDLE_SIZE_RATIO = 0.06;
+const CENTER_SCALE_VISUAL_RADIUS = 0.11;
+const CENTER_SCALE_HITBOX_RADIUS = 0.28;
+const CORNER_SCALE_VISUAL_SIZE = 1.16;
+const CORNER_SCALE_HITBOX_SIZE = 1.55;
 const CORNERS: CornerSides[] = [
   [-1, -1, -1], [-1, -1, 1], [-1, 1, -1], [-1, 1, 1],
   [1, -1, -1], [1, -1, 1], [1, 1, -1], [1, 1, 1]
@@ -356,7 +360,7 @@ function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
   return (
     <group ref={handleRef} renderOrder={Infinity}>
       <mesh renderOrder={Infinity}>
-        <octahedronGeometry args={[0.1, 0]} />
+        <octahedronGeometry args={[CENTER_SCALE_VISUAL_RADIUS, 0]} />
         <meshBasicMaterial
           color="#ffffff"
           transparent
@@ -368,7 +372,7 @@ function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
         />
       </mesh>
       <mesh renderOrder={Infinity} onPointerDown={onPointerDown}>
-        <octahedronGeometry args={[0.2, 0]} />
+        <octahedronGeometry args={[CENTER_SCALE_HITBOX_RADIUS, 0]} />
         <meshBasicMaterial
           color="#ffffff"
           transparent
@@ -389,7 +393,7 @@ function CornerScaleHandle({ mesh, bounds, sides, onPointerDown }: {
   sides: CornerSides;
   onPointerDown: (sides: CornerSides, event: ThreeEvent<PointerEvent>) => void;
 }) {
-  const handleRef = useRef<THREE.Mesh>(null);
+  const handleRef = useRef<THREE.Group>(null);
   const camera = useThree((state) => state.camera);
 
   useFrame(() => {
@@ -399,14 +403,20 @@ function CornerScaleHandle({ mesh, bounds, sides, onPointerDown }: {
     const localPoint = cornerPoint(bounds, sides);
     handle.position.copy(mesh.localToWorld(localPoint));
     handle.quaternion.copy(camera.quaternion);
-    handle.scale.setScalar((scaleHandleWorldSize(mesh, bounds) * 1.08) / 1.05);
+    handle.scale.setScalar(scaleHandleWorldSize(mesh, bounds));
   });
 
   return (
-    <mesh ref={handleRef} renderOrder={1001} onPointerDown={(event) => onPointerDown(sides, event)}>
-      <planeGeometry args={[1.05, 1.05]} />
-      <meshBasicMaterial color="#ffff00" transparent opacity={0.48} side={THREE.DoubleSide} depthTest={false} depthWrite={false} toneMapped={false} />
-    </mesh>
+    <group ref={handleRef} renderOrder={1001}>
+      <mesh renderOrder={1001}>
+        <planeGeometry args={[CORNER_SCALE_VISUAL_SIZE, CORNER_SCALE_VISUAL_SIZE]} />
+        <meshBasicMaterial color="#ffff00" transparent opacity={0.48} side={THREE.DoubleSide} depthTest={false} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh renderOrder={1002} onPointerDown={(event) => onPointerDown(sides, event)}>
+        <planeGeometry args={[CORNER_SCALE_HITBOX_SIZE, CORNER_SCALE_HITBOX_SIZE]} />
+        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthTest={false} depthWrite={false} toneMapped={false} />
+      </mesh>
+    </group>
   );
 }
 
