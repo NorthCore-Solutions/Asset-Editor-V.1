@@ -1,34 +1,64 @@
-name: Trigger Explicit Transform Pivots
+name: Apply Explicit Transform Pivots
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/trigger-explicit-transform-pivots.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  trigger:
+  apply-fix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Trigger pivot workflow
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Apply pivot cleanup
         shell: bash
         run: |
           set -euo pipefail
-          printf '\n# triggered by %s\n' "$GITHUB_RUN_ID" >> .github/workflows/apply-explicit-transform-pivots.yml
+          python - <<'PYRUN'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/apply-explicit-transform-pivots.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, 'pivot-cleanup.py', 'exec'), {'__name__': '__main__'})
+          PYRUN
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Commit verified pivot cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-explicit-transform-pivots.yml
           rm .github/workflows/trigger-explicit-transform-pivots.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/apply-explicit-transform-pivots.yml .github/workflows/trigger-explicit-transform-pivots.yml
-          git commit -m "Transformations-Pivot-Prüfung starten"
+          git add src/editor/paint/useSurfacePaint.ts src/editor/viewport/EditorViewport.tsx .github/workflows/apply-explicit-transform-pivots.yml .github/workflows/trigger-explicit-transform-pivots.yml
+          git commit -m "Transformations-Pivots explizit verwalten"
           git push origin HEAD:main
-
-# second-push trigger
