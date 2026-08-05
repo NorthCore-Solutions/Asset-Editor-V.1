@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { exportGlb, inspectExport, type ExportGeometryMode } from '../../export/exportScene';
+import { isNativeAndroid, saveBlobAs } from '../../platform/nativeFileDialog';
+import { safeFilename } from '../../persistence/projectFile';
 import { useEditorStore } from '../../store/editorStore';
 
 export function ExportDialog({ onClose }: { onClose: () => void }) {
@@ -21,8 +23,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       const blob = await exportGlb(report.objects, filename, geometryMode);
+      let savedName = `${safeFilename(filename)}.glb`;
+
+      if (isNativeAndroid()) {
+        const saved = await saveBlobAs(blob, savedName, 'model/gltf-binary');
+        if (!saved) return;
+        savedName = saved.name;
+      }
+
       const modeLabel = geometryMode === 'union' && report.unionEligible >= 2 ? 'Union' : 'getrennte Meshes';
-      setMessage(`GLB exportiert (${modeLabel}): ${(blob.size / 1024).toFixed(1)} KB`);
+      setMessage(`GLB gespeichert (${modeLabel}): ${savedName} · ${(blob.size / 1024).toFixed(1)} KB`);
       onClose();
     } catch (error) {
       setMessage(error instanceof Error ? `GLB-Export fehlgeschlagen: ${error.message}` : 'GLB-Export fehlgeschlagen');
