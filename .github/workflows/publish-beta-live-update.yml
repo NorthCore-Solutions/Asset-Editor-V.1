@@ -1,0 +1,163 @@
+name: Publish Beta Live Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: 'Eindeutige Bundle-ID, z. B. 2-2026.08.05.1'
+        required: true
+        type: string
+      native_version_code:
+        description: 'Kompatibler Android-versionCode'
+        required: true
+        default: '2'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-beta-live-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://updates.northcore-eu.de/asset-editor/beta
+      EXPECTED_PUBLIC_KEY_SHA256: 372e07c72dc29d4d0447999655344a3e297de81a99265d8c243099741006e0a6
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bundle_id='${{ inputs.bundle_id }}'
+          version_code='${{ inputs.native_version_code }}'
+
+          if [[ ! "$bundle_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || [[ "$bundle_id" == "public" ]]; then
+            echo "Ungültige Bundle-ID: $bundle_id" >&2
+            exit 1
+          fi
+
+          if [[ ! "$version_code" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Ungültiger native_version_code: $version_code" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Prepare and verify signing key
+        shell: bash
+        env:
+          LIVE_UPDATE_PRIVATE_KEY: ${{ secrets.LIVE_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${LIVE_UPDATE_PRIVATE_KEY:-}" ]]; then
+            echo "Repository-Secret LIVE_UPDATE_PRIVATE_KEY fehlt." >&2
+            exit 1
+          fi
+
+          key_path="$RUNNER_TEMP/live-update-private.pem"
+          printf '%s\n' "$LIVE_UPDATE_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+
+          actual_fingerprint="$(openssl pkey -in "$key_path" -pubout -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)"
+          if [[ "$actual_fingerprint" != "$EXPECTED_PUBLIC_KEY_SHA256" ]]; then
+            echo "Der private Schlüssel passt nicht zum in der APK eingebetteten öffentlichen Schlüssel." >&2
+            echo "Erwarteter Fingerprint: $EXPECTED_PUBLIC_KEY_SHA256" >&2
+            echo "Ermittelter Fingerprint: $actual_fingerprint" >&2
+            exit 1
+          fi
+
+          echo "LIVE_UPDATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Create signed update bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bundle_id='${{ inputs.bundle_id }}'
+          version_code='${{ inputs.native_version_code }}'
+          output_root="$RUNNER_TEMP/live-update-output"
+          bundle_dir="$output_root/bundles"
+          zip_path="$bundle_dir/$bundle_id.zip"
+          manifest_path="$output_root/manifest.json"
+
+          rm -rf "$output_root"
+          mkdir -p "$bundle_dir"
+
+          (
+            cd dist
+            zip -qr "$zip_path" .
+          )
+
+          node scripts/sign-live-update-bundle.mjs \
+            "$zip_path" \
+            "$LIVE_UPDATE_KEY_PATH" \
+            "$bundle_id" \
+            "$BASE_URL" \
+            "$version_code" \
+            "$manifest_path"
+
+          node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if(m.bundleId!==process.argv[2]) process.exit(1);" "$manifest_path" "$bundle_id"
+
+          echo "LIVE_UPDATE_OUTPUT_ROOT=$output_root" >> "$GITHUB_ENV"
+          echo "LIVE_UPDATE_ZIP_PATH=$zip_path" >> "$GITHUB_ENV"
+          echo "LIVE_UPDATE_MANIFEST_PATH=$manifest_path" >> "$GITHUB_ENV"
+
+      - name: Publish to gh-pages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bundle_id='${{ inputs.bundle_id }}'
+          pages_dir="$RUNNER_TEMP/gh-pages"
+
+          git fetch origin gh-pages
+          rm -rf "$pages_dir"
+          git worktree add "$pages_dir" origin/gh-pages
+
+          mkdir -p "$pages_dir/asset-editor/beta/bundles"
+          cp "$LIVE_UPDATE_ZIP_PATH" "$pages_dir/asset-editor/beta/bundles/$bundle_id.zip"
+          cp "$LIVE_UPDATE_MANIFEST_PATH" "$pages_dir/asset-editor/beta/manifest.json"
+          touch "$pages_dir/.nojekyll"
+
+          cd "$pages_dir"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .nojekyll asset-editor/beta/manifest.json "asset-editor/beta/bundles/$bundle_id.zip"
+
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen zu veröffentlichen."
+            exit 0
+          fi
+
+          git commit -m "Beta-Live-Update $bundle_id veröffentlichen"
+          git push origin HEAD:gh-pages
+
+      - name: Remove signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/live-update-private.pem"
