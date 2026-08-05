@@ -45,7 +45,7 @@ export function AndroidTouchZoomControls({
   const selectedBounds = useMemo(() => {
     const entries: Array<THREE.Box3 | null | undefined> = objects
       .filter((object) => selectedIds.includes(object.id) && object.visible)
-      .map(worldBoundsFromSceneObject);
+      .map((object) => worldBoundsFromSceneObject(object));
 
     const additionalBounds = resolveAdditionalBounds?.(selectedIds);
     if (additionalBounds) entries.push(...additionalBounds);
