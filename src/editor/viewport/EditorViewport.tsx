@@ -6,7 +6,7 @@ import { createGeometry } from '../../geometry/factory';
 import { findFormSurfaceSnap, isFormType } from '../snapping/primitiveSurfaceSnap';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData, SnapSettings, TransformMode } from '../../types/editor';
-import { useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePaint';
+import { invertHexColor, useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePaint';
 import type { SurfacePaintSettings } from '../paint/surfacePaintSession';
 import { isNativeAndroid } from '../../platform/nativeFileDialog';
 import { AndroidTouchZoomControls } from './AndroidTouchZoomControls';
@@ -66,6 +66,11 @@ interface CenterScaleDragState {
 }
 
 type ScaleDragState = AxisScaleDragState | UniformScaleDragState | CenterScaleDragState;
+
+interface SingleTranslateDragState {
+  startProxyPosition: THREE.Vector3;
+  startMeshWorldPosition: THREE.Vector3;
+}
 
 interface GroupDragState {
   proxyMatrix: THREE.Matrix4;
@@ -339,9 +344,10 @@ function ScaleHandle({ mesh, bounds, axis, side, color, onPointerDown }: {
   );
 }
 
-function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
+function CenterScaleHandle({ mesh, bounds, color, onPointerDown }: {
   mesh: THREE.Mesh;
   bounds: THREE.Box3;
+  color: string;
   onPointerDown: (event: ThreeEvent<PointerEvent>) => void;
 }) {
   const handleRef = useRef<THREE.Group>(null);
@@ -351,8 +357,8 @@ function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
     if (!handle) return;
 
     mesh.updateMatrixWorld(true);
-    const worldPosition = mesh.getWorldPosition(new THREE.Vector3());
-    handle.position.copy(worldPosition);
+    const localCenter = bounds.getCenter(new THREE.Vector3());
+    handle.position.copy(mesh.localToWorld(localCenter));
     handle.quaternion.identity();
     handle.scale.setScalar(scaleHandleWorldSize(mesh, bounds) / 0.2);
   });
@@ -362,9 +368,9 @@ function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
       <mesh renderOrder={Infinity}>
         <octahedronGeometry args={[CENTER_SCALE_VISUAL_RADIUS, 0]} />
         <meshBasicMaterial
-          color="#ffffff"
+          color={color}
           transparent
-          opacity={0.25}
+          opacity={1}
           depthTest={false}
           depthWrite={false}
           fog={false}
@@ -374,7 +380,7 @@ function CenterScaleHandle({ mesh, bounds, onPointerDown }: {
       <mesh renderOrder={Infinity} onPointerDown={onPointerDown}>
         <octahedronGeometry args={[CENTER_SCALE_HITBOX_RADIUS, 0]} />
         <meshBasicMaterial
-          color="#ffffff"
+          color={color}
           transparent
           opacity={0}
           depthTest={false}
@@ -699,7 +705,12 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
 
   return (
     <>
-      <CenterScaleHandle mesh={mesh} bounds={bounds} onPointerDown={startCenterDrag} />
+      <CenterScaleHandle
+        mesh={mesh}
+        bounds={bounds}
+        color={invertHexColor(object.material.color)}
+        onPointerDown={startCenterDrag}
+      />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={-1} color="#ff0000" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="X" side={1} color="#ff0000" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="Y" side={-1} color="#00ff00" onPointerDown={startAxisDrag} />
@@ -707,6 +718,134 @@ function ScaleHandles({ mesh, geometry, object, snap, onSnapTargetChange, onTran
       <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={-1} color="#0000ff" onPointerDown={startAxisDrag} />
       <ScaleHandle mesh={mesh} bounds={bounds} axis="Z" side={1} color="#0000ff" onPointerDown={startAxisDrag} />
       {CORNERS.map((sides) => <CornerScaleHandle key={sides.join(':')} mesh={mesh} bounds={bounds} sides={sides} onPointerDown={startUniformDrag} />)}
+    </>
+  );
+}
+
+function SingleTranslateControls({
+  mesh,
+  geometry,
+  object,
+  snap,
+  onSnapTargetChange,
+  onTransformDraggingChange
+}: {
+  mesh: THREE.Mesh;
+  geometry: THREE.BufferGeometry;
+  object: SceneObjectData;
+  snap: SnapSettings;
+  onSnapTargetChange: (targetId: string | null) => void;
+  onTransformDraggingChange: (dragging: boolean) => void;
+}) {
+  const proxy = useMemo(() => new THREE.Object3D(), []);
+  const dragRef = useRef<SingleTranslateDragState | null>(null);
+  const objects = useEditorStore((state) => state.objects);
+  const updateObject = useEditorStore((state) => state.updateObject);
+  const beginTransaction = useEditorStore((state) => state.beginTransaction);
+  const endTransaction = useEditorStore((state) => state.endTransaction);
+  const localCenter = useMemo(() => {
+    geometry.computeBoundingBox();
+    return geometry.boundingBox?.getCenter(new THREE.Vector3()) ?? new THREE.Vector3();
+  }, [geometry]);
+
+  const resetProxy = useCallback(() => {
+    mesh.updateMatrixWorld(true);
+    proxy.position.copy(mesh.localToWorld(localCenter.clone()));
+    proxy.rotation.set(0, 0, 0);
+    proxy.scale.set(1, 1, 1);
+    proxy.updateMatrixWorld(true);
+  }, [localCenter, mesh, proxy]);
+
+  useFrame(() => {
+    if (!dragRef.current) resetProxy();
+  });
+
+  const start = () => {
+    resetProxy();
+    dragRef.current = {
+      startProxyPosition: proxy.position.clone(),
+      startMeshWorldPosition: mesh.getWorldPosition(new THREE.Vector3())
+    };
+    onSnapTargetChange(null);
+    beginTransaction();
+    onTransformDraggingChange(true);
+  };
+
+  const sync = () => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const worldDelta = proxy.position.clone().sub(drag.startProxyPosition);
+    const nextWorldPosition = drag.startMeshWorldPosition.clone().add(worldDelta);
+    const nextLocalPosition = mesh.parent
+      ? mesh.parent.worldToLocal(nextWorldPosition.clone())
+      : nextWorldPosition;
+    mesh.position.copy(nextLocalPosition);
+    mesh.updateMatrixWorld(true);
+
+    let position: SceneObjectData['position'] = [
+      mesh.position.x,
+      mesh.position.y,
+      mesh.position.z
+    ];
+    const rotation: SceneObjectData['rotation'] = [
+      mesh.rotation.x,
+      mesh.rotation.y,
+      mesh.rotation.z
+    ];
+    const scale: SceneObjectData['scale'] = [
+      mesh.scale.x,
+      mesh.scale.y,
+      mesh.scale.z
+    ];
+
+    if (snap.surface && isFormType(object.type)) {
+      const result = findFormSurfaceSnap(
+        { ...object, position, rotation, scale },
+        objects,
+        snap.position
+      );
+      position = result.position;
+      mesh.position.set(position[0], position[1], position[2]);
+      mesh.updateMatrixWorld(true);
+      onSnapTargetChange(result.targetId);
+    } else {
+      onSnapTargetChange(null);
+    }
+
+    updateObject(object.id, { position, rotation, scale }, false);
+  };
+
+  const stop = () => {
+    sync();
+    dragRef.current = null;
+    onSnapTargetChange(null);
+    endTransaction();
+    onTransformDraggingChange(false);
+    resetProxy();
+  };
+
+  useEffect(() => () => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    onSnapTargetChange(null);
+    endTransaction();
+    onTransformDraggingChange(false);
+  }, [endTransaction, onSnapTargetChange, onTransformDraggingChange]);
+
+  return (
+    <>
+      <primitive object={proxy} />
+      <TransformControls
+        object={proxy}
+        mode="translate"
+        space="world"
+        size={1.15}
+        translationSnap={snap.enabled ? snap.position : undefined}
+        onMouseDown={start}
+        onObjectChange={sync}
+        onMouseUp={stop}
+      />
     </>
   );
 }
@@ -807,7 +946,6 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
   onTransformDraggingChange: (dragging: boolean) => void;
   paintSettings: SurfacePaintSettings;
 }) {
-  const objects = useEditorStore((state) => state.objects);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const select = useEditorStore((state) => state.select);
   const tool = useEditorStore((state) => state.tool);
@@ -829,37 +967,23 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
     return () => { registry.current.delete(object.id); };
   }, [mesh, object.id, registry]);
 
-  const syncTransform = () => {
+  const syncRotation = () => {
     if (!mesh) return;
-
-    let position: SceneObjectData['position'] = [mesh.position.x, mesh.position.y, mesh.position.z];
-    const rotation: SceneObjectData['rotation'] = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z];
-    const scale: SceneObjectData['scale'] = [mesh.scale.x, mesh.scale.y, mesh.scale.z];
-
-    if (tool === 'translate' && snap.surface && singleSelection && isFormType(object.type)) {
-      const candidate: SceneObjectData = { ...object, position, rotation, scale };
-      const result = findFormSurfaceSnap(candidate, objects, snap.position);
-      position = result.position;
-      if (result.targetId) {
-        mesh.position.set(position[0], position[1], position[2]);
-        mesh.updateMatrixWorld(true);
-      }
-      onSnapTargetChange(result.targetId);
-    } else if (tool === 'translate') {
-      onSnapTargetChange(null);
-    }
-
-    updateObject(object.id, { position, rotation, scale }, false);
+    updateObject(object.id, {
+      position: [mesh.position.x, mesh.position.y, mesh.position.z],
+      rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+      scale: [mesh.scale.x, mesh.scale.y, mesh.scale.z]
+    }, false);
   };
 
-  const startTransform = () => {
+  const startRotation = () => {
     onSnapTargetChange(null);
     beginTransaction();
     onTransformDraggingChange(true);
   };
-  const stopTransform = () => {
-    syncTransform();
-    onSnapTargetChange(null);
+
+  const stopRotation = () => {
+    syncRotation();
     endTransaction();
     onTransformDraggingChange(false);
   };
@@ -926,17 +1050,25 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
             onSnapTargetChange={onSnapTargetChange}
             onTransformDraggingChange={onTransformDraggingChange}
           />
+        ) : tool === 'translate' ? (
+          <SingleTranslateControls
+            mesh={mesh}
+            geometry={geometry}
+            object={object}
+            snap={snap}
+            onSnapTargetChange={onSnapTargetChange}
+            onTransformDraggingChange={onTransformDraggingChange}
+          />
         ) : (
           <TransformControls
             object={mesh}
-            mode={tool}
+            mode="rotate"
             space="world"
-            size={tool === 'rotate' ? 1.4 : 1.15}
-            translationSnap={snap.enabled ? snap.position : undefined}
+            size={1.4}
             rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
-            onMouseDown={startTransform}
-            onObjectChange={syncTransform}
-            onMouseUp={stopTransform}
+            onMouseDown={startRotation}
+            onObjectChange={syncRotation}
+            onMouseUp={stopRotation}
           />
         )
       )}
