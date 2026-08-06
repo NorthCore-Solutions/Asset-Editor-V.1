@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createSceneObject, SHAPE_DEFINITIONS } from '../src/geometry/factory';
+import { findAppleCutterSurfaceSnap } from '../src/editor/appleCutter/appleCutterSnap';
 import { surfaceSnapTargetFromSceneObject } from '../src/editor/snapping/objectSurfaceSnap';
-import { findFormSurfaceSnap } from '../src/editor/snapping/primitiveSurfaceSnap';
 import {
   minimumSurfaceProjection,
   transformSurfaceSupportPoints
@@ -151,7 +151,10 @@ function boxGapSetup(gap: number) {
   return { target, previous };
 }
 
-function expectUnchanged(candidate: SceneObjectData, result: ReturnType<typeof findFormSurfaceSnap>) {
+function expectUnchanged(
+  candidate: SceneObjectData,
+  result: ReturnType<typeof findAppleCutterSurfaceSnap>
+) {
   expect(result.targetId).toBeNull();
   expect(result.position[0]).toBeCloseTo(candidate.position[0], 6);
   expect(result.position[1]).toBeCloseTo(candidate.position[1], 6);
@@ -162,7 +165,7 @@ function expectPhysicalContact(
   source: SceneObjectData,
   target: SceneObjectData,
   movementDirection: THREE.Vector3,
-  result: ReturnType<typeof findFormSurfaceSnap>
+  result: ReturnType<typeof findAppleCutterSurfaceSnap>
 ): void {
   const sourceTarget = requiredTarget(withPosition(source, result.position));
   const targetTarget = requiredTarget(target);
@@ -208,7 +211,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
     ['Kugel zu Zylinder', 'sphere', 'cylinder']
   ] as const)('stoppt %s beim Durchqueren', (_label, sourceType, targetType) => {
     const setup = crossingSetup(sourceType, targetType);
-    const result = findFormSurfaceSnap(
+    const result = findAppleCutterSurfaceSnap(
       setup.candidate,
       [setup.previous, setup.target],
       STEP
@@ -231,7 +234,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
 
   it('hält den Kontakt auch beim nächsten Ziehschritt in die Form hinein', () => {
     const setup = crossingSetup('sphere', 'box');
-    const first = findFormSurfaceSnap(
+    const first = findAppleCutterSurfaceSnap(
       setup.candidate,
       [setup.previous, setup.target],
       STEP
@@ -243,7 +246,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
       setup.candidate,
       setup.movementDirection.clone().multiplyScalar(STEP * 2)
     );
-    const second = findFormSurfaceSnap(
+    const second = findAppleCutterSurfaceSnap(
       deeperCandidate,
       [snappedPrevious, setup.target],
       STEP
@@ -266,7 +269,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
       previous.position[2]
     ]);
 
-    expectUnchanged(candidate, findFormSurfaceSnap(candidate, [previous, target], STEP));
+    expectUnchanged(candidate, findAppleCutterSurfaceSnap(candidate, [previous, target], STEP));
   });
 
   it('lässt ein Element nahe an einer Fläche seitlich vorbeiziehen', () => {
@@ -277,7 +280,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
       previous.position[2]
     ]);
 
-    expectUnchanged(candidate, findFormSurfaceSnap(candidate, [previous, target], STEP));
+    expectUnchanged(candidate, findAppleCutterSurfaceSnap(candidate, [previous, target], STEP));
   });
 
   it('greift bei bloßer Nähe außerhalb der Kontaktzone nicht ein', () => {
@@ -288,7 +291,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
       previous.position[2]
     ]);
 
-    expectUnchanged(candidate, findFormSurfaceSnap(candidate, [previous, target], STEP));
+    expectUnchanged(candidate, findAppleCutterSurfaceSnap(candidate, [previous, target], STEP));
   });
 
   it('rastet bei gezielter Annäherung innerhalb der Kontaktzone ein', () => {
@@ -298,7 +301,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
       previous.position[1],
       previous.position[2]
     ]);
-    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
+    const result = findAppleCutterSurfaceSnap(candidate, [previous, target], STEP);
 
     expect(result.targetId).toBe(target.id);
     expectPhysicalContact(candidate, target, new THREE.Vector3(1, 0, 0), result);
@@ -308,7 +311,7 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
 describe('gleiche Durchquerungsbedingung für alle Elemente', () => {
   it.each(SHAPE_DEFINITIONS)("stoppt '$label' als bewegtes Element auf einer Apfelschneider-Bahn", ({ type }) => {
     const setup = crossingSetup(type, 'box');
-    const result = findFormSurfaceSnap(
+    const result = findAppleCutterSurfaceSnap(
       setup.candidate,
       [setup.previous, setup.target],
       STEP
@@ -331,7 +334,7 @@ describe('gleiche Durchquerungsbedingung für alle Elemente', () => {
 
   it.each(SHAPE_DEFINITIONS)("stoppt eine Kugel an '$label' auf einer Apfelschneider-Bahn", ({ type }) => {
     const setup = crossingSetup('sphere', type);
-    const result = findFormSurfaceSnap(
+    const result = findAppleCutterSurfaceSnap(
       setup.candidate,
       [setup.previous, setup.target],
       STEP
