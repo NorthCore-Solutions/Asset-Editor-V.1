@@ -5,6 +5,7 @@ import type { SceneObjectData, Vec3 } from '../../types/editor';
 import { APPLE_CUTTER_CELL_SIZE } from '../appleCutter/appleCutterAxisGrid';
 import type { AppleCutterScope } from '../appleCutter/appleCutterTypes';
 import { removeOpposingCoincidentAnchors } from './compositeAnchorFilter';
+import { buildImportedComponentRoots } from './importComponentAnalysis';
 import { buildGeometrySupportPoints } from './surfaceSupport';
 import {
   buildGeometrySurfaceSnapAnchors,
@@ -422,14 +423,6 @@ function rescopeTarget(
   };
 }
 
-function containsVisibleMesh(root: THREE.Object3D): boolean {
-  let found = false;
-  root.traverseVisible((child) => {
-    if ((child as THREE.Mesh).isMesh) found = true;
-  });
-  return found;
-}
-
 export function analyzeImportedObject3DSnapTargets(
   root: THREE.Object3D,
   id: string = root.uuid
@@ -437,9 +430,7 @@ export function analyzeImportedObject3DSnapTargets(
   const composite = surfaceSnapTargetFromObject3D(root, id);
   if (!composite) return { composite: null, components: [] };
 
-  const componentRoots = root.children
-    .map((child, index) => ({ child, index }))
-    .filter(({ child }) => child.visible && containsVisibleMesh(child));
+  const componentRoots = buildImportedComponentRoots(root);
   if (componentRoots.length === 0) {
     return {
       composite,
@@ -447,9 +438,11 @@ export function analyzeImportedObject3DSnapTargets(
     };
   }
 
-  const components = componentRoots.flatMap(({ child, index }) => {
-    const componentId = `${id}:component:${index}`;
-    const target = surfaceSnapTargetFromObject3D(child, componentId);
+  const components = componentRoots.flatMap((componentRoot, index) => {
+    const stableKey = componentRoot.userData.appleCutterComponentKey;
+    const componentKey = typeof stableKey === 'string' ? stableKey : String(index);
+    const componentId = `${id}:component:${componentKey}`;
+    const target = surfaceSnapTargetFromObject3D(componentRoot, componentId);
     return target
       ? [rescopeTarget(target, componentId, 'component')]
       : [];
