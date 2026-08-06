@@ -36,8 +36,10 @@ interface TouchTranslationSnapSession {
   acceptedPosition: Vec3;
   rotation: Vec3;
   scale: Vec3;
-  snappedTargetId: string | null;
-  released: boolean;
+  activeTargetId: string | null;
+  captureRawOrigin: Vec3 | null;
+  suppressedTargetId: string | null;
+  suppressedOrigin: Vec3 | null;
 }
 
 const translationSnapSessions = new Map<string, TranslationSnapSession>();
@@ -89,6 +91,10 @@ function dot(left: Vec3, right: Vec3): number {
 
 function length(vector: Vec3): number {
   return Math.hypot(vector[0], vector[1], vector[2]);
+}
+
+function distance(left: Vec3, right: Vec3): number {
+  return length(subtract(left, right));
 }
 
 function normalize(vector: Vec3, fallback: Vec3): Vec3 {
@@ -205,6 +211,14 @@ function breakawayDistance(positionStep: number): number {
   return Math.min(0.3, Math.max(0.16, Math.abs(positionStep) * 0.75));
 }
 
+function touchReleaseDistance(positionStep: number): number {
+  return Math.min(0.18, Math.max(0.08, Math.abs(positionStep) * 0.45));
+}
+
+function touchRearmDistance(positionStep: number): number {
+  return Math.min(0.75, Math.max(0.35, Math.abs(positionStep) * 2));
+}
+
 function shouldReleaseLock(
   source: SceneObjectData,
   lock: TranslationSnapLock,
@@ -262,8 +276,10 @@ function rememberTouchTranslationStep(
   rawSource: SceneObjectData,
   acceptedPosition: Vec3,
   transactionToken: unknown,
-  snappedTargetId: string | null,
-  released: boolean
+  activeTargetId: string | null,
+  captureRawOrigin: Vec3 | null,
+  suppressedTargetId: string | null,
+  suppressedOrigin: Vec3 | null
 ): void {
   touchTranslationSnapSessions.set(rawSource.id, {
     transactionToken,
@@ -271,8 +287,10 @@ function rememberTouchTranslationStep(
     acceptedPosition: [...acceptedPosition] as Vec3,
     rotation: [...rawSource.rotation] as Vec3,
     scale: [...rawSource.scale] as Vec3,
-    snappedTargetId,
-    released
+    activeTargetId,
+    captureRawOrigin: captureRawOrigin ? [...captureRawOrigin] as Vec3 : null,
+    suppressedTargetId,
+    suppressedOrigin: suppressedOrigin ? [...suppressedOrigin] as Vec3 : null
   });
 }
 
@@ -301,12 +319,10 @@ export function resetFormSurfaceSnapSessions(): void {
 }
 
 /**
- * Android-WebViews liefern Touch-Schritte gröber und anders getaktet als ein
- * Desktop-Mausdrag. Deshalb wird die vorherige rohe Touch-Position getrennt
- * von der zuletzt akzeptierten Snap-Position geführt. Nach dem ersten
- * Verlassen eines Kontakts bleibt der Oberflächen-Snap für den restlichen Drag
- * freigegeben, damit das Element nicht bei jedem groben Schritt erneut an
- * derselben Fläche hängen bleibt.
+ * Android-WebViews liefern gröbere Touch-Schritte. Ein Kontakt wird deshalb
+ * kurz gehalten, danach aber ohne dauerhafte Sperre freigegeben. Das zuletzt
+ * berührte Ziel wird nur vorübergehend unterdrückt und nach ausreichender
+ * Bewegung innerhalb desselben Drags wieder für einen neuen Kontakt aktiviert.
  */
 export function findTouchFormSurfaceSnap(
   source: SceneObjectData,
@@ -338,14 +354,33 @@ export function findTouchFormSurfaceSnap(
   }
 
   const session = validTouchSession(source, previous, transactionToken);
-  if (session?.released || session?.snappedTargetId) {
+  if (session?.activeTargetId && session.captureRawOrigin) {
+    if (distance(source.position, session.captureRawOrigin) <= touchReleaseDistance(positionStep)) {
+      rememberTouchTranslationStep(
+        source,
+        session.acceptedPosition,
+        transactionToken,
+        session.activeTargetId,
+        session.captureRawOrigin,
+        null,
+        null
+      );
+      return {
+        position: [...session.acceptedPosition] as Vec3,
+        targetId: session.activeTargetId,
+        distance: 0
+      };
+    }
+
     const released = unchangedResult(source);
     rememberTouchTranslationStep(
       source,
       released.position,
       transactionToken,
       null,
-      true
+      null,
+      session.activeTargetId,
+      source.position
     );
     return released;
   }
@@ -356,7 +391,7 @@ export function findTouchFormSurfaceSnap(
   const sweepObjects = objects.map((object) => (
     object.id === source.id ? previousRaw : object
   ));
-  const result = statelessTranslationSnap(
+  const candidate = statelessTranslationSnap(
     source,
     previousRaw,
     sweepObjects,
@@ -364,12 +399,30 @@ export function findTouchFormSurfaceSnap(
     additionalTargets
   );
 
+  let suppressedTargetId = session?.suppressedTargetId ?? null;
+  let suppressedOrigin = session?.suppressedOrigin ?? null;
+  if (
+    suppressedTargetId
+    && suppressedOrigin
+    && distance(source.position, suppressedOrigin) >= touchRearmDistance(positionStep)
+  ) {
+    suppressedTargetId = null;
+    suppressedOrigin = null;
+  }
+
+  const result = candidate.targetId && candidate.targetId === suppressedTargetId
+    ? unchangedResult(source)
+    : candidate;
+  const activeTargetId = result.targetId;
+
   rememberTouchTranslationStep(
     source,
     result.position,
     transactionToken,
-    result.targetId,
-    false
+    activeTargetId,
+    activeTargetId ? source.position : null,
+    suppressedTargetId,
+    suppressedOrigin
   );
   return result;
 }
