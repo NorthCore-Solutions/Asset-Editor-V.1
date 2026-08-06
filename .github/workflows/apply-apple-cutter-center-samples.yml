@@ -54,3 +54,5 @@ jobs:
           git add src/editor/snapping/surfaceSnapTopology.ts
           git commit -m "Apfelschneider-Mittelachsen als Abtastlinien ergänzen"
           git push origin HEAD:feature/apple-cutter-model
+
+# Bereits vorhandenen Workflow mit einem regulären Push auslösen.
