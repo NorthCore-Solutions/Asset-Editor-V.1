@@ -1,13 +1,22 @@
 import * as THREE from 'three';
+import {
+  APPLE_CUTTER_CELL_SIZE,
+  buildCenteredAppleCutterAxis
+} from '../appleCutter/appleCutterAxisGrid';
+import type { AppleCutterScope } from '../appleCutter/appleCutterTypes';
 
 const EPSILON = 0.000001;
-const DEFAULT_MAX_ANCHORS = 8192;
+const DEFAULT_MAX_ANCHORS = 32768;
 
 type AxisIndex = 0 | 1 | 2;
 
 export interface SurfaceSnapAnchor {
+  id?: string;
   position: THREE.Vector3;
   normal: THREE.Vector3;
+  cutterCoordinates?: [number | null, number | null, number | null];
+  componentId?: string;
+  scope?: AppleCutterScope;
 }
 
 const AXIS_PAIRS: ReadonlyArray<readonly [AxisIndex, AxisIndex, AxisIndex]> = [
@@ -32,33 +41,20 @@ function safeScale(value: number): number {
   return Math.max(0.0001, Math.abs(value));
 }
 
+/**
+ * Kompatibilitätswert für bestehende Aufrufstellen. Das Apfelschneider-Modell
+ * verwendet unabhängig vom Bewegungsraster immer höchstens 0,25 Welt-Einheiten
+ * zwischen zwei inneren Schnitten.
+ */
 export function localSurfaceSnapStep(
-  cellSize: number,
+  _cellSize: number,
   objectScale: THREE.Vector3
 ): THREE.Vector3 {
-  const safeCellSize = Math.max(0.05, Math.abs(cellSize));
   return new THREE.Vector3(
-    safeCellSize / safeScale(objectScale.x),
-    safeCellSize / safeScale(objectScale.y),
-    safeCellSize / safeScale(objectScale.z)
+    APPLE_CUTTER_CELL_SIZE / safeScale(objectScale.x),
+    APPLE_CUTTER_CELL_SIZE / safeScale(objectScale.y),
+    APPLE_CUTTER_CELL_SIZE / safeScale(objectScale.z)
   );
-}
-
-function gridCoordinates(minimum: number, maximum: number, step: number): number[] {
-  if (!Number.isFinite(step) || step <= EPSILON || maximum < minimum) {
-    return minimum === maximum ? [minimum] : [minimum, maximum];
-  }
-
-  const values: number[] = [minimum];
-  const count = Math.min(4096, Math.floor((maximum - minimum) / step));
-  for (let index = 1; index <= count; index += 1) {
-    const value = minimum + index * step;
-    if (value >= maximum - EPSILON) break;
-    values.push(value);
-  }
-  const lastValue = values.at(-1) ?? minimum;
-  if (maximum - lastValue > EPSILON) values.push(maximum);
-  return values;
 }
 
 function barycentricCoordinates(
@@ -116,34 +112,48 @@ function finiteAnchor(anchor: SurfaceSnapAnchor): boolean {
   ].every(Number.isFinite) && anchor.normal.lengthSq() > EPSILON * EPSILON;
 }
 
+function quantizedAnchorKey(anchor: SurfaceSnapAnchor, precision: number): string {
+  const normalPrecision = 0.005;
+  return [
+    Math.round(anchor.position.x / precision),
+    Math.round(anchor.position.y / precision),
+    Math.round(anchor.position.z / precision),
+    Math.round(anchor.normal.x / normalPrecision),
+    Math.round(anchor.normal.y / normalPrecision),
+    Math.round(anchor.normal.z / normalPrecision)
+  ].join(':');
+}
+
 function deduplicateAnchors(
   anchors: SurfaceSnapAnchor[],
   localStep: THREE.Vector3,
-  maxAnchors: number
+  maxAnchors: number,
+  componentId: string,
+  scope: AppleCutterScope
 ): SurfaceSnapAnchor[] {
   const minimumStep = Math.min(localStep.x, localStep.y, localStep.z);
   const positionPrecision = Math.max(0.00001, minimumStep * 0.0001);
-  const normalPrecision = 0.01;
   const unique = new Map<string, SurfaceSnapAnchor>();
 
   for (const anchor of anchors) {
     if (!finiteAnchor(anchor)) continue;
-    const normalized = {
+    const normalized: SurfaceSnapAnchor = {
+      ...anchor,
       position: anchor.position.clone(),
-      normal: anchor.normal.clone().normalize()
+      normal: anchor.normal.clone().normalize(),
+      componentId,
+      scope
     };
-    const key = [
-      Math.round(normalized.position.x / positionPrecision),
-      Math.round(normalized.position.y / positionPrecision),
-      Math.round(normalized.position.z / positionPrecision),
-      Math.round(normalized.normal.x / normalPrecision),
-      Math.round(normalized.normal.y / normalPrecision),
-      Math.round(normalized.normal.z / normalPrecision)
-    ].join(':');
+    const key = quantizedAnchorKey(normalized, positionPrecision);
     if (!unique.has(key)) unique.set(key, normalized);
   }
 
-  const result = [...unique.values()];
+  const result = [...unique.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, anchor]) => ({
+      ...anchor,
+      id: `${scope}:${componentId}:${key}`
+    }));
   if (result.length <= maxAnchors) return result;
 
   const reduced: SurfaceSnapAnchor[] = [];
@@ -162,12 +172,30 @@ function triangleVertexIndex(
   return geometryIndex ? geometryIndex.getX(triangleVertex) : triangleVertex;
 }
 
+interface BuildGeometrySurfaceSnapOptions {
+  componentId?: string;
+  scope?: AppleCutterScope;
+  maxAnchors?: number;
+}
+
+/**
+ * Erzeugt ausschließlich Schnittpunkte des zentrierten Apfelschneider-Gitters
+ * mit der tatsächlichen Dreiecksoberfläche. Mesh-Eckpunkte und
+ * Dreiecksmittelpunkte werden nicht zusätzlich als unregelmäßige Snap-Punkte
+ * aufgenommen.
+ */
 export function buildGeometrySurfaceSnapAnchors(
   geometry: THREE.BufferGeometry,
-  cellSize: number,
+  _cellSize: number,
   objectScale: THREE.Vector3,
-  maxAnchors: number = DEFAULT_MAX_ANCHORS
+  maxAnchorsOrOptions: number | BuildGeometrySurfaceSnapOptions = DEFAULT_MAX_ANCHORS
 ): SurfaceSnapAnchor[] {
+  const options: BuildGeometrySurfaceSnapOptions = typeof maxAnchorsOrOptions === 'number'
+    ? { maxAnchors: maxAnchorsOrOptions }
+    : maxAnchorsOrOptions;
+  const componentId = options.componentId ?? 'component';
+  const scope = options.scope ?? 'component';
+  const maxAnchors = options.maxAnchors ?? DEFAULT_MAX_ANCHORS;
   const positions = geometry.getAttribute('position');
   if (!positions || positions.itemSize < 3 || positions.count < 3) return [];
 
@@ -177,12 +205,17 @@ export function buildGeometrySurfaceSnapAnchors(
   const bounds = geometry.boundingBox;
   if (!bounds || bounds.isEmpty()) return [];
 
-  const localStep = localSurfaceSnapStep(cellSize, objectScale);
+  const axisGrids = [
+    buildCenteredAppleCutterAxis('x', bounds.min.x, bounds.max.x, objectScale.x),
+    buildCenteredAppleCutterAxis('y', bounds.min.y, bounds.max.y, objectScale.y),
+    buildCenteredAppleCutterAxis('z', bounds.min.z, bounds.max.z, objectScale.z)
+  ] as const;
   const grids: [number[], number[], number[]] = [
-    gridCoordinates(bounds.min.x, bounds.max.x, localStep.x),
-    gridCoordinates(bounds.min.y, bounds.max.y, localStep.y),
-    gridCoordinates(bounds.min.z, bounds.max.z, localStep.z)
+    axisGrids[0].coordinates,
+    axisGrids[1].coordinates,
+    axisGrids[2].coordinates
   ];
+  const localStep = localSurfaceSnapStep(APPLE_CUTTER_CELL_SIZE, objectScale);
   const index = geometry.getIndex();
   const triangleCount = Math.floor((index ? index.count : positions.count) / 3);
   const anchors: SurfaceSnapAnchor[] = [];
@@ -214,28 +247,6 @@ export function buildGeometrySurfaceSnapAnchors(
       normalForVertex(vertexIndices[2])
     ];
 
-    for (let vertex = 0; vertex < 3; vertex += 1) {
-      const position = trianglePositions[vertex];
-      const normal = triangleNormals[vertex];
-      if (!position || !normal) continue;
-      anchors.push({
-        position: position.clone(),
-        normal: normal.clone()
-      });
-    }
-
-    const centroid = trianglePositions[0].clone()
-      .add(trianglePositions[1])
-      .add(trianglePositions[2])
-      .multiplyScalar(1 / 3);
-    anchors.push({
-      position: centroid,
-      normal: triangleNormals[0].clone()
-        .add(triangleNormals[1])
-        .add(triangleNormals[2])
-        .normalize()
-    });
-
     for (const [firstAxis, secondAxis, solvedAxis] of AXIS_PAIRS) {
       const solvedNormal = component(faceNormal, solvedAxis);
       if (Math.abs(solvedNormal) <= EPSILON) continue;
@@ -244,23 +255,23 @@ export function buildGeometrySurfaceSnapAnchors(
       const firstMaximum = Math.max(...trianglePositions.map((point) => component(point, firstAxis)));
       const secondMinimum = Math.min(...trianglePositions.map((point) => component(point, secondAxis)));
       const secondMaximum = Math.max(...trianglePositions.map((point) => component(point, secondAxis)));
-      const firstValues = grids[firstAxis].filter((value) =>
-        value >= firstMinimum - EPSILON && value <= firstMaximum + EPSILON
-      );
-      const secondValues = grids[secondAxis].filter((value) =>
-        value >= secondMinimum - EPSILON && value <= secondMaximum + EPSILON
-      );
+      const firstValues = grids[firstAxis]
+        .map((value, gridIndex) => ({ value, gridIndex }))
+        .filter(({ value }) => value >= firstMinimum - EPSILON && value <= firstMaximum + EPSILON);
+      const secondValues = grids[secondAxis]
+        .map((value, gridIndex) => ({ value, gridIndex }))
+        .filter(({ value }) => value >= secondMinimum - EPSILON && value <= secondMaximum + EPSILON);
 
-      for (const firstValue of firstValues) {
-        for (const secondValue of secondValues) {
+      for (const firstEntry of firstValues) {
+        for (const secondEntry of secondValues) {
           const point = new THREE.Vector3();
-          setComponent(point, firstAxis, firstValue);
-          setComponent(point, secondAxis, secondValue);
+          setComponent(point, firstAxis, firstEntry.value);
+          setComponent(point, secondAxis, secondEntry.value);
           const solvedValue = component(trianglePositions[0], solvedAxis) - (
             component(faceNormal, firstAxis)
-              * (firstValue - component(trianglePositions[0], firstAxis))
+              * (firstEntry.value - component(trianglePositions[0], firstAxis))
             + component(faceNormal, secondAxis)
-              * (secondValue - component(trianglePositions[0], secondAxis))
+              * (secondEntry.value - component(trianglePositions[0], secondAxis))
           ) / solvedNormal;
           setComponent(point, solvedAxis, solvedValue);
 
@@ -271,16 +282,28 @@ export function buildGeometrySurfaceSnapAnchors(
             trianglePositions[2]
           );
           if (!weights) continue;
+          const coordinates: [number | null, number | null, number | null] = [null, null, null];
+          coordinates[firstAxis] = firstEntry.gridIndex;
+          coordinates[secondAxis] = secondEntry.gridIndex;
           anchors.push({
             position: point,
-            normal: interpolatedNormal(weights, triangleNormals, faceNormal)
+            normal: interpolatedNormal(weights, triangleNormals, faceNormal),
+            cutterCoordinates: coordinates,
+            componentId,
+            scope
           });
         }
       }
     }
   }
 
-  return deduplicateAnchors(anchors, localStep, Math.max(64, maxAnchors));
+  return deduplicateAnchors(
+    anchors,
+    localStep,
+    Math.max(64, maxAnchors),
+    componentId,
+    scope
+  );
 }
 
 export function transformSurfaceSnapAnchors(
@@ -289,6 +312,7 @@ export function transformSurfaceSnapAnchors(
 ): SurfaceSnapAnchor[] {
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrixWorld);
   return anchors.map((anchor) => ({
+    ...anchor,
     position: anchor.position.clone().applyMatrix4(matrixWorld),
     normal: anchor.normal.clone().applyMatrix3(normalMatrix).normalize()
   })).filter(finiteAnchor);
