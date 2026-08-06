@@ -10,11 +10,13 @@ interface CachedComponentRoots {
 }
 
 interface ComponentDefinition {
+  key: string;
   order: number;
   parts: THREE.BufferGeometry[];
 }
 
 interface DirectPart {
+  key: string;
   order: number;
   sourceMesh: THREE.Mesh<THREE.BufferGeometry>;
   geometry: THREE.BufferGeometry;
@@ -184,6 +186,7 @@ function clusterDirectParts(parts: DirectPart[]): ComponentDefinition[] {
   }
 
   return [...groups.values()].map((group) => ({
+    key: [...new Set(group.map((part) => part.key))].sort().join('+'),
     order: Math.min(...group.map((part) => part.order)),
     parts: group.map((part) => part.geometry)
   }));
@@ -207,6 +210,7 @@ function componentRoot(
 ): THREE.Object3D {
   const root = new THREE.Group();
   root.name = 'AppleCutterImportComponent';
+  root.userData.appleCutterComponentKey = definition.key;
   for (const geometry of definition.parts) {
     root.add(new THREE.Mesh(geometry, PLACEHOLDER_MATERIAL));
   }
@@ -280,6 +284,7 @@ export function buildImportedComponentRoots(root: THREE.Object3D): THREE.Object3
     const parts = geometryPartsForNode(mesh, inverseRoot);
     parts.forEach((part, islandIndex) => {
       directParts.push({
+        key: `island-${islandIndex}`,
         order: islandIndex,
         sourceMesh: part.sourceMesh,
         geometry: part.geometry,
@@ -293,6 +298,7 @@ export function buildImportedComponentRoots(root: THREE.Object3D): THREE.Object3
         const parts = geometryPartsForNode(child, inverseRoot);
         parts.forEach((part, islandIndex) => {
           directParts.push({
+            key: islandIndex === 0 ? String(childIndex) : `${childIndex}-island-${islandIndex}`,
             order: childIndex * 100000 + islandIndex,
             sourceMesh: part.sourceMesh,
             geometry: part.geometry,
@@ -306,6 +312,7 @@ export function buildImportedComponentRoots(root: THREE.Object3D): THREE.Object3
         .map((part) => part.geometry);
       if (parts.length > 0) {
         definitions.push({
+          key: String(childIndex),
           order: childIndex * 100000,
           parts
         });
