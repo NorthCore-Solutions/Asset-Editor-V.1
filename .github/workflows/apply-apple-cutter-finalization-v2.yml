@@ -1,0 +1,264 @@
+name: Apply Apple Cutter Finalization V2
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+    paths:
+      - .github/workflows/apply-apple-cutter-finalization-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'feature/apple-cutter-model'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/apple-cutter-model
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Complete migration
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              source = file_path.read_text(encoding='utf-8')
+              if old not in source:
+                  raise SystemExit(f'Expected block not found in {path}: {old[:100]!r}')
+              file_path.write_text(source.replace(old, new, 1), encoding='utf-8')
+
+          import_path = Path('src/editor/snapping/importComponentAnalysis.ts')
+          source = import_path.read_text(encoding='utf-8')
+          source = source.replace(
+              "interface ComponentDefinition {\n  order: number;\n  parts: THREE.BufferGeometry[];\n}",
+              "interface ComponentDefinition {\n  key: string;\n  order: number;\n  parts: THREE.BufferGeometry[];\n}"
+          )
+          source = source.replace(
+              "interface DirectPart {\n  order: number;",
+              "interface DirectPart {\n  key: string;\n  order: number;"
+          )
+          source = source.replace(
+              "  return [...groups.values()].map((group) => ({\n    order: Math.min(...group.map((part) => part.order)),\n    parts: group.map((part) => part.geometry)\n  }));",
+              "  return [...groups.values()].map((group) => ({\n    key: [...new Set(group.map((part) => part.key))].sort().join('+'),\n    order: Math.min(...group.map((part) => part.order)),\n    parts: group.map((part) => part.geometry)\n  }));"
+          )
+          source = source.replace(
+              "  root.name = 'AppleCutterImportComponent';\n",
+              "  root.name = 'AppleCutterImportComponent';\n  root.userData.appleCutterComponentKey = definition.key;\n"
+          )
+          source = source.replace(
+              "      directParts.push({\n        order: islandIndex,",
+              "      directParts.push({\n        key: `island-${islandIndex}`,\n        order: islandIndex,"
+          )
+          source = source.replace(
+              "          directParts.push({\n            order: childIndex * 100000 + islandIndex,",
+              "          directParts.push({\n            key: islandIndex === 0 ? String(childIndex) : `${childIndex}-island-${islandIndex}`,\n            order: childIndex * 100000 + islandIndex,"
+          )
+          source = source.replace(
+              "        definitions.push({\n          order: childIndex * 100000,",
+              "        definitions.push({\n          key: String(childIndex),\n          order: childIndex * 100000,"
+          )
+          required_fragments = [
+              'key: string;',
+              'appleCutterComponentKey = definition.key',
+              'key: `island-${islandIndex}`',
+              'key: String(childIndex)'
+          ]
+          if not all(fragment in source for fragment in required_fragments):
+              raise SystemExit('Stable component-key migration incomplete')
+          import_path.write_text(source, encoding='utf-8')
+
+          object_path = Path('src/editor/snapping/objectSurfaceSnap.ts')
+          source = object_path.read_text(encoding='utf-8')
+          if "import { buildImportedComponentRoots } from './importComponentAnalysis';" not in source:
+              source = source.replace(
+                  "import { buildGeometrySupportPoints } from './surfaceSupport';\n",
+                  "import { buildGeometrySupportPoints } from './surfaceSupport';\nimport { buildImportedComponentRoots } from './importComponentAnalysis';\n"
+              )
+          helper_start = source.find('function containsVisibleMesh(root: THREE.Object3D): boolean {')
+          if helper_start >= 0:
+              helper_end = source.find('\n\nexport function analyzeImportedObject3DSnapTargets(', helper_start)
+              if helper_end < 0:
+                  raise SystemExit('Could not remove containsVisibleMesh helper')
+              source = source[:helper_start] + source[helper_end + 2:]
+          block_start = source.find('  const componentRoots = root.children.filter')
+          if block_start < 0:
+              raise SystemExit('Legacy import component block not found')
+          block_end = source.find('  return {\n    composite,\n    components:', block_start)
+          if block_end < 0:
+              raise SystemExit('Import component return block not found')
+          replacement = """  const componentRoots = buildImportedComponentRoots(root);
+          if (componentRoots.length === 0) {
+            return {
+              composite,
+              components: [rescopeTarget(composite, `${id}:component:0`, 'component')]
+            };
+          }
+
+          const components = componentRoots.flatMap((componentRoot, index) => {
+            const stableKey = componentRoot.userData.appleCutterComponentKey;
+            const componentKey = typeof stableKey === 'string' ? stableKey : String(index);
+            const componentId = `${id}:component:${componentKey}`;
+            const target = surfaceSnapTargetFromObject3D(componentRoot, componentId);
+            return target
+              ? [rescopeTarget(target, componentId, 'component')]
+              : [];
+          });
+"""
+          source = source[:block_start] + replacement + source[block_end:]
+          object_path.write_text(source, encoding='utf-8')
+
+          viewport_path = Path('src/editor/viewport/EditorViewport.tsx')
+          viewport = viewport_path.read_text(encoding='utf-8')
+          viewport = viewport.replace(
+              "import { findFormSurfaceSnap, isFormType } from '../snapping/primitiveSurfaceSnap';",
+              "import { findAppleCutterSurfaceSnap } from '../appleCutter/appleCutterSnap';"
+          )
+          viewport = viewport.replace('findFormSurfaceSnap(', 'findAppleCutterSurfaceSnap(')
+          viewport = viewport.replace('if (snap.surface && isFormType(object.type)) {', 'if (snap.surface) {')
+          viewport = viewport.replace("    && isFormType(object.type)\n", '')
+          if 'primitiveSurfaceSnap' in viewport or 'isFormType' in viewport or 'findFormSurfaceSnap' in viewport:
+              raise SystemExit('Legacy viewport snap references remain')
+          viewport_path.write_text(viewport, encoding='utf-8')
+
+          swept_path = Path('tests/sweptObjectSurfaceSnap.test.ts')
+          swept = swept_path.read_text(encoding='utf-8')
+          swept = swept.replace(
+              "import { findFormSurfaceSnap } from '../src/editor/snapping/primitiveSurfaceSnap';",
+              "import { findAppleCutterSurfaceSnap } from '../src/editor/appleCutter/appleCutterSnap';"
+          )
+          swept = swept.replace('findFormSurfaceSnap', 'findAppleCutterSurfaceSnap')
+          swept_path.write_text(swept, encoding='utf-8')
+
+          composite_path = Path('tests/appleCutterComposite.test.ts')
+          test = composite_path.read_text(encoding='utf-8')
+          test_start = test.find("  it('behandelt direkte Mesh-Nodes")
+          test_end = test.find("\n\n  it('behält Komponenten-IDs", test_start)
+          if test_start < 0 or test_end < 0:
+              raise SystemExit('Direct-mesh import test block not found')
+          replacement_tests = """  it('fasst berührende direkte Mesh-Nodes als eine logische Komponente zusammen', () => {
+            const root = new THREE.Group();
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.2));
+            wall.position.x = -0.5;
+            const roof = new THREE.Mesh(new THREE.ConeGeometry(0.8, 0.7, 4));
+            roof.position.set(0.4, 0.8, 0);
+            root.add(wall, roof);
+
+            const analysis = analyzeImportedObject3DSnapTargets(root, 'imported-house');
+
+            expect(analysis.composite?.scope).toBe('composite');
+            expect(analysis.components).toHaveLength(1);
+            expect(analysis.components[0]?.scope).toBe('component');
+            expect(analysis.components[0]?.anchors.length).toBeGreaterThan(0);
+            wall.geometry.dispose();
+            roof.geometry.dispose();
+          });
+
+          it('erzeugt bei berührenden Materialaufteilungen keine Scheinkomponenten', () => {
+            const root = new THREE.Group();
+            const left = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1, 1));
+            const right = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1, 1));
+            left.position.x = -0.25;
+            right.position.x = 0.25;
+            root.add(left, right);
+
+            const analysis = analyzeImportedObject3DSnapTargets(root, 'material-split');
+
+            expect(analysis.components).toHaveLength(1);
+            left.geometry.dispose();
+            right.geometry.dispose();
+          });
+
+          it('erkennt getrennte Dreiecksinseln eines einzelnen Meshes als Komponenten', () => {
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+              0, 0, 0, 1, 0, 0, 0, 1, 0,
+              3, 0, 0, 4, 0, 0, 3, 1, 0
+            ], 3));
+            geometry.computeVertexNormals();
+            const root = new THREE.Mesh(geometry);
+
+            const analysis = analyzeImportedObject3DSnapTargets(root, 'island-import');
+
+            expect(analysis.composite).not.toBeNull();
+            expect(analysis.components).toHaveLength(2);
+            expect(new Set(analysis.components.map((target) => target.id)).size).toBe(2);
+            geometry.dispose();
+          });"""
+          test = test[:test_start] + replacement_tests + test[test_end:]
+          test = test.replace(
+              "    const meshes = Array.from({ length: 3 }, () => (\n      new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1))\n    ));",
+              "    const meshes = Array.from({ length: 3 }, (_, index) => {\n      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));\n      mesh.position.x = index * 2;\n      return mesh;\n    });"
+          )
+          composite_path.write_text(test, encoding='utf-8')
+
+          for legacy in [
+              Path('src/editor/snapping/primitiveSurfaceSnap.ts'),
+              Path('.github/workflows/apply-apple-cutter-finalization.yml'),
+              Path('.github/workflows/apply-apple-cutter-finalization-v2.yml')
+          ]:
+              if legacy.exists():
+                  legacy.unlink()
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Commit verified migration
+        run: |
+          git config user.name "NorthCore Automation"
+          git config user.email "automation@northcore-eu.de"
+          git add -A \
+            src/editor/appleCutter \
+            src/editor/snapping/importComponentAnalysis.ts \
+            src/editor/snapping/objectSurfaceSnap.ts \
+            src/editor/snapping/primitiveSurfaceSnap.ts \
+            src/editor/viewport/EditorViewport.tsx \
+            tests/appleCutterComposite.test.ts \
+            tests/objectSurfaceSnap.test.ts \
+            tests/sweptObjectSurfaceSnap.test.ts \
+            .github/workflows/apply-apple-cutter-finalization.yml \
+            .github/workflows/apply-apple-cutter-finalization-v2.yml
+          git commit -m "Apfelschneider-Migration vollständig abschließen"
+          git push origin HEAD:feature/apple-cutter-model
+
+      - name: Upload verified debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-editor-apple-cutter-final-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
