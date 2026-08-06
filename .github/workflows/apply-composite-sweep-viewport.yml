@@ -1,0 +1,63 @@
+name: Apply Composite Sweep Viewport
+
+on:
+  push:
+    branches:
+      - feature/apple-cutter-model
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/apple-cutter-model
+          fetch-depth: 0
+      - name: Connect previous composite target
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/editor/viewport/EditorViewport.tsx')
+          source = path.read_text(encoding='utf-8')
+          live_marker = """    const liveObjects = useEditorStore.getState().objects;
+    const transformedObjects = new Map<string, SceneObjectData>();
+"""
+          live_replacement = """    const liveObjects = useEditorStore.getState().objects;
+    const previousSelectedObjects = selectedIds.flatMap((id) => {
+      const storedObject = liveObjects.find((object) => object.id === id);
+      return storedObject ? [storedObject] : [];
+    });
+    const previousCompositeTarget = tool === 'translate' && snap.surface
+      ? surfaceSnapTargetFromSceneObjects(previousSelectedObjects, 'selected-composite')
+      : null;
+    const transformedObjects = new Map<string, SceneObjectData>();
+"""
+          if live_marker not in source:
+              raise SystemExit('Live-Objektblock nicht gefunden')
+          source = source.replace(live_marker, live_replacement, 1)
+
+          old_call = """          drag.surfaceSnapSession,
+          Math.min(0.12, Math.max(0.04, Math.abs(snap.position) * 0.4))
+        );"""
+          new_call = """          drag.surfaceSnapSession,
+          snap.position,
+          previousCompositeTarget
+        );"""
+          if old_call not in source:
+              raise SystemExit('Composite-Aufruf nicht gefunden')
+          source = source.replace(old_call, new_call, 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+      - name: Commit patch and remove temporary workflow
+        run: |
+          git rm .github/workflows/apply-composite-sweep-viewport.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/editor/viewport/EditorViewport.tsx
+          git commit -m "Composite-Sweep an vorherige Gruppenposition koppeln"
+          git push origin HEAD:feature/apple-cutter-model
