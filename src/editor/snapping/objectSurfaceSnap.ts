@@ -1,6 +1,8 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createGeometry } from '../../geometry/factory';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
+import { APPLE_CUTTER_CELL_SIZE } from '../appleCutter/appleCutterAxisGrid';
 import {
   buildGeometrySurfaceSnapAnchors,
   transformSurfaceSnapAnchors,
@@ -18,6 +20,8 @@ export interface ObjectSurfaceSnapResult {
   position: Vec3;
   targetId: string | null;
   distance: number;
+  sourceAnchorId?: string | null;
+  targetAnchorId?: string | null;
 }
 
 export interface SurfaceSnapTarget {
@@ -26,6 +30,7 @@ export interface SurfaceSnapTarget {
   localBounds: THREE.Box3;
   matrixWorld: THREE.Matrix4;
   anchors: SurfaceSnapAnchor[];
+  scope?: 'component' | 'composite';
 }
 
 function finiteBounds(bounds: THREE.Box3): boolean {
@@ -47,20 +52,19 @@ function matrixForSceneObject(object: SceneObjectData): THREE.Matrix4 {
   );
 }
 
-function geometryCacheKey(object: SceneObjectData, cellSize: number): string {
+function geometryCacheKey(object: SceneObjectData): string {
   return JSON.stringify({
     type: object.type,
     geometry: object.geometry,
     scale: object.scale.map((value) => Number(Math.abs(value).toFixed(6))),
-    cellSize: Number(Math.abs(cellSize).toFixed(6))
+    cutterCellSize: APPLE_CUTTER_CELL_SIZE
   });
 }
 
 function cachedSceneTopology(
-  object: SceneObjectData,
-  cellSize: number
+  object: SceneObjectData
 ): { localBounds: THREE.Box3; anchors: SurfaceSnapAnchor[] } | null {
-  const key = geometryCacheKey(object, cellSize);
+  const key = geometryCacheKey(object);
   const cached = topologyCache.get(key);
   if (cached) {
     topologyCache.delete(key);
@@ -78,8 +82,9 @@ function cachedSceneTopology(
     if (!localBounds || !finiteBounds(localBounds)) return null;
     const anchors = buildGeometrySurfaceSnapAnchors(
       geometry,
-      cellSize,
-      new THREE.Vector3(...object.scale)
+      APPLE_CUTTER_CELL_SIZE,
+      new THREE.Vector3(...object.scale),
+      { componentId: object.id, scope: 'component' }
     );
     if (anchors.length === 0) return null;
 
@@ -100,16 +105,17 @@ function cachedSceneTopology(
 
 export function surfaceSnapTargetFromSceneObject(
   object: SceneObjectData,
-  cellSize: number = 0.25
+  _cellSize: number = APPLE_CUTTER_CELL_SIZE
 ): SurfaceSnapTarget | null {
-  const topology = cachedSceneTopology(object, cellSize);
+  const topology = cachedSceneTopology(object);
   if (!topology) return null;
   return {
     id: object.id,
     visible: object.visible,
     localBounds: topology.localBounds,
     matrixWorld: matrixForSceneObject(object),
-    anchors: topology.anchors
+    anchors: topology.anchors,
+    scope: 'component'
   };
 }
 
@@ -119,41 +125,130 @@ function matrixScale(matrix: THREE.Matrix4): THREE.Vector3 {
   return scale;
 }
 
+function nonIndexedClone(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const clone = geometry.clone();
+  if (!clone.index) return clone;
+  const nonIndexed = clone.toNonIndexed();
+  clone.dispose();
+  return nonIndexed;
+}
+
+function mergedGeometry(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return parts[0] ?? null;
+  return mergeGeometries(parts, false);
+}
+
+/**
+ * Importierte Mehrfach-Mesh-Modelle erhalten ein gemeinsames äußeres
+ * Apfelschneider-Raster. Material- oder Node-Grenzen erzeugen dadurch nicht
+ * automatisch voneinander abweichende Snap-Raster.
+ */
 export function surfaceSnapTargetFromObject3D(
   root: THREE.Object3D,
   id: string = root.uuid,
-  cellSize: number = 0.25
+  _cellSize: number = APPLE_CUTTER_CELL_SIZE
 ): SurfaceSnapTarget | null {
   root.updateWorldMatrix(true, true);
   const inverseRootMatrix = root.matrixWorld.clone().invert();
-  const localBounds = new THREE.Box3().makeEmpty();
-  const anchors: SurfaceSnapAnchor[] = [];
+  const parts: THREE.BufferGeometry[] = [];
 
   root.traverseVisible((child) => {
     const mesh = child as THREE.Mesh<THREE.BufferGeometry>;
     if (!mesh.isMesh || !mesh.geometry) return;
-
-    const childAnchors = buildGeometrySurfaceSnapAnchors(
-      mesh.geometry,
-      cellSize,
-      matrixScale(mesh.matrixWorld)
-    );
-    const meshToRoot = inverseRootMatrix.clone().multiply(mesh.matrixWorld);
-    const transformed = transformSurfaceSnapAnchors(childAnchors, meshToRoot);
-    for (const anchor of transformed) {
-      anchors.push(anchor);
-      localBounds.expandByPoint(anchor.position);
-    }
+    const geometry = nonIndexedClone(mesh.geometry);
+    geometry.applyMatrix4(inverseRootMatrix.clone().multiply(mesh.matrixWorld));
+    geometry.computeVertexNormals();
+    parts.push(geometry);
   });
 
-  if (!finiteBounds(localBounds) || anchors.length === 0) return null;
-  return {
-    id,
-    visible: root.visible,
-    localBounds,
-    matrixWorld: root.matrixWorld.clone(),
-    anchors
-  };
+  const geometry = mergedGeometry(parts);
+  if (!geometry) return null;
+  try {
+    geometry.computeBoundingBox();
+    const localBounds = geometry.boundingBox?.clone();
+    if (!localBounds || !finiteBounds(localBounds)) return null;
+    const anchors = buildGeometrySurfaceSnapAnchors(
+      geometry,
+      APPLE_CUTTER_CELL_SIZE,
+      matrixScale(root.matrixWorld),
+      { componentId: id, scope: 'composite' }
+    );
+    if (anchors.length === 0) return null;
+    return {
+      id,
+      visible: root.visible,
+      localBounds,
+      matrixWorld: root.matrixWorld.clone(),
+      anchors,
+      scope: 'composite'
+    };
+  } finally {
+    geometry.dispose();
+    for (const part of parts) {
+      if (part !== geometry) part.dispose();
+    }
+  }
+}
+
+/**
+ * Erzeugt das äußere Raster einer Editor-Gruppe. Die vorhandenen
+ * Komponentenraster bleiben davon unabhängig erhalten.
+ */
+export function surfaceSnapTargetFromSceneObjects(
+  objects: readonly SceneObjectData[],
+  id: string = 'composite'
+): SurfaceSnapTarget | null {
+  const visibleObjects = objects.filter((object) => object.visible);
+  if (visibleObjects.length === 0) return null;
+
+  const worldParts: THREE.BufferGeometry[] = [];
+  const worldBounds = new THREE.Box3().makeEmpty();
+  for (const object of visibleObjects) {
+    const geometry = nonIndexedClone(createGeometry(object));
+    geometry.applyMatrix4(matrixForSceneObject(object));
+    geometry.computeBoundingBox();
+    if (geometry.boundingBox) worldBounds.union(geometry.boundingBox);
+    worldParts.push(geometry);
+  }
+  if (!finiteBounds(worldBounds)) {
+    worldParts.forEach((part) => part.dispose());
+    return null;
+  }
+
+  const center = worldBounds.getCenter(new THREE.Vector3());
+  for (const part of worldParts) part.translate(-center.x, -center.y, -center.z);
+  const geometry = mergedGeometry(worldParts);
+  if (!geometry) {
+    worldParts.forEach((part) => part.dispose());
+    return null;
+  }
+
+  try {
+    geometry.computeBoundingBox();
+    const localBounds = geometry.boundingBox?.clone();
+    if (!localBounds || !finiteBounds(localBounds)) return null;
+    const anchors = buildGeometrySurfaceSnapAnchors(
+      geometry,
+      APPLE_CUTTER_CELL_SIZE,
+      new THREE.Vector3(1, 1, 1),
+      { componentId: id, scope: 'composite' }
+    );
+    if (anchors.length === 0) return null;
+    return {
+      id,
+      visible: true,
+      localBounds,
+      matrixWorld: new THREE.Matrix4().makeTranslation(center.x, center.y, center.z),
+      anchors,
+      scope: 'composite'
+    };
+  } finally {
+    geometry.dispose();
+    for (const part of worldParts) {
+      if (part !== geometry) part.dispose();
+    }
+  }
 }
 
 function expandedWorldBounds(target: SurfaceSnapTarget, amount: number): THREE.Box3 {
@@ -214,42 +309,34 @@ function anchorsCanMeet(
   return source.normal.dot(target.normal) <= -0.12;
 }
 
-export function findObjectSurfaceSnap(
-  source: SceneObjectData,
-  objects: SceneObjectData[],
-  positionStep: number,
-  additionalTargets: readonly SurfaceSnapTarget[] = []
+export function findSurfaceTargetSnap(
+  sourceTarget: SurfaceSnapTarget,
+  targets: readonly SurfaceSnapTarget[],
+  sourcePosition: THREE.Vector3,
+  worldThreshold: number = 0.12
 ): ObjectSurfaceSnapResult {
   const unchanged: ObjectSurfaceSnapResult = {
-    position: [...source.position] as Vec3,
+    position: [sourcePosition.x, sourcePosition.y, sourcePosition.z],
     targetId: null,
-    distance: Number.POSITIVE_INFINITY
+    distance: Number.POSITIVE_INFINITY,
+    sourceAnchorId: null,
+    targetAnchorId: null
   };
-  const worldThreshold = Math.max(0.4, Math.abs(positionStep) * 2);
-  const sourceTarget = surfaceSnapTargetFromSceneObject(source, positionStep);
-  if (!sourceTarget) return unchanged;
-
   const sourceWorldAnchors = transformSurfaceSnapAnchors(
     sourceTarget.anchors,
     sourceTarget.matrixWorld
   );
   const sourceWorldBounds = expandedWorldBounds(sourceTarget, worldThreshold);
-  const targets = [
-    ...objects.flatMap((object) => {
-      const target = surfaceSnapTargetFromSceneObject(object, positionStep);
-      return target ? [target] : [];
-    }),
-    ...additionalTargets
-  ];
-  const sourcePosition = new THREE.Vector3(...source.position);
   let bestCorrection: THREE.Vector3 | null = null;
   let bestTargetId: string | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   let bestNormalAlignment = Number.POSITIVE_INFINITY;
+  let bestSourceAnchorId: string | null = null;
+  let bestTargetAnchorId: string | null = null;
 
   for (const target of targets) {
     if (
-      target.id === source.id
+      target.id === sourceTarget.id
       || !target.visible
       || target.anchors.length === 0
       || !sourceWorldBounds.intersectsBox(expandedWorldBounds(target, worldThreshold))
@@ -275,17 +362,53 @@ export function findObjectSurfaceSnap(
         bestTargetId = target.id;
         bestDistance = distance;
         bestNormalAlignment = normalAlignment;
+        bestSourceAnchorId = sourceAnchor.id ?? null;
+        bestTargetAnchorId = targetAnchor.id ?? null;
       }
     }
   }
 
   if (!bestCorrection) return unchanged;
-  const snappedPosition = sourcePosition.add(bestCorrection);
+  const snappedPosition = sourcePosition.clone().add(bestCorrection);
   return {
     position: [snappedPosition.x, snappedPosition.y, snappedPosition.z],
     targetId: bestTargetId,
-    distance: bestDistance
+    distance: bestDistance,
+    sourceAnchorId: bestSourceAnchorId,
+    targetAnchorId: bestTargetAnchorId
   };
+}
+
+export function findObjectSurfaceSnap(
+  source: SceneObjectData,
+  objects: SceneObjectData[],
+  positionStep: number,
+  additionalTargets: readonly SurfaceSnapTarget[] = []
+): ObjectSurfaceSnapResult {
+  const sourceTarget = surfaceSnapTargetFromSceneObject(source);
+  if (!sourceTarget) {
+    return {
+      position: [...source.position] as Vec3,
+      targetId: null,
+      distance: Number.POSITIVE_INFINITY,
+      sourceAnchorId: null,
+      targetAnchorId: null
+    };
+  }
+  const threshold = Math.min(0.12, Math.max(0.04, Math.abs(positionStep) * 0.4));
+  const targets = [
+    ...objects.flatMap((object) => {
+      const target = surfaceSnapTargetFromSceneObject(object);
+      return target ? [target] : [];
+    }),
+    ...additionalTargets
+  ];
+  return findSurfaceTargetSnap(
+    sourceTarget,
+    targets,
+    new THREE.Vector3(...source.position),
+    threshold
+  );
 }
 
 export function snapObjectToObjectSurfaces(
