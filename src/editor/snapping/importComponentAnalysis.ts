@@ -37,7 +37,7 @@ function splitGeometryIslands(source: THREE.BufferGeometry): THREE.BufferGeometr
   if (geometry !== clone) clone.dispose();
 
   const positions = geometry.getAttribute('position');
-  const triangleCount = positions?.itemSize >= 3
+  const triangleCount = positions && positions.itemSize >= 3
     ? Math.floor(positions.count / 3)
     : 0;
   if (!positions || triangleCount === 0) {
