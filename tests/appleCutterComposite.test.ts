@@ -105,6 +105,27 @@ describe('automatische Importvorbereitung', () => {
     roofMesh.geometry.dispose();
   });
 
+  it('begrenzt große Mehrfach-Mesh-Importe und verwendet deren Composite-Cache wieder', () => {
+    const root = new THREE.Group();
+    const meshes = Array.from({ length: 12 }, (_, index) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+      mesh.position.set(index * 1.2, (index % 3) * 0.15, 0);
+      root.add(mesh);
+      return mesh;
+    });
+
+    const first = analyzeImportedObject3DSnapTargets(root, 'large-import');
+    const second = analyzeImportedObject3DSnapTargets(root, 'large-import');
+
+    expect(first.composite).not.toBeNull();
+    expect(first.components).toHaveLength(12);
+    expect(new Set(first.components.map((target) => target.id)).size).toBe(12);
+    expect(first.composite?.anchors.length).toBeLessThanOrEqual(16384);
+    expect(second.composite?.anchors).toBe(first.composite?.anchors);
+
+    meshes.forEach((mesh) => mesh.geometry.dispose());
+  });
+
   it('behält für ein einzelnes Root-Mesh genau ein Komponentenraster', () => {
     const root = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
 
