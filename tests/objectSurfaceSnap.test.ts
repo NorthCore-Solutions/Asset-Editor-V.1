@@ -22,10 +22,13 @@ const withPosition = (object: SceneObjectData, position: Vec3): SceneObjectData 
   position
 });
 
-interface SnapPair {
-  source: SceneObjectData;
+interface AnchorPair {
+  sourceAnchor: SurfaceSnapAnchor;
   targetAnchor: SurfaceSnapAnchor;
-  sourceAnchorId: string;
+}
+
+interface SnapPair extends AnchorPair {
+  source: SceneObjectData;
 }
 
 function worldAnchors(object: SceneObjectData): SurfaceSnapAnchor[] {
@@ -34,51 +37,58 @@ function worldAnchors(object: SceneObjectData): SurfaceSnapAnchor[] {
   return transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
 }
 
-function rightFacingPair(
+function bestOpposingPair(
+  sourceAnchors: readonly SurfaceSnapAnchor[],
+  targetAnchors: readonly SurfaceSnapAnchor[],
+  label: string
+): AnchorPair {
+  let bestSource: SurfaceSnapAnchor | null = null;
+  let bestTarget: SurfaceSnapAnchor | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const targetAnchor of targetAnchors) {
+    for (const sourceAnchor of sourceAnchors) {
+      const alignment = sourceAnchor.normal.dot(targetAnchor.normal);
+      if (alignment > -0.12) continue;
+      const cardinality = Math.max(
+        Math.abs(targetAnchor.normal.x),
+        Math.abs(targetAnchor.normal.y),
+        Math.abs(targetAnchor.normal.z)
+      );
+      const score = (1 + alignment) * 100 + (1 - cardinality);
+      if (score >= bestScore) continue;
+      bestScore = score;
+      bestSource = sourceAnchor;
+      bestTarget = targetAnchor;
+    }
+  }
+
+  if (!bestSource?.id || !bestTarget?.id) {
+    throw new Error(`Kein gegengerichtetes Apfelschneider-Punktpaar für ${label}`);
+  }
+  return { sourceAnchor: bestSource, targetAnchor: bestTarget };
+}
+
+function positionedPair(
   source: SceneObjectData,
   target: SceneObjectData,
   gap: number = GAP
 ): SnapPair {
-  const targetAnchors = worldAnchors(target)
-    .filter((anchor) => anchor.normal.x > 0.35);
-  const sourceAnchors = worldAnchors(source)
-    .filter((anchor) => anchor.normal.x < -0.35);
-  if (targetAnchors.length === 0 || sourceAnchors.length === 0) {
-    throw new Error(`Kein seitliches Punktpaar für ${target.type}`);
-  }
-
-  let bestTarget = targetAnchors[0];
-  let bestSource = sourceAnchors[0];
-  let bestScore = Number.POSITIVE_INFINITY;
-  for (const targetAnchor of targetAnchors) {
-    for (const sourceAnchor of sourceAnchors) {
-      const normalScore = 1 + targetAnchor.normal.dot(sourceAnchor.normal);
-      const tangentialScore = Math.hypot(
-        targetAnchor.position.y - sourceAnchor.position.y,
-        targetAnchor.position.z - sourceAnchor.position.z
-      );
-      const score = normalScore * 10 + tangentialScore;
-      if (score >= bestScore) continue;
-      bestScore = score;
-      bestTarget = targetAnchor;
-      bestSource = sourceAnchor;
-    }
-  }
-  if (!bestTarget || !bestSource?.id) {
-    throw new Error(`Ungültiges Punktpaar für ${target.type}`);
-  }
-
-  const desiredSourceAnchor = bestTarget.position.clone()
-    .addScaledVector(bestTarget.normal, gap);
-  const translation = desiredSourceAnchor.sub(bestSource.position);
+  const pair = bestOpposingPair(
+    worldAnchors(source),
+    worldAnchors(target),
+    target.type
+  );
+  const desiredSourceAnchor = pair.targetAnchor.position.clone()
+    .addScaledVector(pair.targetAnchor.normal, gap);
+  const translation = desiredSourceAnchor.sub(pair.sourceAnchor.position);
   return {
+    ...pair,
     source: withPosition(source, [
       source.position[0] + translation.x,
       source.position[1] + translation.y,
       source.position[2] + translation.z
-    ]),
-    targetAnchor: bestTarget,
-    sourceAnchorId: bestSource.id
+    ])
   };
 }
 
@@ -131,7 +141,7 @@ describe.each(['Desktop', 'Android'])('allgemeiner Oberflächen-Snap auf %s', (p
     ({ type }) => {
       const target = createSceneObject(type);
       target.id = `${platform}-target-${type}`;
-      const pair = rightFacingPair(createSceneObject(type), target);
+      const pair = positionedPair(createSceneObject(type), target);
       pair.source.id = `${platform}-source-${type}`;
       const result = findObjectSurfaceSnap(pair.source, [target], STEP);
 
@@ -166,36 +176,14 @@ describe('Skalier-Snap für alle registrierten Elemente', () => {
     };
     const target = createSceneObject(type);
     target.id = `scale-target-${type}`;
-
-    const candidateAnchors = worldAnchors(candidate)
-      .filter((anchor) => anchor.normal.x > 0.35);
-    const targetAnchors = worldAnchors(target)
-      .filter((anchor) => anchor.normal.x < -0.35);
-    if (candidateAnchors.length === 0 || targetAnchors.length === 0) {
-      throw new Error(`Kein Skalier-Punktpaar für ${type}`);
-    }
-
-    let sourceAnchor = candidateAnchors[0];
-    let targetAnchor = targetAnchors[0];
-    let bestScore = Number.POSITIVE_INFINITY;
-    for (const candidateAnchor of candidateAnchors) {
-      for (const candidateTarget of targetAnchors) {
-        const score = (1 + candidateAnchor.normal.dot(candidateTarget.normal)) * 10
-          + Math.hypot(
-            candidateAnchor.position.y - candidateTarget.position.y,
-            candidateAnchor.position.z - candidateTarget.position.z
-          );
-        if (score >= bestScore) continue;
-        bestScore = score;
-        sourceAnchor = candidateAnchor;
-        targetAnchor = candidateTarget;
-      }
-    }
-    if (!sourceAnchor || !targetAnchor) throw new Error(`Ungültiges Skalier-Punktpaar für ${type}`);
-
-    const desiredTargetAnchor = sourceAnchor.position.clone()
-      .addScaledVector(sourceAnchor.normal, GAP);
-    const targetTranslation = desiredTargetAnchor.sub(targetAnchor.position);
+    const pair = bestOpposingPair(
+      worldAnchors(candidate),
+      worldAnchors(target),
+      type
+    );
+    const desiredTargetAnchor = pair.sourceAnchor.position.clone()
+      .addScaledVector(pair.sourceAnchor.normal, GAP);
+    const targetTranslation = desiredTargetAnchor.sub(pair.targetAnchor.position);
     target.position = [
       target.position[0] + targetTranslation.x,
       target.position[1] + targetTranslation.y,
