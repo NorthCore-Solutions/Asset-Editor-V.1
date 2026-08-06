@@ -30,5 +30,6 @@ export interface AppleCutterDefinition {
   };
   center: Vec3;
   standardStep: Vec3;
+  baseCutCount: readonly [4, 4, 4];
   scope: AppleCutterScope;
 }
