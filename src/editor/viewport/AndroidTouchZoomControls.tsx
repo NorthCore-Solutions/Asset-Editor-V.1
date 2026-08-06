@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEditorStore } from '../../store/editorStore';
 import { calculatePinchZoomStep } from './androidPinchZoomMath';
-import {
-  syncDraggingTranslateProxy,
-  worldPivotForSceneObject
-} from './androidTransformProxySync';
 import {
   combineWorldBounds,
   worldBoundsFromSceneObject,
@@ -41,21 +37,10 @@ export function AndroidTouchZoomControls({
 }: AndroidTouchZoomControlsProps) {
   const camera = useThree((state) => state.camera);
   const gl = useThree((state) => state.gl);
-  const scene = useThree((state) => state.scene);
   const controls = useThree((state) => state.controls) as unknown as OrbitControlApi | undefined;
   const objects = useEditorStore((state) => state.objects);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const boundsRef = useRef<THREE.Box3 | null>(null);
-
-  const selectedObject = useMemo(() => (
-    selectedIds.length === 1
-      ? objects.find((object) => object.id === selectedIds[0] && object.visible)
-      : undefined
-  ), [objects, selectedIds]);
-
-  const selectedPivot = useMemo(() => (
-    selectedObject ? worldPivotForSceneObject(selectedObject) : null
-  ), [selectedObject]);
 
   const selectedBounds = useMemo(() => {
     const entries: Array<THREE.Box3 | null | undefined> = objects
@@ -67,11 +52,6 @@ export function AndroidTouchZoomControls({
 
     return combineWorldBounds(entries);
   }, [objects, resolveAdditionalBounds, selectedIds]);
-
-  useFrame(() => {
-    if (!selectedPivot) return;
-    syncDraggingTranslateProxy(scene, selectedPivot);
-  });
 
   useEffect(() => {
     boundsRef.current = selectedBounds?.clone() ?? null;
