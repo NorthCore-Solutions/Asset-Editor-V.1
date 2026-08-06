@@ -23,6 +23,12 @@ interface SweepCandidate {
   travel: number;
   lateralDistance: number;
   normalAlignment: number;
+  sourceAnchorId: string | null;
+  targetAnchorId: string | null;
+}
+
+export interface SweptObjectSurfaceSnapOptions {
+  ignoredTargetAnchorId?: string | null;
 }
 
 interface ContactNormals {
@@ -184,7 +190,8 @@ export function findSweptObjectSurfaceSnap(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
   positionStep: number,
-  additionalTargets: readonly SurfaceSnapTarget[] = []
+  additionalTargets: readonly SurfaceSnapTarget[] = [],
+  options: SweptObjectSurfaceSnapOptions = {}
 ): ObjectSurfaceSnapResult | null {
   const previous = previousTranslatedSource(source, objects);
   if (!previous) return null;
@@ -243,6 +250,11 @@ export function findSweptObjectSurfaceSnap(
       segmentBounds.intersect(expandedTargetBounds);
 
       for (const targetAnchor of anchorsInsideBounds(targetHash, segmentBounds, hashCellSize)) {
+        if (
+          options.ignoredTargetAnchorId
+          && targetAnchor.id === options.ignoredTargetAnchorId
+        ) continue;
+
         const normals = contactNormals(
           currentAnchor,
           targetAnchor,
@@ -286,7 +298,9 @@ export function findSweptObjectSurfaceSnap(
           distance: Math.abs(correctionAlongMovement),
           travel,
           lateralDistance,
-          normalAlignment: normals.source.dot(normals.target)
+          normalAlignment: normals.source.dot(normals.target),
+          sourceAnchorId: currentAnchor.id ?? null,
+          targetAnchorId: targetAnchor.id ?? null
         };
         if (betterCandidate(candidate, best)) best = candidate;
       }
@@ -297,7 +311,9 @@ export function findSweptObjectSurfaceSnap(
     ? {
       position: best.position,
       targetId: best.targetId,
-      distance: best.distance
+      distance: best.distance,
+      sourceAnchorId: best.sourceAnchorId,
+      targetAnchorId: best.targetAnchorId
     }
     : null;
 }
