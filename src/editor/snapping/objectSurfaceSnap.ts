@@ -437,19 +437,21 @@ export function analyzeImportedObject3DSnapTargets(
   const composite = surfaceSnapTargetFromObject3D(root, id);
   if (!composite) return { composite: null, components: [] };
 
-  const meshChildren = root.children.filter((child) => child.visible && containsVisibleMesh(child));
-  const explicitGroups = meshChildren.filter((child) => !(child as THREE.Mesh).isMesh);
-  if (explicitGroups.length === 0) {
+  const componentRoots = root.children.filter((child) => (
+    child.visible && containsVisibleMesh(child)
+  ));
+  if (componentRoots.length === 0) {
     return {
       composite,
       components: [rescopeTarget(composite, `${id}:component:0`, 'component')]
     };
   }
 
-  const components = meshChildren.flatMap((child, index) => {
-    const target = surfaceSnapTargetFromObject3D(child, `${id}:component:${index}`);
+  const components = componentRoots.flatMap((child, index) => {
+    const componentId = `${id}:component:${index}`;
+    const target = surfaceSnapTargetFromObject3D(child, componentId);
     return target
-      ? [rescopeTarget(target, `${id}:component:${index}`, 'component')]
+      ? [rescopeTarget(target, componentId, 'component')]
       : [];
   });
   return {
