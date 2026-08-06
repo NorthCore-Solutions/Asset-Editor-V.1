@@ -5,6 +5,7 @@ import type { SceneObjectData, Vec3 } from '../../types/editor';
 import { APPLE_CUTTER_CELL_SIZE } from '../appleCutter/appleCutterAxisGrid';
 import type { AppleCutterScope } from '../appleCutter/appleCutterTypes';
 import { removeOpposingCoincidentAnchors } from './compositeAnchorFilter';
+import { buildGeometrySupportPoints } from './surfaceSupport';
 import {
   buildGeometrySurfaceSnapAnchors,
   transformSurfaceSnapAnchors,
@@ -19,6 +20,7 @@ const INSIDE_RAY_DIRECTION = new THREE.Vector3(1, 0.371, 0.613).normalize();
 interface CachedTopology {
   localBounds: THREE.Box3;
   anchors: SurfaceSnapAnchor[];
+  supportPoints: THREE.Vector3[];
 }
 
 interface ImportedTopologyCacheEntry extends CachedTopology {
@@ -44,6 +46,7 @@ export interface SurfaceSnapTarget {
   localBounds: THREE.Box3;
   matrixWorld: THREE.Matrix4;
   anchors: SurfaceSnapAnchor[];
+  supportPoints?: THREE.Vector3[];
   scope?: AppleCutterScope;
 }
 
@@ -109,7 +112,8 @@ function cachedSceneTopology(object: SceneObjectData): CachedTopology | null {
     topologyCache.set(key, cached);
     return {
       localBounds: cached.localBounds.clone(),
-      anchors: cached.anchors
+      anchors: cached.anchors,
+      supportPoints: cached.supportPoints
     };
   }
 
@@ -124,13 +128,15 @@ function cachedSceneTopology(object: SceneObjectData): CachedTopology | null {
       new THREE.Vector3(...object.scale),
       { componentId: object.id, scope: 'component' }
     );
-    if (anchors.length === 0) return null;
+    const supportPoints = buildGeometrySupportPoints(geometry);
+    if (anchors.length === 0 || supportPoints.length === 0) return null;
 
-    const topology = { localBounds, anchors };
+    const topology = { localBounds, anchors, supportPoints };
     rememberLru(topologyCache, key, topology, TOPOLOGY_CACHE_LIMIT);
     return {
       localBounds: localBounds.clone(),
-      anchors
+      anchors,
+      supportPoints
     };
   } finally {
     geometry.dispose();
@@ -150,6 +156,7 @@ export function surfaceSnapTargetFromSceneObject(
     localBounds: topology.localBounds,
     matrixWorld: matrixForSceneObject(object),
     anchors: topology.anchors,
+    supportPoints: topology.supportPoints,
     scope: 'component'
   };
 }
@@ -259,7 +266,6 @@ function externalCompositeAnchors(
   if (closedParts.length < 2) return anchors;
 
   const exteriorCandidates = removeOpposingCoincidentAnchors(anchors);
-
   const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
   const probes: ClosedPartProbe[] = closedParts.map((part) => {
     part.computeBoundingBox();
@@ -304,7 +310,10 @@ function compositeTopologyFromParts(
       { componentId: id, scope: 'composite', maxAnchors: 16384 }
     );
     const anchors = externalCompositeAnchors(rawAnchors, parts);
-    return anchors.length > 0 ? { localBounds, anchors } : null;
+    const supportPoints = buildGeometrySupportPoints(geometry);
+    return anchors.length > 0 && supportPoints.length > 0
+      ? { localBounds, anchors, supportPoints }
+      : null;
   } finally {
     geometry.dispose();
     for (const part of parts) {
@@ -361,7 +370,8 @@ export function surfaceSnapTargetFromObject3D(
   if (cached && cached.signature === signature && cached.id === id) {
     topology = {
       localBounds: cached.localBounds.clone(),
-      anchors: cached.anchors
+      anchors: cached.anchors,
+      supportPoints: cached.supportPoints
     };
   } else {
     const parts = records.map(({ mesh, matrix }) => {
@@ -376,7 +386,8 @@ export function surfaceSnapTargetFromObject3D(
         signature,
         id,
         localBounds: topology.localBounds.clone(),
-        anchors: topology.anchors
+        anchors: topology.anchors,
+        supportPoints: topology.supportPoints
       });
     }
   }
@@ -388,6 +399,7 @@ export function surfaceSnapTargetFromObject3D(
     localBounds: topology.localBounds,
     matrixWorld: root.matrixWorld.clone(),
     anchors: topology.anchors,
+    supportPoints: topology.supportPoints,
     scope: 'composite'
   };
 }
@@ -498,7 +510,8 @@ export function surfaceSnapTargetFromSceneObjects(
     sceneCompositeCache.set(key, cached);
     topology = {
       localBounds: cached.localBounds.clone(),
-      anchors: cached.anchors
+      anchors: cached.anchors,
+      supportPoints: cached.supportPoints
     };
   } else {
     const localParts: THREE.BufferGeometry[] = [];
@@ -523,7 +536,8 @@ export function surfaceSnapTargetFromSceneObjects(
     if (topology) {
       rememberLru(sceneCompositeCache, key, {
         localBounds: topology.localBounds.clone(),
-        anchors: topology.anchors
+        anchors: topology.anchors,
+        supportPoints: topology.supportPoints
       }, COMPOSITE_CACHE_LIMIT);
     }
   }
@@ -535,6 +549,7 @@ export function surfaceSnapTargetFromSceneObjects(
     localBounds: topology.localBounds,
     matrixWorld: new THREE.Matrix4().makeTranslation(center.x, center.y, center.z),
     anchors: topology.anchors,
+    supportPoints: topology.supportPoints,
     scope: 'composite'
   };
 }
