@@ -1,11 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createSceneObject } from '../src/geometry/factory';
 import {
-  createTranslationSurfaceSnapSession,
-  resolveTranslationSurfaceSnap,
-  type TranslationSurfaceSnapSession
-} from '../src/editor/snapping/translationSurfaceSnap';
+  findTouchFormSurfaceSnap,
+  resetFormSurfaceSnapSessions
+} from '../src/editor/snapping/primitiveSurfaceSnap';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
 import type { SceneObjectData, Vec3 } from '../src/types/editor';
 
@@ -50,80 +49,194 @@ function sphereToBoxGap(gap: number): {
   return { source, target, targetBounds };
 }
 
-describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
-  it('erkennt den Apfelschneider-Kontakt über denselben Solver', () => {
+function acceptedSource(raw: SceneObjectData, position: Vec3): SceneObjectData {
+  return withPosition(raw, position);
+}
+
+beforeEach(() => resetFormSurfaceSnapSessions());
+afterEach(() => resetFormSurfaceSnapSessions());
+
+describe('Android-Touch-Formen-Snap', () => {
+  it('rastet ein und lässt den nächsten groben Touch-Schritt durch die Form weiterlaufen', () => {
     const { source, target, targetBounds } = sphereToBoxGap(0.2);
-    const candidate = withPosition(source, [
-      source.position[0] + 0.15,
+    const transaction = {};
+    const rawApproach = withPosition(source, [
+      source.position[0] + STEP,
       source.position[1],
       source.position[2]
     ]);
-    const resolution = resolveTranslationSurfaceSnap(
-      candidate,
+
+    const snapped = findTouchFormSurfaceSnap(
+      rawApproach,
       [source, target],
       STEP,
-      candidate.position,
-      createTranslationSurfaceSnapSession()
+      transaction
     );
-
-    expect(resolution.result.targetId).toBe(target.id);
-    expect(resolution.result.targetAnchorId).toBeTruthy();
-    expect(requiredBounds(withPosition(candidate, resolution.result.position)).max.x)
+    expect(snapped.targetId).toBe(target.id);
+    expect(requiredBounds(acceptedSource(rawApproach, snapped.position)).max.x)
       .toBeCloseTo(targetBounds.min.x, 4);
-  });
 
-  it('hält einen Kontakt bei kleinen kontinuierlichen Rohbewegungen', () => {
-    const session: TranslationSurfaceSnapSession = {
-      active: {
-        targetId: 'target-box',
-        targetAnchorId: 'target-anchor',
-        sourceAnchorId: 'source-anchor',
-        captureRawPosition: [1, 2, 3],
-        acceptedPosition: [0.75, 2, 3]
-      },
-      suppressed: null,
-      previousCompositeTarget: null
-    };
-    const source = createSceneObject('box');
-    source.position = [0.8, 2, 3];
-    const resolution = resolveTranslationSurfaceSnap(
-      source,
-      [],
+    const acceptedSnap = acceptedSource(rawApproach, snapped.position);
+    const rawInside = withPosition(rawApproach, [
+      rawApproach.position[0] + STEP,
+      rawApproach.position[1],
+      rawApproach.position[2]
+    ]);
+    const released = findTouchFormSurfaceSnap(
+      rawInside,
+      [acceptedSnap, target],
       STEP,
-      [1.08, 2, 3],
-      session
+      transaction
     );
 
-    expect(resolution.result.targetId).toBe('target-box');
-    expect(resolution.result.position).toEqual([0.75, 2, 3]);
-    expect(resolution.session.active).not.toBeNull();
+    expect(released.targetId).toBeNull();
+    expect(released.position).toEqual(rawInside.position);
   });
 
-  it('gibt den Kontakt nach Verlassen des Fangbereichs ohne Blockade frei', () => {
-    const session: TranslationSurfaceSnapSession = {
-      active: {
-        targetId: 'target-box',
-        targetAnchorId: 'target-anchor',
-        sourceAnchorId: 'source-anchor',
-        captureRawPosition: [1, 2, 3],
-        acceptedPosition: [0.75, 2, 3]
-      },
-      suppressed: null,
-      previousCompositeTarget: null
-    };
-    const source = createSceneObject('box');
-    source.position = [1.25, 2, 3];
-    const resolution = resolveTranslationSurfaceSnap(
-      source,
-      [],
+  it('hält kleine Touch-Abweichungen am aktiven Kontakt', () => {
+    const { source, target } = sphereToBoxGap(0.2);
+    const transaction = {};
+    const rawApproach = withPosition(source, [
+      source.position[0] + STEP,
+      source.position[1],
+      source.position[2]
+    ]);
+    const snapped = findTouchFormSurfaceSnap(
+      rawApproach,
+      [source, target],
       STEP,
-      [1.25, 2, 3],
-      session
+      transaction
+    );
+    expect(snapped.targetId).toBe(target.id);
+
+    const acceptedSnap = acceptedSource(rawApproach, snapped.position);
+    const smallTouchMove = withPosition(rawApproach, [
+      rawApproach.position[0] + 0.05,
+      rawApproach.position[1],
+      rawApproach.position[2]
+    ]);
+    const held = findTouchFormSurfaceSnap(
+      smallTouchMove,
+      [acceptedSnap, target],
+      STEP,
+      transaction
     );
 
-    expect(resolution.result.targetId).toBeNull();
-    expect(resolution.result.position).toEqual(source.position);
-    expect(resolution.session.active).toBeNull();
-    expect(resolution.session.suppressed?.targetAnchorId).toBe('target-anchor');
+    expect(held.targetId).toBe(target.id);
+    expect(held.position).toEqual(snapped.position);
+  });
+
+  it('aktiviert dieselbe Fläche nach ausreichender Bewegung im selben Drag erneut', () => {
+    const { source, target } = sphereToBoxGap(0.2);
+    const transaction = {};
+    const rawApproach = withPosition(source, [
+      source.position[0] + STEP,
+      source.position[1],
+      source.position[2]
+    ]);
+    const snapped = findTouchFormSurfaceSnap(
+      rawApproach,
+      [source, target],
+      STEP,
+      transaction
+    );
+    expect(snapped.targetId).toBe(target.id);
+
+    let raw = withPosition(rawApproach, [
+      rawApproach.position[0] - STEP,
+      rawApproach.position[1],
+      rawApproach.position[2]
+    ]);
+    let accepted = acceptedSource(rawApproach, snapped.position);
+    let result = findTouchFormSurfaceSnap(raw, [accepted, target], STEP, transaction);
+    expect(result.targetId).toBeNull();
+    accepted = acceptedSource(raw, result.position);
+
+    for (let index = 0; index < 2; index += 1) {
+      raw = withPosition(raw, [
+        raw.position[0] - STEP,
+        raw.position[1],
+        raw.position[2]
+      ]);
+      result = findTouchFormSurfaceSnap(raw, [accepted, target], STEP, transaction);
+      expect(result.targetId).toBeNull();
+      accepted = acceptedSource(raw, result.position);
+    }
+
+    let snappedAgain = false;
+    for (let index = 0; index < 6; index += 1) {
+      raw = withPosition(raw, [
+        raw.position[0] + STEP,
+        raw.position[1],
+        raw.position[2]
+      ]);
+      result = findTouchFormSurfaceSnap(raw, [accepted, target], STEP, transaction);
+      accepted = acceptedSource(raw, result.position);
+      if (result.targetId === target.id) {
+        snappedAgain = true;
+        break;
+      }
+    }
+
+    expect(snappedAgain).toBe(true);
+  });
+
+  it('lässt den Touch-Pointer nach einem Snap direkt wieder von der Fläche wegziehen', () => {
+    const { source, target } = sphereToBoxGap(0.2);
+    const transaction = {};
+    const rawApproach = withPosition(source, [
+      source.position[0] + STEP,
+      source.position[1],
+      source.position[2]
+    ]);
+    const snapped = findTouchFormSurfaceSnap(
+      rawApproach,
+      [source, target],
+      STEP,
+      transaction
+    );
+    expect(snapped.targetId).toBe(target.id);
+
+    const acceptedSnap = acceptedSource(rawApproach, snapped.position);
+    const rawBack = withPosition(rawApproach, [
+      rawApproach.position[0] - STEP,
+      rawApproach.position[1],
+      rawApproach.position[2]
+    ]);
+    const released = findTouchFormSurfaceSnap(
+      rawBack,
+      [acceptedSnap, target],
+      STEP,
+      transaction
+    );
+
+    expect(released.targetId).toBeNull();
+    expect(released.position).toEqual(rawBack.position);
+  });
+
+  it('verwendet in einer neuen Drag-Transaktion wieder Formen-Snap', () => {
+    const { source, target } = sphereToBoxGap(0.2);
+    const firstTransaction = {};
+    const rawApproach = withPosition(source, [
+      source.position[0] + STEP,
+      source.position[1],
+      source.position[2]
+    ]);
+    const first = findTouchFormSurfaceSnap(
+      rawApproach,
+      [source, target],
+      STEP,
+      firstTransaction
+    );
+    expect(first.targetId).toBe(target.id);
+
+    resetFormSurfaceSnapSessions();
+    const second = findTouchFormSurfaceSnap(
+      rawApproach,
+      [source, target],
+      STEP,
+      {}
+    );
+    expect(second.targetId).toBe(target.id);
   });
 });

@@ -1,7 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { SceneObjectData } from '../../types/editor';
-import { APPLE_CUTTER_CELL_SIZE } from '../appleCutter/appleCutterAxisGrid';
 import {
   buildGeometrySurfaceSnapAnchors,
   createSurfaceSnapPointsGeometry
@@ -9,12 +8,12 @@ import {
 
 const vertexShader = `
   varying vec3 vLocalPosition;
-  varying vec3 vLocalNormal;
+  varying vec3 vWorldNormal;
 
   void main() {
     vec4 worldPosition = modelMatrix * vec4(position, 1.0);
     vLocalPosition = position;
-    vLocalNormal = normalize(normal);
+    vWorldNormal = normalize(mat3(modelMatrix) * normal);
     gl_Position = projectionMatrix * viewMatrix * worldPosition;
   }
 `;
@@ -28,7 +27,7 @@ const fragmentShader = `
   uniform float uOpacity;
 
   varying vec3 vLocalPosition;
-  varying vec3 vLocalNormal;
+  varying vec3 vWorldNormal;
 
   float gridLine(float value) {
     float fraction = fract(value);
@@ -42,30 +41,19 @@ const fragmentShader = `
   }
 
   void main() {
-    float safeCellSize = max(uCellSize, 0.0001);
-    vec3 center = (uBoundsMin + uBoundsMax) * 0.5;
-
-    // Schnitte liegen zentriert bei ±0,5, ±1,5, ±2,5 ... Kachellängen.
-    vec3 centeredCoordinates = ((vLocalPosition - center) * uObjectScale) / safeCellSize;
-    vec3 edgeCoordinates = ((vLocalPosition - uBoundsMin) * uObjectScale) / safeCellSize;
+    float safeCellSize = max(uCellSize, 0.05);
+    vec3 coordinates = ((vLocalPosition - uBoundsMin) * uObjectScale) / safeCellSize;
     vec3 extents = ((uBoundsMax - uBoundsMin) * uObjectScale) / safeCellSize;
     vec3 axisLines = max(
+      vec3(gridLine(coordinates.x), gridLine(coordinates.y), gridLine(coordinates.z)),
       vec3(
-        gridLine(centeredCoordinates.x - 0.5),
-        gridLine(centeredCoordinates.y - 0.5),
-        gridLine(centeredCoordinates.z - 0.5)
-      ),
-      vec3(
-        edgeLine(edgeCoordinates.x, extents.x),
-        edgeLine(edgeCoordinates.y, extents.y),
-        edgeLine(edgeCoordinates.z, extents.z)
+        edgeLine(coordinates.x, extents.x),
+        edgeLine(coordinates.y, extents.y),
+        edgeLine(coordinates.z, extents.z)
       )
     );
 
-    // Rasterachsen und Position liegen im lokalen Raum; daher muss auch die
-    // Flächengewichtung lokal bleiben. Rotation und nicht-uniforme Skalierung
-    // dürfen nicht auf eine andere Rasterachse umschalten.
-    vec3 normalWeight = pow(abs(normalize(vLocalNormal)), vec3(8.0));
+    vec3 normalWeight = pow(abs(normalize(vWorldNormal)), vec3(8.0));
     normalWeight /= max(normalWeight.x + normalWeight.y + normalWeight.z, 0.0001);
 
     float onXFace = max(axisLines.y, axisLines.z);
@@ -87,7 +75,6 @@ interface PrimitiveSnapPatternProps {
 }
 
 export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }: PrimitiveSnapPatternProps) {
-  void cellSize;
   const scaleX = object.scale[0];
   const scaleY = object.scale[1];
   const scaleZ = object.scale[2];
@@ -101,13 +88,8 @@ export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }
       ?? new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
   }, [geometry]);
   const anchors = useMemo(
-    () => buildGeometrySurfaceSnapAnchors(
-      geometry,
-      APPLE_CUTTER_CELL_SIZE,
-      objectScale,
-      { componentId: object.id, scope: 'component' }
-    ),
-    [geometry, object.id, objectScale]
+    () => buildGeometrySurfaceSnapAnchors(geometry, cellSize, objectScale),
+    [cellSize, geometry, objectScale]
   );
   const pointsGeometry = useMemo(
     () => createSurfaceSnapPointsGeometry(anchors),
@@ -127,10 +109,10 @@ export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }
         Math.max(0.0001, Math.abs(scaleZ))
       )
     },
-    uCellSize: { value: APPLE_CUTTER_CELL_SIZE },
+    uCellSize: { value: Math.max(0.05, Math.abs(cellSize)) },
     uOpacity: { value: highlighted ? 0.46 : 0.16 }
-  }), [bounds, highlighted, scaleX, scaleY, scaleZ]);
-  const pointSize = Math.min(0.075, Math.max(0.025, APPLE_CUTTER_CELL_SIZE * 0.12));
+  }), [bounds, cellSize, highlighted, scaleX, scaleY, scaleZ]);
+  const pointSize = Math.min(0.075, Math.max(0.025, Math.abs(cellSize) * 0.12));
 
   return (
     <group
