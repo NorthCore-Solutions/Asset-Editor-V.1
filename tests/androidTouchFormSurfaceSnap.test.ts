@@ -81,7 +81,8 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
         captureRawPosition: [1, 2, 3],
         acceptedPosition: [0.75, 2, 3]
       },
-      suppressed: null
+      suppressed: null,
+      previousCompositeTarget: null
     };
     const source = createSceneObject('box');
     source.position = [0.8, 2, 3];
@@ -107,7 +108,8 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
         captureRawPosition: [1, 2, 3],
         acceptedPosition: [0.75, 2, 3]
       },
-      suppressed: null
+      suppressed: null,
+      previousCompositeTarget: null
     };
     const source = createSceneObject('box');
     source.position = [1.25, 2, 3];
