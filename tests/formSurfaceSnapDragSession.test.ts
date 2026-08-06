@@ -17,7 +17,8 @@ function activeSession(): TranslationSurfaceSnapSession {
       captureRawPosition: [0, 0, 0],
       acceptedPosition: [2, 3, 4]
     },
-    suppressed: null
+    suppressed: null,
+    previousCompositeTarget: null
   };
 }
 
@@ -27,8 +28,16 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
     const second = createTranslationSurfaceSnapSession();
 
     expect(first).not.toBe(second);
-    expect(first).toEqual({ active: null, suppressed: null });
-    expect(second).toEqual({ active: null, suppressed: null });
+    expect(first).toEqual({
+      active: null,
+      suppressed: null,
+      previousCompositeTarget: null
+    });
+    expect(second).toEqual({
+      active: null,
+      suppressed: null,
+      previousCompositeTarget: null
+    });
   });
 
   it('liefert beim Halten exakt dieselbe akzeptierte Position ohne Nachspringen', () => {
