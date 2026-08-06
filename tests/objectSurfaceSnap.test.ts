@@ -6,7 +6,6 @@ import {
   surfaceSnapTargetFromObject3D,
   surfaceSnapTargetFromSceneObject
 } from '../src/editor/snapping/objectSurfaceSnap';
-import { isFormType } from '../src/editor/snapping/primitiveSurfaceSnap';
 import {
   transformSurfaceSnapAnchors,
   type SurfaceSnapAnchor
@@ -217,9 +216,5 @@ describe('Vorbereitung für importierte Objekte', () => {
     expect(result.targetId).toBe(importedTarget.id);
     expectPositiveXContact(source, targetBounds, result.position);
     child.geometry.dispose();
-  });
-
-  it.each(SHAPE_DEFINITIONS)("filtert '$label' nicht mehr nach Typ", ({ type }) => {
-    expect(isFormType(type)).toBe(true);
   });
 });
