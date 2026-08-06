@@ -13,6 +13,7 @@ import {
 const EPSILON = 0.000001;
 const TOPOLOGY_CACHE_LIMIT = 256;
 const COMPOSITE_CACHE_LIMIT = 64;
+const INSIDE_RAY_DIRECTION = new THREE.Vector3(1, 0.371, 0.613).normalize();
 
 interface CachedTopology {
   localBounds: THREE.Box3;
@@ -158,7 +159,6 @@ function matrixScale(matrix: THREE.Matrix4): THREE.Vector3 {
   return scale;
 }
 
-/** Vereinheitlicht Attribute, damit beliebige importierte Meshes zusammengeführt werden können. */
 function normalizedSnapGeometry(source: THREE.BufferGeometry): THREE.BufferGeometry {
   const clone = source.clone();
   const geometry = clone.index ? clone.toNonIndexed() : clone;
@@ -232,7 +232,7 @@ function pointInsideClosedProbe(
 ): boolean {
   if (!probe.bounds.containsPoint(point)) return false;
 
-  raycaster.set(point, new THREE.Vector3(1, 0.371, 0.613).normalize());
+  raycaster.set(point, INSIDE_RAY_DIRECTION);
   raycaster.near = 0.000001;
   raycaster.far = Number.POSITIVE_INFINITY;
   const distances = raycaster.intersectObject(probe.mesh, false)
@@ -250,11 +250,6 @@ function pointInsideClosedProbe(
   return uniqueCount % 2 === 1;
 }
 
-/**
- * Entfernt Composite-Punkte, deren leicht nach außen versetzte Position in
- * einem anderen geschlossenen Bauteil liegt. Dadurch verschwinden insbesondere
- * Kontaktflächen zwischen Wänden, Dach und weiteren Gruppenbestandteilen.
- */
 function externalCompositeAnchors(
   anchors: SurfaceSnapAnchor[],
   componentParts: readonly THREE.BufferGeometry[]
@@ -335,9 +330,7 @@ function importedMeshSignature(
       node: mesh.uuid,
       geometry: mesh.geometry.uuid,
       positionCount: position?.count ?? 0,
-      positionVersion: position?.version ?? 0,
       indexCount: index?.count ?? 0,
-      indexVersion: index?.version ?? 0,
       matrix: matrix.elements.map(rounded)
     });
   });
@@ -352,11 +345,6 @@ function importedMeshSignature(
   };
 }
 
-/**
- * Importierte Mehrfach-Mesh-Modelle erhalten ein gemeinsames äußeres
- * Apfelschneider-Raster. Material- oder Node-Grenzen erzeugen dadurch nicht
- * automatisch voneinander abweichende Snap-Raster.
- */
 export function surfaceSnapTargetFromObject3D(
   root: THREE.Object3D,
   id: string = root.uuid,
@@ -427,12 +415,6 @@ function containsVisibleMesh(root: THREE.Object3D): boolean {
   return found;
 }
 
-/**
- * Vorbereitung für zukünftige Importe: Die äußere Hülle wird immer erzeugt.
- * Explizite Top-Level-Gruppen werden zusätzlich als innere Komponenten
- * angeboten. Besteht der Import nur aus direkten Mesh-Nodes, bleiben diese als
- * eine gemeinsame logische Komponente zusammengefasst.
- */
 export function analyzeImportedObject3DSnapTargets(
   root: THREE.Object3D,
   id: string = root.uuid
@@ -494,11 +476,6 @@ function sceneCompositeKey(
   });
 }
 
-/**
- * Erzeugt das äußere Raster einer Editor-Gruppe. Reine gemeinsame Translation
- * verändert nur die Zielmatrix; lokale Hülle und Anker werden aus dem Cache
- * wiederverwendet. Die Komponentenraster bleiben davon unabhängig erhalten.
- */
 export function surfaceSnapTargetFromSceneObjects(
   objects: readonly SceneObjectData[],
   id: string = 'composite'
