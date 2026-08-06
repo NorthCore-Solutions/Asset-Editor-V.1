@@ -10,6 +10,7 @@ import { findSweptSurfaceTargetSnap } from './sweptSurfaceTargetSnap';
 
 const RELEASE_DISTANCE = 0.14;
 const REARM_DISTANCE = 0.35;
+const MAX_WORLD_THRESHOLD = 0.12;
 
 export interface TranslationSurfaceSnapContact {
   targetId: string;
@@ -27,6 +28,7 @@ export interface TranslationSurfaceSnapSuppression {
 export interface TranslationSurfaceSnapSession {
   active: TranslationSurfaceSnapContact | null;
   suppressed: TranslationSurfaceSnapSuppression | null;
+  previousCompositeTarget: SurfaceSnapTarget | null;
 }
 
 export interface TranslationSurfaceSnapResolution {
@@ -35,7 +37,11 @@ export interface TranslationSurfaceSnapResolution {
 }
 
 export function createTranslationSurfaceSnapSession(): TranslationSurfaceSnapSession {
-  return { active: null, suppressed: null };
+  return {
+    active: null,
+    suppressed: null,
+    previousCompositeTarget: null
+  };
 }
 
 function distance(left: Vec3, right: Vec3): number {
@@ -78,7 +84,11 @@ function holdOrReleaseContact(
             sourceAnchorId: active.sourceAnchorId,
             targetAnchorId: active.targetAnchorId
           },
-          session: { active, suppressed: null }
+          session: {
+            active,
+            suppressed: null,
+            previousCompositeTarget: currentSession.previousCompositeTarget
+          }
         },
         active,
         suppressed: null
@@ -101,12 +111,17 @@ function capturedResolution(
   snapped: ObjectSurfaceSnapResult | null,
   rawPosition: Vec3,
   unchangedPosition: Vec3,
-  suppressed: TranslationSurfaceSnapSuppression | null
+  suppressed: TranslationSurfaceSnapSuppression | null,
+  previousCompositeTarget: SurfaceSnapTarget | null
 ): TranslationSurfaceSnapResolution {
   if (!snapped?.targetId) {
     return {
       result: unchanged(unchangedPosition),
-      session: { active: null, suppressed }
+      session: {
+        active: null,
+        suppressed,
+        previousCompositeTarget
+      }
     };
   }
 
@@ -119,7 +134,44 @@ function capturedResolution(
   };
   return {
     result: snapped,
-    session: { active, suppressed: null }
+    session: {
+      active,
+      suppressed: null,
+      previousCompositeTarget
+    }
+  };
+}
+
+function compositeTargetAtPosition(
+  target: SurfaceSnapTarget,
+  position: Vec3
+): SurfaceSnapTarget {
+  const matrixWorld = target.matrixWorld.clone();
+  matrixWorld.setPosition(position[0], position[1], position[2]);
+  return {
+    ...target,
+    matrixWorld
+  };
+}
+
+function compositeDistances(value: number): {
+  positionStep: number;
+  worldThreshold: number;
+} {
+  const magnitude = Math.max(0.0001, Math.abs(value));
+  if (magnitude > MAX_WORLD_THRESHOLD) {
+    return {
+      positionStep: magnitude,
+      worldThreshold: Math.min(
+        MAX_WORLD_THRESHOLD,
+        Math.max(0.04, magnitude * 0.4)
+      )
+    };
+  }
+
+  return {
+    positionStep: Math.max(0.1, magnitude / 0.4),
+    worldThreshold: magnitude
   };
 }
 
@@ -146,22 +198,25 @@ export function resolveTranslationSurfaceSnap(
     snapped,
     rawPosition,
     source.position,
-    contact.suppressed
+    contact.suppressed,
+    null
   );
 }
 
 /**
  * Dieselbe Hysterese für das äußere Raster einer Gruppe oder eines Imports.
- * Der vorherige und aktuelle Composite-Zustand werden als vollständige
- * Ziehbahn geprüft; ein 0,25-Rasterschritt kann den Kontakt nicht überspringen.
+ * Der zuletzt akzeptierte Composite-Zustand liegt direkt in der Drag-Sitzung;
+ * dadurch hängt der Sweep nicht von React-Renderständen ab.
+ *
+ * Der fünfte Parameter akzeptiert aus Kompatibilitätsgründen sowohl den
+ * bisherigen Fangabstand als auch direkt den Bewegungsraster-Schritt.
  */
 export function resolveCompositeTranslationSurfaceSnap(
   sourceTarget: SurfaceSnapTarget,
   targets: readonly SurfaceSnapTarget[],
   rawPosition: Vec3,
   currentSession: TranslationSurfaceSnapSession,
-  positionStep: number,
-  previousSourceTarget: SurfaceSnapTarget | null = null
+  thresholdOrPositionStep: number = MAX_WORLD_THRESHOLD
 ): TranslationSurfaceSnapResolution {
   const contact = holdOrReleaseContact(rawPosition, currentSession);
   if (contact.held) return contact.held;
@@ -175,26 +230,32 @@ export function resolveCompositeTranslationSurfaceSnap(
     }))
     : targets;
   const sourcePosition = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
-  const swept = previousSourceTarget
+  const distances = compositeDistances(thresholdOrPositionStep);
+  const swept = currentSession.previousCompositeTarget
     ? findSweptSurfaceTargetSnap(
-      previousSourceTarget,
+      currentSession.previousCompositeTarget,
       sourceTarget,
       filteredTargets,
-      positionStep,
+      distances.positionStep,
       { ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null }
     )
     : null;
-  const threshold = Math.min(0.12, Math.max(0.04, Math.abs(positionStep) * 0.4));
   const nearby = swept ?? findSurfaceTargetSnap(
     sourceTarget,
     filteredTargets,
     sourcePosition,
-    threshold
+    distances.worldThreshold
   );
+  const snapped = nearby.targetId ? nearby : null;
+  const acceptedPosition = snapped?.position
+    ?? [sourcePosition.x, sourcePosition.y, sourcePosition.z] as Vec3;
+  const acceptedTarget = compositeTargetAtPosition(sourceTarget, acceptedPosition);
+
   return capturedResolution(
-    nearby.targetId ? nearby : null,
+    snapped,
     rawPosition,
-    [sourcePosition.x, sourcePosition.y, sourcePosition.z],
-    contact.suppressed
+    acceptedPosition,
+    contact.suppressed,
+    acceptedTarget
   );
 }
