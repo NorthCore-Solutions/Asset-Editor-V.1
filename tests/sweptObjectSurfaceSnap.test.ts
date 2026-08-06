@@ -16,6 +16,7 @@ import type { PrimitiveType, SceneObjectData, Vec3 } from '../src/types/editor';
 
 const STEP = 0.25;
 const START_GAP = 0.05;
+const CROSSING_DISTANCE = 0.8;
 const THIN_DIMENSION = 0.0001;
 
 const withPosition = (object: SceneObjectData, position: Vec3): SceneObjectData => ({
@@ -29,41 +30,73 @@ function requiredBounds(object: SceneObjectData): THREE.Box3 {
   return bounds;
 }
 
-function worldAnchors(object: SceneObjectData): SurfaceSnapAnchor[] {
+function requiredTarget(object: SceneObjectData) {
   const target = surfaceSnapTargetFromSceneObject(object);
   if (!target) throw new Error(`Keine Snap-Topologie für ${object.type}.`);
+  return target;
+}
+
+function worldAnchors(object: SceneObjectData): SurfaceSnapAnchor[] {
+  const target = requiredTarget(object);
   return transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
 }
 
-function approachPair(
+function bestOpposingPair(
   source: SceneObjectData,
   target: SceneObjectData
 ): { sourceAnchor: SurfaceSnapAnchor; targetAnchor: SurfaceSnapAnchor } {
-  const sourceAnchors = worldAnchors(source).filter((anchor) => anchor.normal.x > 0.25);
-  const targetAnchors = worldAnchors(target).filter((anchor) => anchor.normal.x < -0.25);
-  if (sourceAnchors.length === 0 || targetAnchors.length === 0) {
-    throw new Error(`Keine X-gerichtete Punktbahn für ${source.type} zu ${target.type}.`);
-  }
-
-  let bestSource = sourceAnchors[0];
-  let bestTarget = targetAnchors[0];
+  const sourceAnchors = worldAnchors(source);
+  const targetAnchors = worldAnchors(target);
+  let bestSource: SurfaceSnapAnchor | null = null;
+  let bestTarget: SurfaceSnapAnchor | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
-  for (const sourceAnchor of sourceAnchors) {
-    for (const targetAnchor of targetAnchors) {
-      const normalScore = 1 + sourceAnchor.normal.dot(targetAnchor.normal);
-      const tangentialScore = Math.hypot(
-        sourceAnchor.position.y - targetAnchor.position.y,
-        sourceAnchor.position.z - targetAnchor.position.z
+
+  for (const targetAnchor of targetAnchors) {
+    for (const sourceAnchor of sourceAnchors) {
+      const alignment = sourceAnchor.normal.dot(targetAnchor.normal);
+      if (alignment > -0.12) continue;
+      const cardinality = Math.max(
+        Math.abs(targetAnchor.normal.x),
+        Math.abs(targetAnchor.normal.y),
+        Math.abs(targetAnchor.normal.z)
       );
-      const score = normalScore * 10 + tangentialScore;
+      const score = (1 + alignment) * 100 + (1 - cardinality);
       if (score >= bestScore) continue;
       bestScore = score;
       bestSource = sourceAnchor;
       bestTarget = targetAnchor;
     }
   }
-  if (!bestSource || !bestTarget) throw new Error('Kein gültiges Punktpaar.');
+
+  if (!bestSource?.id || !bestTarget?.id) {
+    throw new Error(`Kein gegengerichtetes Punktpaar für ${source.type} zu ${target.type}.`);
+  }
   return { sourceAnchor: bestSource, targetAnchor: bestTarget };
+}
+
+function translatedObject(
+  object: SceneObjectData,
+  translation: THREE.Vector3
+): SceneObjectData {
+  return withPosition(object, [
+    object.position[0] + translation.x,
+    object.position[1] + translation.y,
+    object.position[2] + translation.z
+  ]);
+}
+
+function physicalSupportProjection(
+  object: SceneObjectData,
+  normal: THREE.Vector3
+): number {
+  const target = requiredTarget(object);
+  const localSupport = target.supportPoints?.length
+    ? target.supportPoints
+    : target.anchors.map((anchor) => anchor.position);
+  return minimumSurfaceProjection(
+    transformSurfaceSupportPoints(localSupport, target.matrixWorld),
+    normal
+  );
 }
 
 function crossingSetup(sourceType: PrimitiveType, targetType: PrimitiveType) {
@@ -71,25 +104,34 @@ function crossingSetup(sourceType: PrimitiveType, targetType: PrimitiveType) {
   target.id = `target-${targetType}`;
   const initialSource = createSceneObject(sourceType);
   initialSource.id = `source-${sourceType}`;
-  const pair = approachPair(initialSource, target);
-  const desiredSourceAnchor = pair.targetAnchor.position.clone()
-    .addScaledVector(pair.targetAnchor.normal, START_GAP);
-  const sourceTranslation = desiredSourceAnchor.sub(pair.sourceAnchor.position);
-  const previous = withPosition(initialSource, [
-    initialSource.position[0] + sourceTranslation.x,
-    initialSource.position[1] + sourceTranslation.y,
-    initialSource.position[2] + sourceTranslation.z
-  ]);
-  const previousBounds = requiredBounds(previous);
-  const sourceWidth = previousBounds.max.x - previousBounds.min.x;
-  const overshoot = Math.max(STEP * 3, sourceWidth * 0.65);
-  const candidate = withPosition(previous, [
-    previous.position[0] + START_GAP + overshoot,
-    previous.position[1],
-    previous.position[2]
-  ]);
+  const pair = bestOpposingPair(initialSource, target);
+  const targetNormal = pair.targetAnchor.normal.clone().normalize();
+  const movementDirection = targetNormal.clone().negate();
 
-  return { target, previous, candidate };
+  const anchorDelta = pair.targetAnchor.position.clone().sub(pair.sourceAnchor.position);
+  const tangentialTranslation = anchorDelta.sub(
+    targetNormal.clone().multiplyScalar(anchorDelta.dot(targetNormal))
+  );
+  let previous = translatedObject(initialSource, tangentialTranslation);
+  const targetProjection = pair.targetAnchor.position.dot(targetNormal);
+  const currentProjection = physicalSupportProjection(previous, targetNormal);
+  previous = translatedObject(
+    previous,
+    targetNormal.clone().multiplyScalar(
+      START_GAP - (currentProjection - targetProjection)
+    )
+  );
+  const candidate = translatedObject(
+    previous,
+    movementDirection.clone().multiplyScalar(CROSSING_DISTANCE)
+  );
+
+  return {
+    target,
+    previous,
+    candidate,
+    movementDirection
+  };
 }
 
 function boxGapSetup(gap: number) {
@@ -106,7 +148,7 @@ function boxGapSetup(gap: number) {
     source.position[2]
   ]);
 
-  return { target, targetBounds, previous };
+  return { target, previous };
 }
 
 function expectUnchanged(candidate: SceneObjectData, result: ReturnType<typeof findFormSurfaceSnap>) {
@@ -119,16 +161,11 @@ function expectUnchanged(candidate: SceneObjectData, result: ReturnType<typeof f
 function expectPhysicalContact(
   source: SceneObjectData,
   target: SceneObjectData,
-  previous: SceneObjectData,
-  candidate: SceneObjectData,
+  movementDirection: THREE.Vector3,
   result: ReturnType<typeof findFormSurfaceSnap>
 ): void {
-  const sourceTarget = surfaceSnapTargetFromSceneObject(withPosition(source, result.position));
-  const targetTarget = surfaceSnapTargetFromSceneObject(target);
-  expect(sourceTarget).not.toBeNull();
-  expect(targetTarget).not.toBeNull();
-  if (!sourceTarget || !targetTarget) return;
-
+  const sourceTarget = requiredTarget(withPosition(source, result.position));
+  const targetTarget = requiredTarget(target);
   const targetAnchor = transformSurfaceSnapAnchors(
     targetTarget.anchors,
     targetTarget.matrixWorld
@@ -136,12 +173,9 @@ function expectPhysicalContact(
   expect(targetAnchor).toBeDefined();
   if (!targetAnchor) return;
 
-  const movement = new THREE.Vector3(...candidate.position)
-    .sub(new THREE.Vector3(...previous.position))
-    .normalize();
   const targetSize = targetTarget.localBounds.getSize(new THREE.Vector3());
   const targetNormal = Math.min(targetSize.x, targetSize.y, targetSize.z) <= THIN_DIMENSION
-    ? movement.clone().negate()
+    ? movementDirection.clone().negate()
     : targetAnchor.normal;
   const localSupport = sourceTarget.supportPoints?.length
     ? sourceTarget.supportPoints
@@ -155,10 +189,15 @@ function expectPhysicalContact(
 function expectStopsDuringCrossing(
   previous: SceneObjectData,
   candidate: SceneObjectData,
+  movementDirection: THREE.Vector3,
   resultPosition: Vec3
 ): void {
-  expect(resultPosition[0]).toBeGreaterThanOrEqual(previous.position[0] - 0.00001);
-  expect(resultPosition[0]).toBeLessThan(candidate.position[0] - 0.00001);
+  const previousProgress = new THREE.Vector3(...previous.position).dot(movementDirection);
+  const candidateProgress = new THREE.Vector3(...candidate.position).dot(movementDirection);
+  const resultProgress = new THREE.Vector3(...resultPosition).dot(movementDirection);
+
+  expect(resultProgress).toBeGreaterThanOrEqual(previousProgress - 0.00001);
+  expect(resultProgress).toBeLessThan(candidateProgress - 0.00001);
 }
 
 describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (platform) => {
@@ -168,29 +207,55 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
     ['Kugel zu Würfel', 'sphere', 'box'],
     ['Kugel zu Zylinder', 'sphere', 'cylinder']
   ] as const)('stoppt %s beim Durchqueren', (_label, sourceType, targetType) => {
-    const { target, previous, candidate } = crossingSetup(sourceType, targetType);
-    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
+    const setup = crossingSetup(sourceType, targetType);
+    const result = findFormSurfaceSnap(
+      setup.candidate,
+      [setup.previous, setup.target],
+      STEP
+    );
 
-    expect(result.targetId).toBe(target.id);
-    expectStopsDuringCrossing(previous, candidate, result.position);
-    expectPhysicalContact(candidate, target, previous, candidate, result);
+    expect(result.targetId).toBe(setup.target.id);
+    expectStopsDuringCrossing(
+      setup.previous,
+      setup.candidate,
+      setup.movementDirection,
+      result.position
+    );
+    expectPhysicalContact(
+      setup.candidate,
+      setup.target,
+      setup.movementDirection,
+      result
+    );
   });
 
   it('hält den Kontakt auch beim nächsten Ziehschritt in die Form hinein', () => {
-    const { target, previous, candidate } = crossingSetup('sphere', 'box');
-    const first = findFormSurfaceSnap(candidate, [previous, target], STEP);
-    expect(first.targetId).toBe(target.id);
+    const setup = crossingSetup('sphere', 'box');
+    const first = findFormSurfaceSnap(
+      setup.candidate,
+      [setup.previous, setup.target],
+      STEP
+    );
+    expect(first.targetId).toBe(setup.target.id);
 
-    const snappedPrevious = withPosition(candidate, first.position);
-    const deeperCandidate = withPosition(candidate, [
-      candidate.position[0] + STEP * 2,
-      candidate.position[1],
-      candidate.position[2]
-    ]);
-    const second = findFormSurfaceSnap(deeperCandidate, [snappedPrevious, target], STEP);
+    const snappedPrevious = withPosition(setup.candidate, first.position);
+    const deeperCandidate = translatedObject(
+      setup.candidate,
+      setup.movementDirection.clone().multiplyScalar(STEP * 2)
+    );
+    const second = findFormSurfaceSnap(
+      deeperCandidate,
+      [snappedPrevious, setup.target],
+      STEP
+    );
 
-    expect(second.targetId).toBe(target.id);
-    expectPhysicalContact(deeperCandidate, target, snappedPrevious, deeperCandidate, second);
+    expect(second.targetId).toBe(setup.target.id);
+    expectPhysicalContact(
+      deeperCandidate,
+      setup.target,
+      setup.movementDirection,
+      second
+    );
   });
 
   it('lässt ein eingerastetes Element wieder von der Fläche wegziehen', () => {
@@ -236,26 +301,54 @@ describe.each(['Desktop', 'Android'])('durchgängiger Formen-Snap auf %s', (plat
     const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
 
     expect(result.targetId).toBe(target.id);
-    expectPhysicalContact(candidate, target, previous, candidate, result);
+    expectPhysicalContact(candidate, target, new THREE.Vector3(1, 0, 0), result);
   });
 });
 
 describe('gleiche Durchquerungsbedingung für alle Elemente', () => {
   it.each(SHAPE_DEFINITIONS)("stoppt '$label' als bewegtes Element auf einer Apfelschneider-Bahn", ({ type }) => {
-    const { target, previous, candidate } = crossingSetup(type, 'box');
-    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
+    const setup = crossingSetup(type, 'box');
+    const result = findFormSurfaceSnap(
+      setup.candidate,
+      [setup.previous, setup.target],
+      STEP
+    );
 
-    expect(result.targetId).toBe(target.id);
-    expectStopsDuringCrossing(previous, candidate, result.position);
-    expectPhysicalContact(candidate, target, previous, candidate, result);
+    expect(result.targetId).toBe(setup.target.id);
+    expectStopsDuringCrossing(
+      setup.previous,
+      setup.candidate,
+      setup.movementDirection,
+      result.position
+    );
+    expectPhysicalContact(
+      setup.candidate,
+      setup.target,
+      setup.movementDirection,
+      result
+    );
   });
 
   it.each(SHAPE_DEFINITIONS)("stoppt eine Kugel an '$label' auf einer Apfelschneider-Bahn", ({ type }) => {
-    const { target, previous, candidate } = crossingSetup('sphere', type);
-    const result = findFormSurfaceSnap(candidate, [previous, target], STEP);
+    const setup = crossingSetup('sphere', type);
+    const result = findFormSurfaceSnap(
+      setup.candidate,
+      [setup.previous, setup.target],
+      STEP
+    );
 
-    expect(result.targetId).toBe(target.id);
-    expectStopsDuringCrossing(previous, candidate, result.position);
-    expectPhysicalContact(candidate, target, previous, candidate, result);
+    expect(result.targetId).toBe(setup.target.id);
+    expectStopsDuringCrossing(
+      setup.previous,
+      setup.candidate,
+      setup.movementDirection,
+      result.position
+    );
+    expectPhysicalContact(
+      setup.candidate,
+      setup.target,
+      setup.movementDirection,
+      result
+    );
   });
 });
