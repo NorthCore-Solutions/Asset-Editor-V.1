@@ -6,10 +6,6 @@ import {
   type SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import {
-  minimumSurfaceProjection,
-  transformSurfaceSupportPoints
-} from './surfaceSupport';
-import {
   transformSurfaceSnapAnchors,
   type SurfaceSnapAnchor
 } from './surfaceSnapTopology';
@@ -27,12 +23,6 @@ interface SweepCandidate {
   travel: number;
   lateralDistance: number;
   normalAlignment: number;
-  sourceAnchorId: string | null;
-  targetAnchorId: string | null;
-}
-
-export interface SweptObjectSurfaceSnapOptions {
-  ignoredTargetAnchorId?: string | null;
 }
 
 interface ContactNormals {
@@ -81,12 +71,6 @@ function hashCoordinate(value: number, cellSize: number): number {
 
 function hashKey(x: number, y: number, z: number): string {
   return `${x}:${y}:${z}`;
-}
-
-function normalKey(normal: THREE.Vector3): string {
-  return [normal.x, normal.y, normal.z]
-    .map((value) => value.toFixed(5))
-    .join(':');
 }
 
 function buildAnchorHash(
@@ -163,10 +147,10 @@ function betterCandidate(
   current: SweepCandidate | null
 ): boolean {
   if (!current) return true;
-  if (candidate.lateralDistance < current.lateralDistance - EPSILON) return true;
-  if (Math.abs(candidate.lateralDistance - current.lateralDistance) > EPSILON) return false;
   if (candidate.travel < current.travel - EPSILON) return true;
   if (Math.abs(candidate.travel - current.travel) > EPSILON) return false;
+  if (candidate.lateralDistance < current.lateralDistance - EPSILON) return true;
+  if (Math.abs(candidate.lateralDistance - current.lateralDistance) > EPSILON) return false;
   return candidate.normalAlignment < current.normalAlignment;
 }
 
@@ -200,8 +184,7 @@ export function findSweptObjectSurfaceSnap(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
   positionStep: number,
-  additionalTargets: readonly SurfaceSnapTarget[] = [],
-  options: SweptObjectSurfaceSnapOptions = {}
+  additionalTargets: readonly SurfaceSnapTarget[] = []
 ): ObjectSurfaceSnapResult | null {
   const previous = previousTranslatedSource(source, objects);
   if (!previous) return null;
@@ -226,14 +209,6 @@ export function findSweptObjectSurfaceSnap(
   if (movementLength <= EPSILON) return null;
 
   const direction = movement.clone().divideScalar(movementLength);
-  const supportSource = sourceTarget.supportPoints?.length
-    ? sourceTarget.supportPoints
-    : sourceTarget.anchors.map((anchor) => anchor.position);
-  const currentSupportPoints = transformSurfaceSupportPoints(
-    supportSource,
-    sourceTarget.matrixWorld
-  );
-  const supportProjectionCache = new Map<string, number>();
   const captureDistance = Math.min(
     MAX_CAPTURE_DISTANCE,
     Math.max(0.04, Math.abs(positionStep) * 0.4)
@@ -268,11 +243,6 @@ export function findSweptObjectSurfaceSnap(
       segmentBounds.intersect(expandedTargetBounds);
 
       for (const targetAnchor of anchorsInsideBounds(targetHash, segmentBounds, hashCellSize)) {
-        if (
-          options.ignoredTargetAnchorId
-          && targetAnchor.id === options.ignoredTargetAnchorId
-        ) continue;
-
         const normals = contactNormals(
           currentAnchor,
           targetAnchor,
@@ -282,18 +252,10 @@ export function findSweptObjectSurfaceSnap(
         );
         if (!opposingAndApproaching(normals, direction)) continue;
 
-        const projectionKey = normalKey(normals.target);
-        let currentSupportProjection = supportProjectionCache.get(projectionKey);
-        if (currentSupportProjection === undefined) {
-          currentSupportProjection = minimumSurfaceProjection(
-            currentSupportPoints,
-            normals.target
-          );
-          supportProjectionCache.set(projectionKey, currentSupportProjection);
-        }
-        const targetProjection = targetAnchor.position.dot(normals.target);
-        const currentSeparation = currentSupportProjection - targetProjection;
-        const previousSeparation = currentSeparation - movement.dot(normals.target);
+        const previousDelta = previousAnchor.position.clone().sub(targetAnchor.position);
+        const currentDelta = currentAnchor.position.clone().sub(targetAnchor.position);
+        const previousSeparation = previousDelta.dot(normals.target);
+        const currentSeparation = currentDelta.dot(normals.target);
         const separationChange = currentSeparation - previousSeparation;
         if (separationChange >= -EPSILON) continue;
         if (previousSeparation < -captureDistance - EPSILON) continue;
@@ -324,9 +286,7 @@ export function findSweptObjectSurfaceSnap(
           distance: Math.abs(correctionAlongMovement),
           travel,
           lateralDistance,
-          normalAlignment: normals.source.dot(normals.target),
-          sourceAnchorId: currentAnchor.id ?? null,
-          targetAnchorId: targetAnchor.id ?? null
+          normalAlignment: normals.source.dot(normals.target)
         };
         if (betterCandidate(candidate, best)) best = candidate;
       }
@@ -337,9 +297,7 @@ export function findSweptObjectSurfaceSnap(
     ? {
       position: best.position,
       targetId: best.targetId,
-      distance: best.distance,
-      sourceAnchorId: best.sourceAnchorId,
-      targetAnchorId: best.targetAnchorId
+      distance: best.distance
     }
     : null;
 }
