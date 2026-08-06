@@ -10,9 +10,10 @@ function positionKey(anchor: SurfaceSnapAnchor): string {
 }
 
 /**
- * Eine gemeinsame Kontaktfläche zweier geschlossener Bauteile erzeugt am
- * selben Ort zwei Snap-Punkte mit entgegengesetzten Normalen. Beide gehören
- * zur inneren Trennfläche und dürfen im äußeren Composite-Raster nicht bleiben.
+ * Eine gemeinsame Kontaktfläche zweier Bauteile erzeugt am selben Ort
+ * Snap-Punkte mit entgegengesetzten Normalen. Beide gehören zur inneren
+ * Trennfläche und dürfen weder bei geschlossenen noch bei offenen Bauteilen im
+ * äußeren Composite-Raster verbleiben.
  */
 export function removeOpposingCoincidentAnchors(
   anchors: readonly SurfaceSnapAnchor[]
