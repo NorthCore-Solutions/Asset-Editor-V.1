@@ -4,6 +4,7 @@ import { createGeometry } from '../../geometry/factory';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
 import { APPLE_CUTTER_CELL_SIZE } from '../appleCutter/appleCutterAxisGrid';
 import type { AppleCutterScope } from '../appleCutter/appleCutterTypes';
+import { removeOpposingCoincidentAnchors } from './compositeAnchorFilter';
 import {
   buildGeometrySurfaceSnapAnchors,
   transformSurfaceSnapAnchors,
@@ -257,6 +258,8 @@ function externalCompositeAnchors(
   const closedParts = componentParts.filter(closedTriangleSoup);
   if (closedParts.length < 2) return anchors;
 
+  const exteriorCandidates = removeOpposingCoincidentAnchors(anchors);
+
   const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
   const probes: ClosedPartProbe[] = closedParts.map((part) => {
     part.computeBoundingBox();
@@ -274,7 +277,7 @@ function externalCompositeAnchors(
   const raycaster = new THREE.Raycaster();
 
   try {
-    return anchors.filter((anchor) => {
+    return exteriorCandidates.filter((anchor) => {
       const outsideProbe = anchor.position.clone().addScaledVector(anchor.normal, offset);
       return !probes.some((probe) => pointInsideClosedProbe(outsideProbe, probe, raycaster));
     });
