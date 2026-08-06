@@ -57,7 +57,7 @@ beforeEach(() => resetFormSurfaceSnapSessions());
 afterEach(() => resetFormSurfaceSnapSessions());
 
 describe('Android-Touch-Formen-Snap', () => {
-  it('rastet einmal ein und lässt den nächsten groben Touch-Schritt durch die Form weiterlaufen', () => {
+  it('rastet ein und lässt den nächsten groben Touch-Schritt durch die Form weiterlaufen', () => {
     const { source, target, targetBounds } = sphereToBoxGap(0.2);
     const transaction = {};
     const rawApproach = withPosition(source, [
@@ -93,7 +93,7 @@ describe('Android-Touch-Formen-Snap', () => {
     expect(released.position).toEqual(rawInside.position);
   });
 
-  it('hält nach der Freigabe nicht erneut an derselben Fläche fest', () => {
+  it('hält kleine Touch-Abweichungen am aktiven Kontakt', () => {
     const { source, target } = sphereToBoxGap(0.2);
     const transaction = {};
     const rawApproach = withPosition(source, [
@@ -109,25 +109,76 @@ describe('Android-Touch-Formen-Snap', () => {
     );
     expect(snapped.targetId).toBe(target.id);
 
+    const acceptedSnap = acceptedSource(rawApproach, snapped.position);
+    const smallTouchMove = withPosition(rawApproach, [
+      rawApproach.position[0] + 0.05,
+      rawApproach.position[1],
+      rawApproach.position[2]
+    ]);
+    const held = findTouchFormSurfaceSnap(
+      smallTouchMove,
+      [acceptedSnap, target],
+      STEP,
+      transaction
+    );
+
+    expect(held.targetId).toBe(target.id);
+    expect(held.position).toEqual(snapped.position);
+  });
+
+  it('aktiviert dieselbe Fläche nach ausreichender Bewegung im selben Drag erneut', () => {
+    const { source, target } = sphereToBoxGap(0.2);
+    const transaction = {};
+    const rawApproach = withPosition(source, [
+      source.position[0] + STEP,
+      source.position[1],
+      source.position[2]
+    ]);
+    const snapped = findTouchFormSurfaceSnap(
+      rawApproach,
+      [source, target],
+      STEP,
+      transaction
+    );
+    expect(snapped.targetId).toBe(target.id);
+
+    let raw = withPosition(rawApproach, [
+      rawApproach.position[0] - STEP,
+      rawApproach.position[1],
+      rawApproach.position[2]
+    ]);
     let accepted = acceptedSource(rawApproach, snapped.position);
-    let raw = rawApproach;
-    for (let index = 1; index <= 5; index += 1) {
+    let result = findTouchFormSurfaceSnap(raw, [accepted, target], STEP, transaction);
+    expect(result.targetId).toBeNull();
+    accepted = acceptedSource(raw, result.position);
+
+    for (let index = 0; index < 2; index += 1) {
+      raw = withPosition(raw, [
+        raw.position[0] - STEP,
+        raw.position[1],
+        raw.position[2]
+      ]);
+      result = findTouchFormSurfaceSnap(raw, [accepted, target], STEP, transaction);
+      expect(result.targetId).toBeNull();
+      accepted = acceptedSource(raw, result.position);
+    }
+
+    let snappedAgain = false;
+    for (let index = 0; index < 6; index += 1) {
       raw = withPosition(raw, [
         raw.position[0] + STEP,
         raw.position[1],
         raw.position[2]
       ]);
-      const result = findTouchFormSurfaceSnap(
-        raw,
-        [accepted, target],
-        STEP,
-        transaction
-      );
-
-      expect(result.targetId).toBeNull();
-      expect(result.position).toEqual(raw.position);
+      result = findTouchFormSurfaceSnap(raw, [accepted, target], STEP, transaction);
       accepted = acceptedSource(raw, result.position);
+      if (result.targetId === target.id) {
+        snappedAgain = true;
+        break;
+      }
     }
+
+    expect(snappedAgain).toBe(true);
   });
 
   it('lässt den Touch-Pointer nach einem Snap direkt wieder von der Fläche wegziehen', () => {
