@@ -5,6 +5,10 @@ import {
   surfaceSnapTargetFromSceneObject,
   surfaceSnapTargetFromSceneObjects
 } from '../src/editor/snapping/objectSurfaceSnap';
+import {
+  createTranslationSurfaceSnapSession,
+  resolveCompositeTranslationSurfaceSnap
+} from '../src/editor/snapping/translationSurfaceSnap';
 import { findSweptSurfaceTargetSnap } from '../src/editor/snapping/sweptSurfaceTargetSnap';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
 import type { PrimitiveType, SceneObjectData } from '../src/types/editor';
@@ -17,7 +21,7 @@ function requiredBounds(object: SceneObjectData): THREE.Box3 {
   return bounds;
 }
 
-function crossingSetup(targetType: PrimitiveType) {
+function crossingSetup(targetType: PrimitiveType, gap: number = 0.05) {
   const target = createSceneObject(targetType);
   target.id = `target-${targetType}`;
   const targetBounds = requiredBounds(target);
@@ -36,7 +40,7 @@ function crossingSetup(targetType: PrimitiveType) {
   const previousObject: SceneObjectData = {
     ...source,
     position: [
-      source.position[0] + targetBounds.min.x - 0.05 - alignedBounds.max.x,
+      source.position[0] + targetBounds.min.x - gap - alignedBounds.max.x,
       source.position[1],
       source.position[2]
     ]
@@ -72,6 +76,11 @@ function crossingSetup(targetType: PrimitiveType) {
     currentTarget,
     fixedTarget
   };
+}
+
+function targetCenter(target: { matrixWorld: THREE.Matrix4 }): [number, number, number] {
+  const center = new THREE.Vector3().setFromMatrixPosition(target.matrixWorld);
+  return [center.x, center.y, center.z];
 }
 
 function correctedObject(
@@ -119,6 +128,29 @@ describe('kontinuierlicher äußerer Composite-Snap', () => {
         .toBeCloseTo(setup.targetBounds.min.x, 4);
     }
   );
+
+  it('führt den Sweep über die gemeinsame Drag-Sitzung ohne Viewport-Sonderzustand aus', () => {
+    const setup = crossingSetup('box', 0.2);
+    const initial = resolveCompositeTranslationSurfaceSnap(
+      setup.previousTarget,
+      [setup.fixedTarget],
+      targetCenter(setup.previousTarget),
+      createTranslationSurfaceSnapSession(),
+      0.1
+    );
+    expect(initial.result.targetId).toBeNull();
+
+    const crossed = resolveCompositeTranslationSurfaceSnap(
+      setup.currentTarget,
+      [setup.fixedTarget],
+      targetCenter(setup.currentTarget),
+      initial.session,
+      0.1
+    );
+
+    expect(crossed.result.targetId).toBe(setup.target.id);
+    expect(crossed.session.previousCompositeTarget).not.toBeNull();
+  });
 
   it('lässt eine Gruppe beim Wegziehen frei', () => {
     const setup = crossingSetup('box');
