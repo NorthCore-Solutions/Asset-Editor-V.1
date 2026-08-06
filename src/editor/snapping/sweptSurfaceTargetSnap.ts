@@ -4,6 +4,10 @@ import type {
   SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import {
+  minimumSurfaceProjection,
+  transformSurfaceSupportPoints
+} from './surfaceSupport';
+import {
   transformSurfaceSnapAnchors,
   type SurfaceSnapAnchor
 } from './surfaceSnapTopology';
@@ -40,6 +44,12 @@ function hashCoordinate(value: number, cellSize: number): number {
 
 function hashKey(x: number, y: number, z: number): string {
   return `${x}:${y}:${z}`;
+}
+
+function normalKey(normal: THREE.Vector3): string {
+  return [normal.x, normal.y, normal.z]
+    .map((value) => value.toFixed(5))
+    .join(':');
 }
 
 function buildAnchorHash(
@@ -129,11 +139,6 @@ function opposingAndApproaching(
     && direction.dot(normals.target) <= -MIN_APPROACH_ALIGNMENT;
 }
 
-/**
- * Prüft zwei Positionen desselben Komponenten- oder Composite-Rasters als
- * durchgängige Ziehbahn. Dadurch können auch gerasterte 0,25-Schritte keine
- * dazwischenliegende Oberfläche überspringen.
- */
 export function findSweptSurfaceTargetSnap(
   previousSource: SurfaceSnapTarget,
   currentSource: SurfaceSnapTarget,
@@ -162,6 +167,14 @@ export function findSweptSurfaceTargetSnap(
     currentSource.anchors,
     currentSource.matrixWorld
   );
+  const supportSource = currentSource.supportPoints?.length
+    ? currentSource.supportPoints
+    : currentSource.anchors.map((anchor) => anchor.position);
+  const currentSupportPoints = transformSurfaceSupportPoints(
+    supportSource,
+    currentSource.matrixWorld
+  );
+  const supportProjectionCache = new Map<string, number>();
   const captureDistance = Math.min(
     MAX_CAPTURE_DISTANCE,
     Math.max(0.04, Math.abs(positionStep) * 0.4)
@@ -213,12 +226,18 @@ export function findSweptSurfaceTargetSnap(
         );
         if (!opposingAndApproaching(normals, direction)) continue;
 
-        const previousSeparation = previousAnchor.position.clone()
-          .sub(targetAnchor.position)
-          .dot(normals.target);
-        const currentSeparation = currentAnchor.position.clone()
-          .sub(targetAnchor.position)
-          .dot(normals.target);
+        const projectionKey = normalKey(normals.target);
+        let currentSupportProjection = supportProjectionCache.get(projectionKey);
+        if (currentSupportProjection === undefined) {
+          currentSupportProjection = minimumSurfaceProjection(
+            currentSupportPoints,
+            normals.target
+          );
+          supportProjectionCache.set(projectionKey, currentSupportProjection);
+        }
+        const targetProjection = targetAnchor.position.dot(normals.target);
+        const currentSeparation = currentSupportProjection - targetProjection;
+        const previousSeparation = currentSeparation - movement.dot(normals.target);
         const separationChange = currentSeparation - previousSeparation;
         if (separationChange >= -EPSILON) continue;
         if (previousSeparation < -captureDistance - EPSILON) continue;
