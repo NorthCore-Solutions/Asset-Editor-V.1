@@ -4,6 +4,11 @@ import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
 import { findFormSurfaceSnap, isFormType } from '../snapping/primitiveSurfaceSnap';
+import {
+  createTranslationSurfaceSnapSession,
+  resolveTranslationSurfaceSnap,
+  type TranslationSurfaceSnapSession
+} from '../snapping/translationSurfaceSnap';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData, SnapSettings, TransformMode } from '../../types/editor';
 import { invertHexColor, useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePaint';
@@ -68,8 +73,9 @@ interface CenterScaleDragState {
 type ScaleDragState = AxisScaleDragState | UniformScaleDragState | CenterScaleDragState;
 
 interface SingleTranslateDragState {
-  startProxyPosition: THREE.Vector3;
-  startMeshWorldPosition: THREE.Vector3;
+  lastRawProxyPosition: THREE.Vector3;
+  rawMeshWorldPosition: THREE.Vector3;
+  surfaceSnapSession: TranslationSurfaceSnapSession;
 }
 
 interface GroupDragState {
@@ -763,8 +769,9 @@ function SingleTranslateControls({
   const start = () => {
     resetProxy();
     dragRef.current = {
-      startProxyPosition: proxy.position.clone(),
-      startMeshWorldPosition: mesh.getWorldPosition(new THREE.Vector3())
+      lastRawProxyPosition: proxy.position.clone(),
+      rawMeshWorldPosition: mesh.getWorldPosition(new THREE.Vector3()),
+      surfaceSnapSession: createTranslationSurfaceSnapSession()
     };
     onSnapTargetChange(null);
     beginTransaction();
@@ -775,8 +782,22 @@ function SingleTranslateControls({
     const drag = dragRef.current;
     if (!drag) return;
 
-    const worldDelta = proxy.position.clone().sub(drag.startProxyPosition);
-    const nextWorldPosition = drag.startMeshWorldPosition.clone().add(worldDelta);
+    const rawProxyPosition = proxy.position.clone();
+    const rawDelta = rawProxyPosition.clone().sub(drag.lastRawProxyPosition);
+    drag.lastRawProxyPosition.copy(rawProxyPosition);
+    drag.rawMeshWorldPosition.add(rawDelta);
+
+    const rawLocalPosition = mesh.parent
+      ? mesh.parent.worldToLocal(drag.rawMeshWorldPosition.clone())
+      : drag.rawMeshWorldPosition.clone();
+    const nextWorldPosition = drag.rawMeshWorldPosition.clone();
+    if (snap.enabled && snap.position > 0) {
+      nextWorldPosition.set(
+        Math.round(nextWorldPosition.x / snap.position) * snap.position,
+        Math.round(nextWorldPosition.y / snap.position) * snap.position,
+        Math.round(nextWorldPosition.z / snap.position) * snap.position
+      );
+    }
     const nextLocalPosition = mesh.parent
       ? mesh.parent.worldToLocal(nextWorldPosition.clone())
       : nextWorldPosition;
@@ -800,20 +821,30 @@ function SingleTranslateControls({
     ];
 
     if (snap.surface && isFormType(object.type)) {
-      const result = findFormSurfaceSnap(
+      const liveObjects = useEditorStore.getState().objects;
+      const resolution = resolveTranslationSurfaceSnap(
         { ...object, position, rotation, scale },
-        objects,
-        snap.position
+        liveObjects,
+        snap.position,
+        [rawLocalPosition.x, rawLocalPosition.y, rawLocalPosition.z],
+        drag.surfaceSnapSession
       );
-      position = result.position;
+      drag.surfaceSnapSession = resolution.session;
+      position = resolution.result.position;
       mesh.position.set(position[0], position[1], position[2]);
       mesh.updateMatrixWorld(true);
-      onSnapTargetChange(result.targetId);
+      onSnapTargetChange(resolution.result.targetId);
     } else {
+      drag.surfaceSnapSession = createTranslationSurfaceSnapSession();
       onSnapTargetChange(null);
     }
 
     updateObject(object.id, { position, rotation, scale }, false);
+
+    // Gizmo und Objekt verwenden nach jedem Pointer-Schritt denselben Pivot.
+    mesh.updateMatrixWorld(true);
+    proxy.position.copy(mesh.localToWorld(localCenter.clone()));
+    proxy.updateMatrixWorld(true);
   };
 
   const stop = () => {
@@ -841,7 +872,7 @@ function SingleTranslateControls({
         mode="translate"
         space="world"
         size={1.15}
-        translationSnap={snap.enabled ? snap.position : undefined}
+        translationSnap={undefined}
         onMouseDown={start}
         onObjectChange={sync}
         onMouseUp={stop}
