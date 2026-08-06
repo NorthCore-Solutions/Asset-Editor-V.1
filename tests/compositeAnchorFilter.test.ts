@@ -32,4 +32,11 @@ describe('Composite-Ankerfilter', () => {
 
     expect(removeOpposingCoincidentAnchors([side, top])).toEqual([side, top]);
   });
+
+  it('entfernt gleichgerichtete Punkte derselben Außenfläche nicht', () => {
+    const first = anchor([1, 0.25, 0.25], [1, 0, 0]);
+    const second = anchor([1, 0.25, 0.25], [1, 0, 0]);
+
+    expect(removeOpposingCoincidentAnchors([first, second])).toEqual([first, second]);
+  });
 });
