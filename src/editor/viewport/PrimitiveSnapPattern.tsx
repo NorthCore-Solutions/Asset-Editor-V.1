@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import type { SceneObjectData } from '../../types/editor';
+import { APPLE_CUTTER_CELL_SIZE } from '../appleCutter/appleCutterAxisGrid';
 import {
   buildGeometrySurfaceSnapAnchors,
   createSurfaceSnapPointsGeometry
@@ -41,15 +42,23 @@ const fragmentShader = `
   }
 
   void main() {
-    float safeCellSize = max(uCellSize, 0.05);
-    vec3 coordinates = ((vLocalPosition - uBoundsMin) * uObjectScale) / safeCellSize;
+    float safeCellSize = max(uCellSize, 0.0001);
+    vec3 center = (uBoundsMin + uBoundsMax) * 0.5;
+
+    // Schnitte liegen zentriert bei ±0,5, ±1,5, ±2,5 ... Kachellängen.
+    vec3 centeredCoordinates = ((vLocalPosition - center) * uObjectScale) / safeCellSize;
+    vec3 edgeCoordinates = ((vLocalPosition - uBoundsMin) * uObjectScale) / safeCellSize;
     vec3 extents = ((uBoundsMax - uBoundsMin) * uObjectScale) / safeCellSize;
     vec3 axisLines = max(
-      vec3(gridLine(coordinates.x), gridLine(coordinates.y), gridLine(coordinates.z)),
       vec3(
-        edgeLine(coordinates.x, extents.x),
-        edgeLine(coordinates.y, extents.y),
-        edgeLine(coordinates.z, extents.z)
+        gridLine(centeredCoordinates.x - 0.5),
+        gridLine(centeredCoordinates.y - 0.5),
+        gridLine(centeredCoordinates.z - 0.5)
+      ),
+      vec3(
+        edgeLine(edgeCoordinates.x, extents.x),
+        edgeLine(edgeCoordinates.y, extents.y),
+        edgeLine(edgeCoordinates.z, extents.z)
       )
     );
 
@@ -75,6 +84,7 @@ interface PrimitiveSnapPatternProps {
 }
 
 export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }: PrimitiveSnapPatternProps) {
+  void cellSize;
   const scaleX = object.scale[0];
   const scaleY = object.scale[1];
   const scaleZ = object.scale[2];
@@ -88,8 +98,13 @@ export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }
       ?? new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
   }, [geometry]);
   const anchors = useMemo(
-    () => buildGeometrySurfaceSnapAnchors(geometry, cellSize, objectScale),
-    [cellSize, geometry, objectScale]
+    () => buildGeometrySurfaceSnapAnchors(
+      geometry,
+      APPLE_CUTTER_CELL_SIZE,
+      objectScale,
+      { componentId: object.id, scope: 'component' }
+    ),
+    [geometry, object.id, objectScale]
   );
   const pointsGeometry = useMemo(
     () => createSurfaceSnapPointsGeometry(anchors),
@@ -109,10 +124,10 @@ export function PrimitiveSnapPattern({ geometry, object, cellSize, highlighted }
         Math.max(0.0001, Math.abs(scaleZ))
       )
     },
-    uCellSize: { value: Math.max(0.05, Math.abs(cellSize)) },
+    uCellSize: { value: APPLE_CUTTER_CELL_SIZE },
     uOpacity: { value: highlighted ? 0.46 : 0.16 }
-  }), [bounds, cellSize, highlighted, scaleX, scaleY, scaleZ]);
-  const pointSize = Math.min(0.075, Math.max(0.025, Math.abs(cellSize) * 0.12));
+  }), [bounds, highlighted, scaleX, scaleY, scaleZ]);
+  const pointSize = Math.min(0.075, Math.max(0.025, APPLE_CUTTER_CELL_SIZE * 0.12));
 
   return (
     <group
