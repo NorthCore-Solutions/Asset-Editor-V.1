@@ -63,7 +63,7 @@ describe('äußeres Apfelschneider-Raster', () => {
 });
 
 describe('automatische Importvorbereitung', () => {
-  it('behandelt direkte Mesh-Nodes als getrennte Komponenten plus äußere Hülle', () => {
+  it('fasst berührende direkte Mesh-Nodes als eine logische Komponente zusammen', () => {
     const root = new THREE.Group();
     const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.2));
     wall.position.x = -0.5;
@@ -75,20 +75,55 @@ describe('automatische Importvorbereitung', () => {
 
     expect(analysis.composite?.scope).toBe('composite');
     expect(analysis.composite?.anchors.length).toBeGreaterThan(0);
-    expect(analysis.components).toHaveLength(2);
-    expect(analysis.components.every((target) => target.scope === 'component')).toBe(true);
-    expect(analysis.components.every((target) => target.anchors.length > 0)).toBe(true);
-    expect(new Set(analysis.components.map((target) => target.id)).size).toBe(2);
+    expect(analysis.components).toHaveLength(1);
+    expect(analysis.components[0]?.scope).toBe('component');
+    expect(analysis.components[0]?.anchors.length).toBeGreaterThan(0);
 
     wall.geometry.dispose();
     roof.geometry.dispose();
   });
 
+  it('erzeugt bei berührenden Materialaufteilungen keine Scheinkomponenten', () => {
+    const root = new THREE.Group();
+    const left = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1, 1));
+    const right = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1, 1));
+    left.position.x = -0.25;
+    right.position.x = 0.25;
+    root.add(left, right);
+
+    const analysis = analyzeImportedObject3DSnapTargets(root, 'material-split');
+
+    expect(analysis.components).toHaveLength(1);
+
+    left.geometry.dispose();
+    right.geometry.dispose();
+  });
+
+  it('erkennt getrennte Dreiecksinseln eines einzelnen Meshes als Komponenten', () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0, 1, 0, 0, 0, 1, 0,
+      3, 0, 0, 4, 0, 0, 3, 1, 0
+    ], 3));
+    geometry.computeVertexNormals();
+    const root = new THREE.Mesh(geometry);
+
+    const analysis = analyzeImportedObject3DSnapTargets(root, 'island-import');
+
+    expect(analysis.composite).not.toBeNull();
+    expect(analysis.components).toHaveLength(2);
+    expect(new Set(analysis.components.map((target) => target.id)).size).toBe(2);
+
+    geometry.dispose();
+  });
+
   it('behält Komponenten-IDs beim Ausblenden vorheriger Kinder stabil', () => {
     const root = new THREE.Group();
-    const meshes = Array.from({ length: 3 }, () => (
-      new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1))
-    ));
+    const meshes = Array.from({ length: 3 }, (_, index) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+      mesh.position.x = index * 2;
+      return mesh;
+    });
     root.add(...meshes);
 
     const first = analyzeImportedObject3DSnapTargets(root, 'stable-import');
