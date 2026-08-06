@@ -108,6 +108,7 @@ export function surfaceSnapTargetFromSceneObject(
   object: SceneObjectData,
   _cellSize: number = APPLE_CUTTER_CELL_SIZE
 ): SurfaceSnapTarget | null {
+  void _cellSize;
   const topology = cachedSceneTopology(object);
   if (!topology) return null;
   return {
@@ -276,6 +277,7 @@ export function surfaceSnapTargetFromObject3D(
   id: string = root.uuid,
   _cellSize: number = APPLE_CUTTER_CELL_SIZE
 ): SurfaceSnapTarget | null {
+  void _cellSize;
   root.updateWorldMatrix(true, true);
   const inverseRootMatrix = root.matrixWorld.clone().invert();
   const parts: THREE.BufferGeometry[] = [];

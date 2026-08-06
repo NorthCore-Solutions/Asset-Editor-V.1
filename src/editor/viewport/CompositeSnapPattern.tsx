@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react';
-import * as THREE from 'three';
 import type { SceneObjectData } from '../../types/editor';
 import { surfaceSnapTargetFromSceneObjects } from '../snapping/objectSurfaceSnap';
 import {
