@@ -6,6 +6,10 @@ import {
   type SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import {
+  minimumSurfaceProjection,
+  transformSurfaceSupportPoints
+} from './surfaceSupport';
+import {
   transformSurfaceSnapAnchors,
   type SurfaceSnapAnchor
 } from './surfaceSnapTopology';
@@ -77,6 +81,12 @@ function hashCoordinate(value: number, cellSize: number): number {
 
 function hashKey(x: number, y: number, z: number): string {
   return `${x}:${y}:${z}`;
+}
+
+function normalKey(normal: THREE.Vector3): string {
+  return [normal.x, normal.y, normal.z]
+    .map((value) => value.toFixed(5))
+    .join(':');
 }
 
 function buildAnchorHash(
@@ -153,11 +163,6 @@ function betterCandidate(
   current: SweepCandidate | null
 ): boolean {
   if (!current) return true;
-
-  // Formen-Snap ist ein Punkt-zu-Punkt-Snap. Eine seitlich besser deckende
-  // Paarung ist daher geometrisch gültiger als eine früher gekreuzte,
-  // schräg liegende Tangentialebene. Erst bei gleicher Punktdeckung gewinnt
-  // der zeitlich frühere Kontakt auf der Ziehbahn.
   if (candidate.lateralDistance < current.lateralDistance - EPSILON) return true;
   if (Math.abs(candidate.lateralDistance - current.lateralDistance) > EPSILON) return false;
   if (candidate.travel < current.travel - EPSILON) return true;
@@ -221,6 +226,14 @@ export function findSweptObjectSurfaceSnap(
   if (movementLength <= EPSILON) return null;
 
   const direction = movement.clone().divideScalar(movementLength);
+  const supportSource = sourceTarget.supportPoints?.length
+    ? sourceTarget.supportPoints
+    : sourceTarget.anchors.map((anchor) => anchor.position);
+  const currentSupportPoints = transformSurfaceSupportPoints(
+    supportSource,
+    sourceTarget.matrixWorld
+  );
+  const supportProjectionCache = new Map<string, number>();
   const captureDistance = Math.min(
     MAX_CAPTURE_DISTANCE,
     Math.max(0.04, Math.abs(positionStep) * 0.4)
@@ -269,10 +282,18 @@ export function findSweptObjectSurfaceSnap(
         );
         if (!opposingAndApproaching(normals, direction)) continue;
 
-        const previousDelta = previousAnchor.position.clone().sub(targetAnchor.position);
-        const currentDelta = currentAnchor.position.clone().sub(targetAnchor.position);
-        const previousSeparation = previousDelta.dot(normals.target);
-        const currentSeparation = currentDelta.dot(normals.target);
+        const projectionKey = normalKey(normals.target);
+        let currentSupportProjection = supportProjectionCache.get(projectionKey);
+        if (currentSupportProjection === undefined) {
+          currentSupportProjection = minimumSurfaceProjection(
+            currentSupportPoints,
+            normals.target
+          );
+          supportProjectionCache.set(projectionKey, currentSupportProjection);
+        }
+        const targetProjection = targetAnchor.position.dot(normals.target);
+        const currentSeparation = currentSupportProjection - targetProjection;
+        const previousSeparation = currentSeparation - movement.dot(normals.target);
         const separationChange = currentSeparation - previousSeparation;
         if (separationChange >= -EPSILON) continue;
         if (previousSeparation < -captureDistance - EPSILON) continue;
