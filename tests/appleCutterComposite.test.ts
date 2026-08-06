@@ -84,6 +84,30 @@ describe('automatische Importvorbereitung', () => {
     roof.geometry.dispose();
   });
 
+  it('behält Komponenten-IDs beim Ausblenden vorheriger Kinder stabil', () => {
+    const root = new THREE.Group();
+    const meshes = Array.from({ length: 3 }, () => (
+      new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1))
+    ));
+    root.add(...meshes);
+
+    const first = analyzeImportedObject3DSnapTargets(root, 'stable-import');
+    meshes[0]!.visible = false;
+    const second = analyzeImportedObject3DSnapTargets(root, 'stable-import');
+
+    expect(first.components.map((target) => target.id)).toEqual([
+      'stable-import:component:0',
+      'stable-import:component:1',
+      'stable-import:component:2'
+    ]);
+    expect(second.components.map((target) => target.id)).toEqual([
+      'stable-import:component:1',
+      'stable-import:component:2'
+    ]);
+
+    meshes.forEach((mesh) => mesh.geometry.dispose());
+  });
+
   it('erkennt explizite Top-Level-Gruppen als getrennte innere Komponenten', () => {
     const root = new THREE.Group();
     const walls = new THREE.Group();
