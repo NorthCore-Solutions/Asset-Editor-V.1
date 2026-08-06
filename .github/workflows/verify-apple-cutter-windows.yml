@@ -59,10 +59,10 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Record verified head
-        if: github.event_name == 'push'
+      - name: Record CI result
+        if: always() && github.event_name == 'push'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr comment 32 --repo NorthCore-Solutions/Asset-Editor-V.1 --body "APPLE_CUTTER_CI_OK `${{ github.sha }}`: Lint, Tests, Web-Build, Android-Sync und Debug-APK erfolgreich."
+          gh pr comment 32 --repo NorthCore-Solutions/Asset-Editor-V.1 --body "APPLE_CUTTER_CI `${{ github.sha }}`: `${{ job.status }}`."
