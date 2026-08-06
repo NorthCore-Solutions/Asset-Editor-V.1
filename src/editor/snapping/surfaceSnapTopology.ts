@@ -41,11 +41,6 @@ function safeScale(value: number): number {
   return Math.max(0.0001, Math.abs(value));
 }
 
-/**
- * Kompatibilitätswert für bestehende Aufrufstellen. Das Apfelschneider-Modell
- * verwendet unabhängig vom Bewegungsraster immer höchstens 0,25 Welt-Einheiten
- * zwischen zwei inneren Schnitten.
- */
 export function localSurfaceSnapStep(
   _cellSize: number,
   objectScale: THREE.Vector3
@@ -178,12 +173,6 @@ interface BuildGeometrySurfaceSnapOptions {
   maxAnchors?: number;
 }
 
-/**
- * Erzeugt ausschließlich Schnittpunkte des zentrierten Apfelschneider-Gitters
- * mit der tatsächlichen Dreiecksoberfläche. Mesh-Eckpunkte und
- * Dreiecksmittelpunkte werden nicht zusätzlich als unregelmäßige Snap-Punkte
- * aufgenommen.
- */
 export function buildGeometrySurfaceSnapAnchors(
   geometry: THREE.BufferGeometry,
   _cellSize: number,
@@ -210,13 +199,11 @@ export function buildGeometrySurfaceSnapAnchors(
     buildCenteredAppleCutterAxis('y', bounds.min.y, bounds.max.y, objectScale.y),
     buildCenteredAppleCutterAxis('z', bounds.min.z, bounds.max.z, objectScale.z)
   ] as const;
-  // Die Mittelpunktachsen sind Referenzlinien für die Oberflächenabtastung,
-  // aber keine zusätzlichen Schnitte und verändern daher keine Kachelgröße.
-  // Sie sichern insbesondere bei kleinen und runden Körpern die exakten
-  // symmetrischen Außenpunkte entlang X, Y und Z.
   const samplingCoordinates = (axisGrid: (typeof axisGrids)[number]): number[] => (
-    [...new Set([...axisGrid.coordinates, axisGrid.center])]
-      .sort((left, right) => left - right)
+    axisGrid.cuts.length === 0
+      ? [...new Set([...axisGrid.coordinates, axisGrid.center])]
+        .sort((left, right) => left - right)
+      : axisGrid.coordinates
   );
   const grids: [number[], number[], number[]] = [
     samplingCoordinates(axisGrids[0]),
