@@ -98,7 +98,7 @@ export function resolveTranslationSurfaceSnap(
     additionalTargets,
     { ignoredTargetAnchorId: suppressed?.targetAnchorId ?? null }
   );
-  if (!snapped) {
+  if (!snapped?.targetId) {
     return {
       result: unchanged(source.position),
       session: { active: null, suppressed }
@@ -106,7 +106,7 @@ export function resolveTranslationSurfaceSnap(
   }
 
   active = {
-    targetId: snapped.targetId ?? '',
+    targetId: snapped.targetId,
     targetAnchorId: snapped.targetAnchorId ?? null,
     sourceAnchorId: snapped.sourceAnchorId ?? null,
     captureRawPosition: [...rawPosition] as Vec3,
