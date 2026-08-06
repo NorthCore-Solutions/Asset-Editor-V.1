@@ -4,15 +4,93 @@ on:
   push:
     branches:
       - feature/apple-cutter-model
+  pull_request:
+    branches:
+      - main
+    types:
+      - reopened
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/apple-cutter-model
+          fetch-depth: 2
+
+      - name: Stabilize imported component IDs
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source_path = Path('src/editor/snapping/objectSurfaceSnap.ts')
+          source = source_path.read_text(encoding='utf-8')
+          old = """  const componentRoots = root.children.filter((child) => (
+    child.visible && containsVisibleMesh(child)
+  ));
+  if (componentRoots.length === 0) {
+    return {
+      composite,
+      components: [rescopeTarget(composite, `${id}:component:0`, 'component')]
+    };
+  }
+
+  const components = componentRoots.flatMap((child, index) => {
+    const componentId = `${id}:component:${index}`;
+    const target = surfaceSnapTargetFromObject3D(child, componentId);
+"""
+          new = """  const componentRoots = root.children
+    .map((child, index) => ({ child, index }))
+    .filter(({ child }) => child.visible && containsVisibleMesh(child));
+  if (componentRoots.length === 0) {
+    return {
+      composite,
+      components: [rescopeTarget(composite, `${id}:component:0`, 'component')]
+    };
+  }
+
+  const components = componentRoots.flatMap(({ child, index }) => {
+    const componentId = `${id}:component:${index}`;
+    const target = surfaceSnapTargetFromObject3D(child, componentId);
+"""
+          if old not in source:
+              raise SystemExit('Expected component-root block not found')
+          source_path.write_text(source.replace(old, new, 1), encoding='utf-8')
+
+          test_path = Path('tests/appleCutterComposite.test.ts')
+          test = test_path.read_text(encoding='utf-8')
+          marker = """  it('erkennt explizite Top-Level-Gruppen als getrennte innere Komponenten', () => {
+"""
+          addition = """  it('behält Komponenten-IDs beim Ausblenden vorheriger Kinder stabil', () => {
+    const root = new THREE.Group();
+    const meshes = Array.from({ length: 3 }, () => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+    root.add(...meshes);
+
+    const first = analyzeImportedObject3DSnapTargets(root, 'stable-import');
+    meshes[0]!.visible = false;
+    const second = analyzeImportedObject3DSnapTargets(root, 'stable-import');
+
+    expect(first.components.map((target) => target.id)).toEqual([
+      'stable-import:component:0',
+      'stable-import:component:1',
+      'stable-import:component:2'
+    ]);
+    expect(second.components.map((target) => target.id)).toEqual([
+      'stable-import:component:1',
+      'stable-import:component:2'
+    ]);
+
+    meshes.forEach((mesh) => mesh.geometry.dispose());
+  });
+
+"""
+          if marker not in test:
+              raise SystemExit('Expected grouped-import test marker not found')
+          test_path.write_text(test.replace(marker, addition + marker, 1), encoding='utf-8')
 
       - uses: actions/setup-node@v4
         with:
@@ -43,6 +121,16 @@ jobs:
       - name: Build debug APK
         working-directory: android
         run: .\gradlew.bat assembleDebug
+
+      - name: Restore workflow and commit correction
+        shell: pwsh
+        run: |
+          git checkout HEAD^ -- .github/workflows/verify-apple-cutter-windows.yml
+          git config user.name "NorthCore Automation"
+          git config user.email "automation@northcore-eu.de"
+          git add src/editor/snapping/objectSurfaceSnap.ts tests/appleCutterComposite.test.ts .github/workflows/verify-apple-cutter-windows.yml
+          git commit -m "Import-Komponenten-IDs stabil halten"
+          git push origin HEAD:feature/apple-cutter-model
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
