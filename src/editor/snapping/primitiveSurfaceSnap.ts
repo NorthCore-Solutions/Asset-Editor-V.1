@@ -1,5 +1,6 @@
 import type { PrimitiveType, SceneObjectData, Vec3 } from '../../types/editor';
 import { useEditorStore } from '../../store/editorStore';
+import { isNativeAndroid } from '../../platform/nativeFileDialog';
 import {
   findObjectSurfaceSnap as findNearbyObjectSurfaceSnap,
   surfaceSnapTargetFromObject3D,
@@ -29,7 +30,18 @@ interface TranslationSnapSession {
   lock: TranslationSnapLock | null;
 }
 
+interface TouchTranslationSnapSession {
+  transactionToken: unknown;
+  rawPosition: Vec3;
+  acceptedPosition: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+  snappedTargetId: string | null;
+  released: boolean;
+}
+
 const translationSnapSessions = new Map<string, TranslationSnapSession>();
+const touchTranslationSnapSessions = new Map<string, TouchTranslationSnapSession>();
 
 export type {
   ObjectSurfaceSnapResult as FormSurfaceSnapResult,
@@ -143,6 +155,23 @@ function validSession(
   return session;
 }
 
+function validTouchSession(
+  source: SceneObjectData,
+  previous: SceneObjectData,
+  transactionToken: unknown
+): TouchTranslationSnapSession | null {
+  const session = touchTranslationSnapSessions.get(source.id);
+  if (
+    !session
+    || session.transactionToken !== transactionToken
+    || !sameVector(previous.position, session.acceptedPosition)
+    || !sameVector(source.rotation, session.rotation)
+    || !sameVector(source.scale, session.scale)
+  ) return null;
+
+  return session;
+}
+
 function incrementalTranslationSource(
   source: SceneObjectData,
   previous: SceneObjectData,
@@ -229,6 +258,24 @@ function rememberTranslationStep(
   });
 }
 
+function rememberTouchTranslationStep(
+  rawSource: SceneObjectData,
+  acceptedPosition: Vec3,
+  transactionToken: unknown,
+  snappedTargetId: string | null,
+  released: boolean
+): void {
+  touchTranslationSnapSessions.set(rawSource.id, {
+    transactionToken,
+    rawPosition: [...rawSource.position] as Vec3,
+    acceptedPosition: [...acceptedPosition] as Vec3,
+    rotation: [...rawSource.rotation] as Vec3,
+    scale: [...rawSource.scale] as Vec3,
+    snappedTargetId,
+    released
+  });
+}
+
 function statelessTranslationSnap(
   source: SceneObjectData,
   previous: SceneObjectData,
@@ -250,6 +297,82 @@ function statelessTranslationSnap(
 
 export function resetFormSurfaceSnapSessions(): void {
   translationSnapSessions.clear();
+  touchTranslationSnapSessions.clear();
+}
+
+/**
+ * Android-WebViews liefern Touch-Schritte gröber und anders getaktet als ein
+ * Desktop-Mausdrag. Deshalb wird die vorherige rohe Touch-Position getrennt
+ * von der zuletzt akzeptierten Snap-Position geführt. Nach dem ersten
+ * Verlassen eines Kontakts bleibt der Oberflächen-Snap für den restlichen Drag
+ * freigegeben, damit das Element nicht bei jedem groben Schritt erneut an
+ * derselben Fläche hängen bleibt.
+ */
+export function findTouchFormSurfaceSnap(
+  source: SceneObjectData,
+  objects: SceneObjectData[],
+  positionStep: number,
+  transactionToken: unknown,
+  additionalTargets: readonly SurfaceSnapTarget[] = []
+): ObjectSurfaceSnapResult {
+  const previous = objects.find((object) => object.id === source.id);
+  if (!previous || !sameRotationAndScale(source, previous)) {
+    touchTranslationSnapSessions.delete(source.id);
+    return findNearbyObjectSurfaceSnap(
+      source,
+      objects.filter((object) => object.id !== source.id),
+      positionStep,
+      additionalTargets
+    );
+  }
+
+  if (!transactionToken) {
+    touchTranslationSnapSessions.delete(source.id);
+    return statelessTranslationSnap(
+      source,
+      previous,
+      objects,
+      positionStep,
+      additionalTargets
+    );
+  }
+
+  const session = validTouchSession(source, previous, transactionToken);
+  if (session?.released) {
+    const released = unchangedResult(source);
+    rememberTouchTranslationStep(
+      source,
+      released.position,
+      transactionToken,
+      null,
+      true
+    );
+    return released;
+  }
+
+  const previousRaw: SceneObjectData = session
+    ? { ...previous, position: [...session.rawPosition] as Vec3 }
+    : previous;
+  const sweepObjects = objects.map((object) => (
+    object.id === source.id ? previousRaw : object
+  ));
+  const result = statelessTranslationSnap(
+    source,
+    previousRaw,
+    sweepObjects,
+    positionStep,
+    additionalTargets
+  );
+  const released = Boolean(session?.snappedTargetId && !result.targetId);
+
+  rememberTouchTranslationStep(
+    source,
+    result.position,
+    transactionToken,
+    result.targetId,
+    released
+  );
+  return result;
 }
 
 export function findFormSurfaceSnap(
@@ -267,6 +390,18 @@ export function findFormSurfaceSnap(
   const previous = activeObjects.find((object) => object.id === source.id);
 
   if (previous && sameRotationAndScale(source, previous)) {
+    if (isNativeAndroid()) {
+      translationSnapSessions.delete(source.id);
+      return findTouchFormSurfaceSnap(
+        source,
+        activeObjects,
+        positionStep,
+        transactionToken,
+        additionalTargets
+      );
+    }
+
+    touchTranslationSnapSessions.delete(source.id);
     if (!transactionToken) {
       translationSnapSessions.delete(source.id);
       return statelessTranslationSnap(
@@ -329,6 +464,7 @@ export function findFormSurfaceSnap(
   }
 
   translationSnapSessions.delete(source.id);
+  touchTranslationSnapSessions.delete(source.id);
   return findNearbyObjectSurfaceSnap(
     source,
     activeObjects.filter((object) => object.id !== source.id),
