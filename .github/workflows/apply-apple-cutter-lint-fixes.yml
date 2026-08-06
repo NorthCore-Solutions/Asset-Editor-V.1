@@ -1,0 +1,51 @@
+name: Apply Apple Cutter Lint Fixes
+
+on:
+  push:
+    branches:
+      - feature/apple-cutter-model
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/apple-cutter-model
+          fetch-depth: 0
+      - name: Apply focused fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          snap_path = Path('src/editor/snapping/objectSurfaceSnap.ts')
+          source = snap_path.read_text(encoding='utf-8')
+          source = source.replace(
+              "): SurfaceSnapTarget | null {\n  const topology = cachedSceneTopology(object);",
+              "): SurfaceSnapTarget | null {\n  void _cellSize;\n  const topology = cachedSceneTopology(object);",
+              1,
+          )
+          source = source.replace(
+              "): SurfaceSnapTarget | null {\n  root.updateWorldMatrix(true, true);",
+              "): SurfaceSnapTarget | null {\n  void _cellSize;\n  root.updateWorldMatrix(true, true);",
+              1,
+          )
+          snap_path.write_text(source, encoding='utf-8')
+
+          pattern_path = Path('src/editor/viewport/CompositeSnapPattern.tsx')
+          pattern = pattern_path.read_text(encoding='utf-8')
+          pattern = pattern.replace("import * as THREE from 'three';\n", '', 1)
+          pattern_path.write_text(pattern, encoding='utf-8')
+          PY
+      - name: Commit fixes and remove temporary workflow
+        run: |
+          git rm .github/workflows/apply-apple-cutter-lint-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/editor/snapping/objectSurfaceSnap.ts src/editor/viewport/CompositeSnapPattern.tsx
+          git commit -m "Apfelschneider-Lintfehler beheben"
+          git push origin HEAD:feature/apple-cutter-model
