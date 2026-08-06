@@ -1,0 +1,89 @@
+name: Apply Apple Cutter Finalization V4
+
+on:
+  push:
+    branches:
+      - feature/apple-cutter-model
+    paths:
+      - .github/workflows/apply-apple-cutter-finalization-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/apple-cutter-model
+          fetch-depth: 0
+
+      - name: Synchronize current branch
+        run: git pull --ff-only origin feature/apple-cutter-model
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Apply final migration
+        run: |
+          python scripts/finalize-apple-cutter.py
+          rm -f .github/workflows/apply-apple-cutter-finalization-v4.yml
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Commit verified migration
+        run: |
+          git config user.name "NorthCore Automation"
+          git config user.email "automation@northcore-eu.de"
+          git add -A \
+            src/editor/appleCutter \
+            src/editor/snapping/importComponentAnalysis.ts \
+            src/editor/snapping/objectSurfaceSnap.ts \
+            src/editor/snapping/primitiveSurfaceSnap.ts \
+            src/editor/viewport/EditorViewport.tsx \
+            tests/appleCutterComposite.test.ts \
+            tests/objectSurfaceSnap.test.ts \
+            tests/sweptObjectSurfaceSnap.test.ts \
+            scripts/finalize-apple-cutter.py \
+            .github/workflows/apply-apple-cutter-finalization.yml \
+            .github/workflows/apply-apple-cutter-finalization-v2.yml \
+            .github/workflows/apply-apple-cutter-finalization-v3.yml \
+            .github/workflows/apply-apple-cutter-finalization-v4.yml
+          git commit -m "Apfelschneider-Migration vollständig abschließen"
+          git pull --rebase origin feature/apple-cutter-model
+          git push origin HEAD:feature/apple-cutter-model
+
+      - name: Upload verified debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-editor-apple-cutter-final-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
