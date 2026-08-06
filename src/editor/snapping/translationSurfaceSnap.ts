@@ -1,5 +1,10 @@
+import * as THREE from 'three';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
-import type { ObjectSurfaceSnapResult, SurfaceSnapTarget } from './objectSurfaceSnap';
+import {
+  findSurfaceTargetSnap,
+  type ObjectSurfaceSnapResult,
+  type SurfaceSnapTarget
+} from './objectSurfaceSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
 
 const RELEASE_DISTANCE = 0.14;
@@ -50,34 +55,32 @@ function unchanged(position: Vec3): ObjectSurfaceSnapResult {
   };
 }
 
-/**
- * Gemeinsame magnetische Freigabelogik für Maus und Touch. Die kontinuierliche
- * rohe Bewegung bleibt vom Bewegungsraster getrennt. Ein Kontakt wird sichtbar
- * gehalten, bis der Pointer den Freigabebereich verlässt; danach wird nur der
- * konkrete Apfelschneider-Punkt vorübergehend unterdrückt.
- */
-export function resolveTranslationSurfaceSnap(
-  source: SceneObjectData,
-  objects: readonly SceneObjectData[],
-  positionStep: number,
+function holdOrReleaseContact(
   rawPosition: Vec3,
-  currentSession: TranslationSurfaceSnapSession,
-  additionalTargets: readonly SurfaceSnapTarget[] = []
-): TranslationSurfaceSnapResolution {
+  currentSession: TranslationSurfaceSnapSession
+): {
+  held: TranslationSurfaceSnapResolution | null;
+  active: TranslationSurfaceSnapContact | null;
+  suppressed: TranslationSurfaceSnapSuppression | null;
+} {
   let active = currentSession.active;
   let suppressed = currentSession.suppressed;
 
   if (active) {
     if (distance(rawPosition, active.captureRawPosition) <= RELEASE_DISTANCE) {
       return {
-        result: {
-          position: [...active.acceptedPosition] as Vec3,
-          targetId: active.targetId,
-          distance: 0,
-          sourceAnchorId: active.sourceAnchorId,
-          targetAnchorId: active.targetAnchorId
+        held: {
+          result: {
+            position: [...active.acceptedPosition] as Vec3,
+            targetId: active.targetId,
+            distance: 0,
+            sourceAnchorId: active.sourceAnchorId,
+            targetAnchorId: active.targetAnchorId
+          },
+          session: { active, suppressed: null }
         },
-        session: { active, suppressed: null }
+        active,
+        suppressed: null
       };
     }
 
@@ -90,22 +93,23 @@ export function resolveTranslationSurfaceSnap(
   if (suppressed && distance(rawPosition, suppressed.rawOrigin) >= REARM_DISTANCE) {
     suppressed = null;
   }
+  return { held: null, active, suppressed };
+}
 
-  const snapped = findSweptObjectSurfaceSnap(
-    source,
-    objects,
-    positionStep,
-    additionalTargets,
-    { ignoredTargetAnchorId: suppressed?.targetAnchorId ?? null }
-  );
+function capturedResolution(
+  snapped: ObjectSurfaceSnapResult | null,
+  rawPosition: Vec3,
+  unchangedPosition: Vec3,
+  suppressed: TranslationSurfaceSnapSuppression | null
+): TranslationSurfaceSnapResolution {
   if (!snapped?.targetId) {
     return {
-      result: unchanged(source.position),
+      result: unchanged(unchangedPosition),
       session: { active: null, suppressed }
     };
   }
 
-  active = {
+  const active: TranslationSurfaceSnapContact = {
     targetId: snapped.targetId,
     targetAnchorId: snapped.targetAnchorId ?? null,
     sourceAnchorId: snapped.sourceAnchorId ?? null,
@@ -116,4 +120,68 @@ export function resolveTranslationSurfaceSnap(
     result: snapped,
     session: { active, suppressed: null }
   };
+}
+
+/** Gemeinsame magnetische Freigabelogik für einzelne Formen auf Maus und Touch. */
+export function resolveTranslationSurfaceSnap(
+  source: SceneObjectData,
+  objects: readonly SceneObjectData[],
+  positionStep: number,
+  rawPosition: Vec3,
+  currentSession: TranslationSurfaceSnapSession,
+  additionalTargets: readonly SurfaceSnapTarget[] = []
+): TranslationSurfaceSnapResolution {
+  const contact = holdOrReleaseContact(rawPosition, currentSession);
+  if (contact.held) return contact.held;
+
+  const snapped = findSweptObjectSurfaceSnap(
+    source,
+    objects,
+    positionStep,
+    additionalTargets,
+    { ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null }
+  );
+  return capturedResolution(
+    snapped,
+    rawPosition,
+    source.position,
+    contact.suppressed
+  );
+}
+
+/**
+ * Dieselbe Hysterese für das äußere Raster einer Gruppe oder eines Imports.
+ * Unterdrückt wird nur der konkrete Apfelschneider-Punkt, nicht das Zielobjekt.
+ */
+export function resolveCompositeTranslationSurfaceSnap(
+  sourceTarget: SurfaceSnapTarget,
+  targets: readonly SurfaceSnapTarget[],
+  rawPosition: Vec3,
+  currentSession: TranslationSurfaceSnapSession,
+  worldThreshold: number = 0.12
+): TranslationSurfaceSnapResolution {
+  const contact = holdOrReleaseContact(rawPosition, currentSession);
+  if (contact.held) return contact.held;
+
+  const filteredTargets = contact.suppressed
+    ? targets.map((target) => ({
+      ...target,
+      anchors: target.anchors.filter((anchor) => (
+        anchor.id !== contact.suppressed?.targetAnchorId
+      ))
+    }))
+    : targets;
+  const sourcePosition = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
+  const snapped = findSurfaceTargetSnap(
+    sourceTarget,
+    filteredTargets,
+    sourcePosition,
+    worldThreshold
+  );
+  return capturedResolution(
+    snapped.targetId ? snapped : null,
+    rawPosition,
+    [sourcePosition.x, sourcePosition.y, sourcePosition.z],
+    contact.suppressed
+  );
 }
