@@ -210,10 +210,18 @@ export function buildGeometrySurfaceSnapAnchors(
     buildCenteredAppleCutterAxis('y', bounds.min.y, bounds.max.y, objectScale.y),
     buildCenteredAppleCutterAxis('z', bounds.min.z, bounds.max.z, objectScale.z)
   ] as const;
+  // Die Mittelpunktachsen sind Referenzlinien für die Oberflächenabtastung,
+  // aber keine zusätzlichen Schnitte und verändern daher keine Kachelgröße.
+  // Sie sichern insbesondere bei kleinen und runden Körpern die exakten
+  // symmetrischen Außenpunkte entlang X, Y und Z.
+  const samplingCoordinates = (axisGrid: (typeof axisGrids)[number]): number[] => (
+    [...new Set([...axisGrid.coordinates, axisGrid.center])]
+      .sort((left, right) => left - right)
+  );
   const grids: [number[], number[], number[]] = [
-    axisGrids[0].coordinates,
-    axisGrids[1].coordinates,
-    axisGrids[2].coordinates
+    samplingCoordinates(axisGrids[0]),
+    samplingCoordinates(axisGrids[1]),
+    samplingCoordinates(axisGrids[2])
   ];
   const localStep = localSurfaceSnapStep(APPLE_CUTTER_CELL_SIZE, objectScale);
   const index = geometry.getIndex();
