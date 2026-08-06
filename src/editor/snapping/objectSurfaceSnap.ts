@@ -54,6 +54,7 @@ function matrixForSceneObject(object: SceneObjectData): THREE.Matrix4 {
 
 function geometryCacheKey(object: SceneObjectData): string {
   return JSON.stringify({
+    id: object.id,
     type: object.type,
     geometry: object.geometry,
     scale: object.scale.map((value) => Number(Math.abs(value).toFixed(6))),
@@ -125,18 +126,144 @@ function matrixScale(matrix: THREE.Matrix4): THREE.Vector3 {
   return scale;
 }
 
-function nonIndexedClone(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
-  const clone = geometry.clone();
-  if (!clone.index) return clone;
-  const nonIndexed = clone.toNonIndexed();
-  clone.dispose();
-  return nonIndexed;
+/** Vereinheitlicht Attribute, damit beliebige importierte Meshes zusammengeführt werden können. */
+function normalizedSnapGeometry(source: THREE.BufferGeometry): THREE.BufferGeometry {
+  const clone = source.clone();
+  const geometry = clone.index ? clone.toNonIndexed() : clone;
+  if (geometry !== clone) clone.dispose();
+
+  for (const name of Object.keys(geometry.attributes)) {
+    if (name !== 'position') geometry.deleteAttribute(name);
+  }
+  geometry.clearGroups();
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 function mergedGeometry(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
   if (parts.length === 0) return null;
   if (parts.length === 1) return parts[0] ?? null;
   return mergeGeometries(parts, false);
+}
+
+function quantizedPointKey(point: THREE.Vector3): string {
+  const precision = 0.00001;
+  return [point.x, point.y, point.z]
+    .map((value) => Math.round(value / precision))
+    .join(':');
+}
+
+function closedTriangleSoup(geometry: THREE.BufferGeometry): boolean {
+  const positions = geometry.getAttribute('position');
+  if (!positions || positions.itemSize < 3 || positions.count < 3) return false;
+  const edgeCounts = new Map<string, number>();
+
+  for (let triangle = 0; triangle + 2 < positions.count; triangle += 3) {
+    const points = [0, 1, 2].map((offset) => (
+      new THREE.Vector3().fromBufferAttribute(positions, triangle + offset)
+    ));
+    for (const [first, second] of [[0, 1], [1, 2], [2, 0]] as const) {
+      const firstKey = quantizedPointKey(points[first] ?? new THREE.Vector3());
+      const secondKey = quantizedPointKey(points[second] ?? new THREE.Vector3());
+      const key = firstKey < secondKey ? `${firstKey}|${secondKey}` : `${secondKey}|${firstKey}`;
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
+  }
+
+  return edgeCounts.size > 0 && [...edgeCounts.values()].every((count) => count % 2 === 0);
+}
+
+function pointInsideClosedGeometry(
+  point: THREE.Vector3,
+  geometry: THREE.BufferGeometry
+): boolean {
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.updateMatrixWorld(true);
+  const raycaster = new THREE.Raycaster(
+    point,
+    new THREE.Vector3(1, 0.371, 0.613).normalize(),
+    0.000001,
+    Number.POSITIVE_INFINITY
+  );
+  const distances = raycaster.intersectObject(mesh, false)
+    .map((hit) => hit.distance)
+    .filter((distance) => distance > 0.00001)
+    .sort((left, right) => left - right);
+  material.dispose();
+
+  let uniqueCount = 0;
+  let previous = Number.NEGATIVE_INFINITY;
+  for (const distance of distances) {
+    if (distance - previous <= 0.00001) continue;
+    previous = distance;
+    uniqueCount += 1;
+  }
+  return uniqueCount % 2 === 1;
+}
+
+/**
+ * Entfernt Composite-Punkte, deren leicht nach außen versetzte Position in
+ * einem anderen geschlossenen Bauteil liegt. Dadurch verschwinden insbesondere
+ * Kontaktflächen zwischen Wänden, Dach und weiteren Gruppenbestandteilen.
+ */
+function externalCompositeAnchors(
+  anchors: SurfaceSnapAnchor[],
+  componentParts: readonly THREE.BufferGeometry[]
+): SurfaceSnapAnchor[] {
+  const closedParts = componentParts.filter(closedTriangleSoup);
+  if (closedParts.length < 2) return anchors;
+  const combinedBounds = new THREE.Box3().makeEmpty();
+  for (const part of closedParts) {
+    part.computeBoundingBox();
+    if (part.boundingBox) combinedBounds.union(part.boundingBox);
+  }
+  const diagonal = combinedBounds.getSize(new THREE.Vector3()).length();
+  const offset = Math.max(0.0001, diagonal * 0.00001);
+
+  return anchors.filter((anchor) => {
+    const outsideProbe = anchor.position.clone().addScaledVector(anchor.normal, offset);
+    return !closedParts.some((part) => pointInsideClosedGeometry(outsideProbe, part));
+  });
+}
+
+function compositeTargetFromParts(
+  parts: THREE.BufferGeometry[],
+  id: string,
+  visible: boolean,
+  matrixWorld: THREE.Matrix4,
+  scale: THREE.Vector3
+): SurfaceSnapTarget | null {
+  const geometry = mergedGeometry(parts);
+  if (!geometry) return null;
+  try {
+    geometry.computeBoundingBox();
+    const localBounds = geometry.boundingBox?.clone();
+    if (!localBounds || !finiteBounds(localBounds)) return null;
+    const rawAnchors = buildGeometrySurfaceSnapAnchors(
+      geometry,
+      APPLE_CUTTER_CELL_SIZE,
+      scale,
+      { componentId: id, scope: 'composite', maxAnchors: 16384 }
+    );
+    const anchors = externalCompositeAnchors(rawAnchors, parts);
+    if (anchors.length === 0) return null;
+    return {
+      id,
+      visible,
+      localBounds,
+      matrixWorld: matrixWorld.clone(),
+      anchors,
+      scope: 'composite'
+    };
+  } finally {
+    geometry.dispose();
+    for (const part of parts) {
+      if (part !== geometry) part.dispose();
+    }
+  }
 }
 
 /**
@@ -156,39 +283,19 @@ export function surfaceSnapTargetFromObject3D(
   root.traverseVisible((child) => {
     const mesh = child as THREE.Mesh<THREE.BufferGeometry>;
     if (!mesh.isMesh || !mesh.geometry) return;
-    const geometry = nonIndexedClone(mesh.geometry);
+    const geometry = normalizedSnapGeometry(mesh.geometry);
     geometry.applyMatrix4(inverseRootMatrix.clone().multiply(mesh.matrixWorld));
     geometry.computeVertexNormals();
     parts.push(geometry);
   });
 
-  const geometry = mergedGeometry(parts);
-  if (!geometry) return null;
-  try {
-    geometry.computeBoundingBox();
-    const localBounds = geometry.boundingBox?.clone();
-    if (!localBounds || !finiteBounds(localBounds)) return null;
-    const anchors = buildGeometrySurfaceSnapAnchors(
-      geometry,
-      APPLE_CUTTER_CELL_SIZE,
-      matrixScale(root.matrixWorld),
-      { componentId: id, scope: 'composite' }
-    );
-    if (anchors.length === 0) return null;
-    return {
-      id,
-      visible: root.visible,
-      localBounds,
-      matrixWorld: root.matrixWorld.clone(),
-      anchors,
-      scope: 'composite'
-    };
-  } finally {
-    geometry.dispose();
-    for (const part of parts) {
-      if (part !== geometry) part.dispose();
-    }
-  }
+  return compositeTargetFromParts(
+    parts,
+    id,
+    root.visible,
+    root.matrixWorld,
+    matrixScale(root.matrixWorld)
+  );
 }
 
 /**
@@ -205,7 +312,9 @@ export function surfaceSnapTargetFromSceneObjects(
   const worldParts: THREE.BufferGeometry[] = [];
   const worldBounds = new THREE.Box3().makeEmpty();
   for (const object of visibleObjects) {
-    const geometry = nonIndexedClone(createGeometry(object));
+    const sourceGeometry = createGeometry(object);
+    const geometry = normalizedSnapGeometry(sourceGeometry);
+    sourceGeometry.dispose();
     geometry.applyMatrix4(matrixForSceneObject(object));
     geometry.computeBoundingBox();
     if (geometry.boundingBox) worldBounds.union(geometry.boundingBox);
@@ -218,37 +327,13 @@ export function surfaceSnapTargetFromSceneObjects(
 
   const center = worldBounds.getCenter(new THREE.Vector3());
   for (const part of worldParts) part.translate(-center.x, -center.y, -center.z);
-  const geometry = mergedGeometry(worldParts);
-  if (!geometry) {
-    worldParts.forEach((part) => part.dispose());
-    return null;
-  }
-
-  try {
-    geometry.computeBoundingBox();
-    const localBounds = geometry.boundingBox?.clone();
-    if (!localBounds || !finiteBounds(localBounds)) return null;
-    const anchors = buildGeometrySurfaceSnapAnchors(
-      geometry,
-      APPLE_CUTTER_CELL_SIZE,
-      new THREE.Vector3(1, 1, 1),
-      { componentId: id, scope: 'composite' }
-    );
-    if (anchors.length === 0) return null;
-    return {
-      id,
-      visible: true,
-      localBounds,
-      matrixWorld: new THREE.Matrix4().makeTranslation(center.x, center.y, center.z),
-      anchors,
-      scope: 'composite'
-    };
-  } finally {
-    geometry.dispose();
-    for (const part of worldParts) {
-      if (part !== geometry) part.dispose();
-    }
-  }
+  return compositeTargetFromParts(
+    worldParts,
+    id,
+    true,
+    new THREE.Matrix4().makeTranslation(center.x, center.y, center.z),
+    new THREE.Vector3(1, 1, 1)
+  );
 }
 
 function expandedWorldBounds(target: SurfaceSnapTarget, amount: number): THREE.Box3 {
