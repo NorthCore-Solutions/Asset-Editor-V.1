@@ -153,10 +153,15 @@ function betterCandidate(
   current: SweepCandidate | null
 ): boolean {
   if (!current) return true;
-  if (candidate.travel < current.travel - EPSILON) return true;
-  if (Math.abs(candidate.travel - current.travel) > EPSILON) return false;
+
+  // Formen-Snap ist ein Punkt-zu-Punkt-Snap. Eine seitlich besser deckende
+  // Paarung ist daher geometrisch gültiger als eine früher gekreuzte,
+  // schräg liegende Tangentialebene. Erst bei gleicher Punktdeckung gewinnt
+  // der zeitlich frühere Kontakt auf der Ziehbahn.
   if (candidate.lateralDistance < current.lateralDistance - EPSILON) return true;
   if (Math.abs(candidate.lateralDistance - current.lateralDistance) > EPSILON) return false;
+  if (candidate.travel < current.travel - EPSILON) return true;
+  if (Math.abs(candidate.travel - current.travel) > EPSILON) return false;
   return candidate.normalAlignment < current.normalAlignment;
 }
 
