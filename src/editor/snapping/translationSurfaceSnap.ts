@@ -6,6 +6,7 @@ import {
   type SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
+import { findSweptSurfaceTargetSnap } from './sweptSurfaceTargetSnap';
 
 const RELEASE_DISTANCE = 0.14;
 const REARM_DISTANCE = 0.35;
@@ -151,14 +152,16 @@ export function resolveTranslationSurfaceSnap(
 
 /**
  * Dieselbe Hysterese für das äußere Raster einer Gruppe oder eines Imports.
- * Unterdrückt wird nur der konkrete Apfelschneider-Punkt, nicht das Zielobjekt.
+ * Der vorherige und aktuelle Composite-Zustand werden als vollständige
+ * Ziehbahn geprüft; ein 0,25-Rasterschritt kann den Kontakt nicht überspringen.
  */
 export function resolveCompositeTranslationSurfaceSnap(
   sourceTarget: SurfaceSnapTarget,
   targets: readonly SurfaceSnapTarget[],
   rawPosition: Vec3,
   currentSession: TranslationSurfaceSnapSession,
-  worldThreshold: number = 0.12
+  positionStep: number,
+  previousSourceTarget: SurfaceSnapTarget | null = null
 ): TranslationSurfaceSnapResolution {
   const contact = holdOrReleaseContact(rawPosition, currentSession);
   if (contact.held) return contact.held;
@@ -172,14 +175,24 @@ export function resolveCompositeTranslationSurfaceSnap(
     }))
     : targets;
   const sourcePosition = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
-  const snapped = findSurfaceTargetSnap(
+  const swept = previousSourceTarget
+    ? findSweptSurfaceTargetSnap(
+      previousSourceTarget,
+      sourceTarget,
+      filteredTargets,
+      positionStep,
+      { ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null }
+    )
+    : null;
+  const threshold = Math.min(0.12, Math.max(0.04, Math.abs(positionStep) * 0.4));
+  const nearby = swept ?? findSurfaceTargetSnap(
     sourceTarget,
     filteredTargets,
     sourcePosition,
-    worldThreshold
+    threshold
   );
   return capturedResolution(
-    snapped.targetId ? snapped : null,
+    nearby.targetId ? nearby : null,
     rawPosition,
     [sourcePosition.x, sourcePosition.y, sourcePosition.z],
     contact.suppressed
