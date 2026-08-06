@@ -58,4 +58,14 @@ describe('Apfelschneider-Achsraster', () => {
     expect(grid.cuts).toEqual([2.125, 2.375, 2.625, 2.875]);
     expect(grid.cells.map((cell) => cell.size)).toEqual([0.125, 0.25, 0.25, 0.25, 0.125]);
   });
+
+  it('behandelt negative Skalierung spiegelbildlich mit identischen Kachelgrößen', () => {
+    const positive = buildCenteredAppleCutterAxis('x', -0.5, 0.5, 1.6);
+    const negative = buildCenteredAppleCutterAxis('x', -0.5, 0.5, -1.6);
+
+    expect(negative.cuts).toEqual(positive.cuts);
+    expect(negative.cells.map((cell) => cell.size)).toEqual(
+      positive.cells.map((cell) => cell.size)
+    );
+  });
 });
