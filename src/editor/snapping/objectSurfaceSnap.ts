@@ -263,10 +263,10 @@ function externalCompositeAnchors(
   anchors: SurfaceSnapAnchor[],
   componentParts: readonly THREE.BufferGeometry[]
 ): SurfaceSnapAnchor[] {
-  const exteriorCandidates = removeOpposingCoincidentAnchors(anchors);
   const closedParts = componentParts.filter(closedTriangleSoup);
-  if (closedParts.length < 2) return exteriorCandidates;
+  if (closedParts.length < 2) return anchors;
 
+  const exteriorCandidates = removeOpposingCoincidentAnchors(anchors);
   const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
   const probes: ClosedPartProbe[] = closedParts.map((part) => {
     part.computeBoundingBox();
