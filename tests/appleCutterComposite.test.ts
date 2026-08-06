@@ -41,6 +41,29 @@ describe('äußeres Apfelschneider-Raster', () => {
     ))).toBe(true);
   });
 
+  it('entfernt deckungsgleiche Gegenflächen auch bei offenen Bauteilen', () => {
+    const root = new THREE.Group();
+    const firstInternal = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    const secondInternal = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    secondInternal.rotation.y = Math.PI;
+    const exterior = new THREE.Mesh(new THREE.PlaneGeometry(1, 1));
+    exterior.position.z = 2;
+    root.add(firstInternal, secondInternal, exterior);
+
+    const target = surfaceSnapTargetFromObject3D(root, 'open-composite');
+
+    expect(target).not.toBeNull();
+    if (target) {
+      const anchors = transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
+      expect(anchors.some((anchor) => Math.abs(anchor.position.z) < 0.00001)).toBe(false);
+      expect(anchors.some((anchor) => Math.abs(anchor.position.z - 2) < 0.00001)).toBe(true);
+    }
+
+    firstInternal.geometry.dispose();
+    secondInternal.geometry.dispose();
+    exterior.geometry.dispose();
+  });
+
   it('verwendet bei gemeinsamer Translation dieselbe lokale Topologie wieder', () => {
     const firstObjects = [boxAt('left', -0.5), boxAt('right', 0.5)];
     const first = surfaceSnapTargetFromSceneObjects(firstObjects, 'cached-group');
