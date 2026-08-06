@@ -63,7 +63,7 @@ describe('äußeres Apfelschneider-Raster', () => {
 });
 
 describe('automatische Importvorbereitung', () => {
-  it('behandelt direkte Mesh-Nodes als eine logische Komponente plus äußere Hülle', () => {
+  it('behandelt direkte Mesh-Nodes als getrennte Komponenten plus äußere Hülle', () => {
     const root = new THREE.Group();
     const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.2));
     wall.position.x = -0.5;
@@ -75,9 +75,10 @@ describe('automatische Importvorbereitung', () => {
 
     expect(analysis.composite?.scope).toBe('composite');
     expect(analysis.composite?.anchors.length).toBeGreaterThan(0);
-    expect(analysis.components).toHaveLength(1);
-    expect(analysis.components[0]?.scope).toBe('component');
-    expect(analysis.components[0]?.anchors.length).toBeGreaterThan(0);
+    expect(analysis.components).toHaveLength(2);
+    expect(analysis.components.every((target) => target.scope === 'component')).toBe(true);
+    expect(analysis.components.every((target) => target.anchors.length > 0)).toBe(true);
+    expect(new Set(analysis.components.map((target) => target.id)).size).toBe(2);
 
     wall.geometry.dispose();
     roof.geometry.dispose();
@@ -102,6 +103,19 @@ describe('automatische Importvorbereitung', () => {
 
     wallMesh.geometry.dispose();
     roofMesh.geometry.dispose();
+  });
+
+  it('behält für ein einzelnes Root-Mesh genau ein Komponentenraster', () => {
+    const root = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+
+    const analysis = analyzeImportedObject3DSnapTargets(root, 'single-mesh-import');
+
+    expect(analysis.composite?.scope).toBe('composite');
+    expect(analysis.components).toHaveLength(1);
+    expect(analysis.components[0]?.scope).toBe('component');
+    expect(analysis.components[0]?.anchors.length).toBeGreaterThan(0);
+
+    root.geometry.dispose();
   });
 
   it('berechnet bei reiner Root-Translation die Importtopologie nicht neu', () => {
