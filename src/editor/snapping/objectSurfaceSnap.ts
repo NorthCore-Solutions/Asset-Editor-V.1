@@ -437,9 +437,9 @@ export function analyzeImportedObject3DSnapTargets(
   const composite = surfaceSnapTargetFromObject3D(root, id);
   if (!composite) return { composite: null, components: [] };
 
-  const componentRoots = root.children.filter((child) => (
-    child.visible && containsVisibleMesh(child)
-  ));
+  const componentRoots = root.children
+    .map((child, index) => ({ child, index }))
+    .filter(({ child }) => child.visible && containsVisibleMesh(child));
   if (componentRoots.length === 0) {
     return {
       composite,
@@ -447,7 +447,7 @@ export function analyzeImportedObject3DSnapTargets(
     };
   }
 
-  const components = componentRoots.flatMap((child, index) => {
+  const components = componentRoots.flatMap(({ child, index }) => {
     const componentId = `${id}:component:${index}`;
     const target = surfaceSnapTargetFromObject3D(child, componentId);
     return target
