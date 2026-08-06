@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createGeometry, createSceneObject } from '../src/geometry/factory';
 import { APPLE_CUTTER_CELL_SIZE } from '../src/editor/appleCutter/appleCutterAxisGrid';
+import { surfaceSnapTargetFromSceneObject } from '../src/editor/snapping/objectSurfaceSnap';
 import { buildGeometrySurfaceSnapAnchors } from '../src/editor/snapping/surfaceSnapTopology';
 import { buildGeometrySupportPoints } from '../src/editor/snapping/surfaceSupport';
 
@@ -64,5 +65,23 @@ describe('Trennung von Apfelschneider-Punkten und Oberflächenstützen', () => {
     ))).toBe(true);
 
     geometry.dispose();
+  });
+
+  it('liefert dem Solver Stützpunkte, ohne sie als sichtbare Anker auszugeben', () => {
+    const object = createSceneObject('sphere');
+    const target = surfaceSnapTargetFromSceneObject(object);
+    const radius = object.geometry.radius ?? 0.65;
+
+    expect(target).not.toBeNull();
+    expect(target?.supportPoints?.some((point) => (
+      Math.abs(point.x - radius) < 0.000001
+      && Math.abs(point.y) < 0.000001
+      && Math.abs(point.z) < 0.000001
+    ))).toBe(true);
+    expect(target?.anchors.some((anchor) => (
+      Math.abs(anchor.position.x - radius) < 0.000001
+      && Math.abs(anchor.position.y) < 0.000001
+      && Math.abs(anchor.position.z) < 0.000001
+    ))).toBe(false);
   });
 });
