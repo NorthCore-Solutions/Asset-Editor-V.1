@@ -3,46 +3,84 @@ import * as THREE from 'three';
 import { createSceneObject } from '../src/geometry/factory';
 import {
   surfaceSnapTargetFromSceneObject,
-  surfaceSnapTargetFromSceneObjects
+  surfaceSnapTargetFromSceneObjects,
+  type SurfaceSnapTarget
 } from '../src/editor/snapping/objectSurfaceSnap';
+import {
+  minimumSurfaceProjection,
+  transformSurfaceSupportPoints
+} from '../src/editor/snapping/surfaceSupport';
+import {
+  transformSurfaceSnapAnchors,
+  type SurfaceSnapAnchor
+} from '../src/editor/snapping/surfaceSnapTopology';
 import {
   createTranslationSurfaceSnapSession,
   resolveCompositeTranslationSurfaceSnap
 } from '../src/editor/snapping/translationSurfaceSnap';
 import { findSweptSurfaceTargetSnap } from '../src/editor/snapping/sweptSurfaceTargetSnap';
-import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
 import type { PrimitiveType, SceneObjectData } from '../src/types/editor';
 
 const STEP = 0.25;
 
-function requiredBounds(object: SceneObjectData): THREE.Box3 {
-  const bounds = worldBoundsFromSceneObject(object);
-  if (!bounds) throw new Error(`Keine Bounds für ${object.type}.`);
-  return bounds;
+function worldAnchors(target: SurfaceSnapTarget): SurfaceSnapAnchor[] {
+  return transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
+}
+
+function targetCenter(target: { matrixWorld: THREE.Matrix4 }): [number, number, number] {
+  const center = new THREE.Vector3().setFromMatrixPosition(target.matrixWorld);
+  return [center.x, center.y, center.z];
 }
 
 function crossingSetup(targetType: PrimitiveType, gap: number = 0.05) {
   const target = createSceneObject(targetType);
   target.id = `target-${targetType}`;
-  const targetBounds = requiredBounds(target);
-  const targetCenter = targetBounds.getCenter(new THREE.Vector3());
+  const fixedTarget = surfaceSnapTargetFromSceneObject(target);
+  if (!fixedTarget) throw new Error(`Keine Zieltopologie für ${targetType}.`);
 
   const source = createSceneObject('sphere');
   source.id = 'source-component';
-  const sourceBounds = requiredBounds(source);
-  const sourceCenter = sourceBounds.getCenter(new THREE.Vector3());
-  source.position = [
-    source.position[0],
-    source.position[1] + targetCenter.y - sourceCenter.y,
-    source.position[2] + targetCenter.z - sourceCenter.z
-  ];
-  const alignedBounds = requiredBounds(source);
+  const initialSourceTarget = surfaceSnapTargetFromSceneObjects(
+    [source],
+    'moving-composite'
+  );
+  if (!initialSourceTarget) throw new Error('Keine Composite-Quelltopologie.');
+
+  const sourceAnchors = worldAnchors(initialSourceTarget)
+    .filter((anchor) => anchor.normal.x > 0.25);
+  const targetAnchors = worldAnchors(fixedTarget)
+    .filter((anchor) => anchor.normal.x < -0.25);
+  if (sourceAnchors.length === 0 || targetAnchors.length === 0) {
+    throw new Error(`Keine Composite-Punktbahn zu ${targetType}.`);
+  }
+
+  let sourceAnchor = sourceAnchors[0];
+  let targetAnchor = targetAnchors[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidateSource of sourceAnchors) {
+    for (const candidateTarget of targetAnchors) {
+      const score = (1 + candidateSource.normal.dot(candidateTarget.normal)) * 10
+        + Math.hypot(
+          candidateSource.position.y - candidateTarget.position.y,
+          candidateSource.position.z - candidateTarget.position.z
+        );
+      if (score >= bestScore) continue;
+      bestScore = score;
+      sourceAnchor = candidateSource;
+      targetAnchor = candidateTarget;
+    }
+  }
+  if (!sourceAnchor || !targetAnchor) throw new Error('Ungültiges Composite-Punktpaar.');
+
+  const desiredSourceAnchor = targetAnchor.position.clone()
+    .addScaledVector(targetAnchor.normal, gap);
+  const translation = desiredSourceAnchor.sub(sourceAnchor.position);
   const previousObject: SceneObjectData = {
     ...source,
     position: [
-      source.position[0] + targetBounds.min.x - gap - alignedBounds.max.x,
-      source.position[1],
-      source.position[2]
+      source.position[0] + translation.x,
+      source.position[1] + translation.y,
+      source.position[2] + translation.z
     ]
   };
   const currentObject: SceneObjectData = {
@@ -53,7 +91,6 @@ function crossingSetup(targetType: PrimitiveType, gap: number = 0.05) {
       previousObject.position[2]
     ]
   };
-
   const previousTarget = surfaceSnapTargetFromSceneObjects(
     [previousObject],
     'moving-composite'
@@ -62,14 +99,12 @@ function crossingSetup(targetType: PrimitiveType, gap: number = 0.05) {
     [currentObject],
     'moving-composite'
   );
-  const fixedTarget = surfaceSnapTargetFromSceneObject(target);
-  if (!previousTarget || !currentTarget || !fixedTarget) {
+  if (!previousTarget || !currentTarget) {
     throw new Error('Composite-Sweep-Testtopologie konnte nicht erzeugt werden.');
   }
 
   return {
     target,
-    targetBounds,
     previousObject,
     currentObject,
     previousTarget,
@@ -78,25 +113,25 @@ function crossingSetup(targetType: PrimitiveType, gap: number = 0.05) {
   };
 }
 
-function targetCenter(target: { matrixWorld: THREE.Matrix4 }): [number, number, number] {
-  const center = new THREE.Vector3().setFromMatrixPosition(target.matrixWorld);
-  return [center.x, center.y, center.z];
-}
+function expectPhysicalCompositeContact(
+  currentTarget: SurfaceSnapTarget,
+  fixedTarget: SurfaceSnapTarget,
+  result: NonNullable<ReturnType<typeof findSweptSurfaceTargetSnap>>
+): void {
+  const targetAnchor = worldAnchors(fixedTarget)
+    .find((anchor) => anchor.id === result.targetAnchorId);
+  expect(targetAnchor).toBeDefined();
+  if (!targetAnchor) return;
 
-function correctedObject(
-  object: SceneObjectData,
-  currentCenter: THREE.Vector3,
-  snappedCenter: [number, number, number]
-): SceneObjectData {
-  const correction = new THREE.Vector3(...snappedCenter).sub(currentCenter);
-  return {
-    ...object,
-    position: [
-      object.position[0] + correction.x,
-      object.position[1] + correction.y,
-      object.position[2] + correction.z
-    ]
-  };
+  const correctedMatrix = currentTarget.matrixWorld.clone();
+  correctedMatrix.setPosition(...result.position);
+  const localSupport = currentTarget.supportPoints?.length
+    ? currentTarget.supportPoints
+    : currentTarget.anchors.map((anchor) => anchor.position);
+  const worldSupport = transformSurfaceSupportPoints(localSupport, correctedMatrix);
+
+  expect(minimumSurfaceProjection(worldSupport, targetAnchor.normal))
+    .toBeCloseTo(targetAnchor.position.dot(targetAnchor.normal), 4);
 }
 
 describe('kontinuierlicher äußerer Composite-Snap', () => {
@@ -104,9 +139,6 @@ describe('kontinuierlicher äußerer Composite-Snap', () => {
     'stoppt eine Gruppe trotz übersprungener Fangzone an %s',
     (targetType) => {
       const setup = crossingSetup(targetType);
-      expect(requiredBounds(setup.currentObject).max.x)
-        .toBeGreaterThan(setup.targetBounds.min.x);
-
       const result = findSweptSurfaceTargetSnap(
         setup.previousTarget,
         setup.currentTarget,
@@ -116,16 +148,9 @@ describe('kontinuierlicher äußerer Composite-Snap', () => {
 
       expect(result?.targetId).toBe(setup.target.id);
       if (!result) return;
-      const currentCenter = new THREE.Vector3().setFromMatrixPosition(
-        setup.currentTarget.matrixWorld
-      );
-      const snapped = correctedObject(
-        setup.currentObject,
-        currentCenter,
-        result.position
-      );
-      expect(requiredBounds(snapped).max.x)
-        .toBeCloseTo(setup.targetBounds.min.x, 4);
+      expect(result.position[0]).toBeGreaterThan(setup.previousTarget.matrixWorld.elements[12] ?? -Infinity);
+      expect(result.position[0]).toBeLessThan(setup.currentTarget.matrixWorld.elements[12] ?? Infinity);
+      expectPhysicalCompositeContact(setup.currentTarget, setup.fixedTarget, result);
     }
   );
 
