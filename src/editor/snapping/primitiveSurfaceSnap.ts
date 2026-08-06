@@ -338,7 +338,7 @@ export function findTouchFormSurfaceSnap(
   }
 
   const session = validTouchSession(source, previous, transactionToken);
-  if (session?.released) {
+  if (session?.released || session?.snappedTargetId) {
     const released = unchangedResult(source);
     rememberTouchTranslationStep(
       source,
@@ -363,14 +363,13 @@ export function findTouchFormSurfaceSnap(
     positionStep,
     additionalTargets
   );
-  const released = Boolean(session?.snappedTargetId && !result.targetId);
 
   rememberTouchTranslationStep(
     source,
     result.position,
     transactionToken,
     result.targetId,
-    released
+    false
   );
   return result;
 }
