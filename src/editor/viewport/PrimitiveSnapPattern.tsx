@@ -9,12 +9,12 @@ import {
 
 const vertexShader = `
   varying vec3 vLocalPosition;
-  varying vec3 vWorldNormal;
+  varying vec3 vLocalNormal;
 
   void main() {
     vec4 worldPosition = modelMatrix * vec4(position, 1.0);
     vLocalPosition = position;
-    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    vLocalNormal = normalize(normal);
     gl_Position = projectionMatrix * viewMatrix * worldPosition;
   }
 `;
@@ -28,7 +28,7 @@ const fragmentShader = `
   uniform float uOpacity;
 
   varying vec3 vLocalPosition;
-  varying vec3 vWorldNormal;
+  varying vec3 vLocalNormal;
 
   float gridLine(float value) {
     float fraction = fract(value);
@@ -62,7 +62,10 @@ const fragmentShader = `
       )
     );
 
-    vec3 normalWeight = pow(abs(normalize(vWorldNormal)), vec3(8.0));
+    // Rasterachsen und Position liegen im lokalen Raum; daher muss auch die
+    // Flächengewichtung lokal bleiben. Rotation und nicht-uniforme Skalierung
+    // dürfen nicht auf eine andere Rasterachse umschalten.
+    vec3 normalWeight = pow(abs(normalize(vLocalNormal)), vec3(8.0));
     normalWeight /= max(normalWeight.x + normalWeight.y + normalWeight.z, 0.0001);
 
     float onXFace = max(axisLines.y, axisLines.z);
