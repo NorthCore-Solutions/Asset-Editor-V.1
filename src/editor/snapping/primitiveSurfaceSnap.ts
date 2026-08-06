@@ -1,15 +1,12 @@
 import type { PrimitiveType, SceneObjectData, Vec3 } from '../../types/editor';
+import { findAppleCutterSurfaceSnap } from '../appleCutter/appleCutterSnap';
 import {
-  findObjectSurfaceSnap as findNearbyObjectSurfaceSnap,
   surfaceSnapTargetFromObject3D,
   surfaceSnapTargetFromSceneObject,
   surfaceSnapTargetFromSceneObjects,
   type ObjectSurfaceSnapResult,
   type SurfaceSnapTarget
 } from './objectSurfaceSnap';
-import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
-
-const EPSILON = 0.000001;
 
 export type {
   ObjectSurfaceSnapResult as FormSurfaceSnapResult,
@@ -22,37 +19,13 @@ export {
   surfaceSnapTargetFromSceneObjects
 };
 
-function sameVector(left: Vec3, right: Vec3): boolean {
-  return left.every((value, index) => (
-    Math.abs(value - (right[index] ?? value)) <= EPSILON
-  ));
-}
-
-function sameRotationAndScale(
-  source: SceneObjectData,
-  previous: SceneObjectData
-): boolean {
-  return sameVector(source.rotation, previous.rotation)
-    && sameVector(source.scale, previous.scale);
-}
-
-function unchangedResult(source: SceneObjectData): ObjectSurfaceSnapResult {
-  return {
-    position: [...source.position] as Vec3,
-    targetId: null,
-    distance: Number.POSITIVE_INFINITY,
-    sourceAnchorId: null,
-    targetAnchorId: null
-  };
-}
-
 /**
- * Kompatibilitätsfunktion. Der zustandsbehaftete Android-/Desktop-Sonderpfad
- * wurde entfernt; Drag-Sitzungen werden jetzt ausschließlich im Viewport über
- * den gemeinsamen Translation-Controller geführt.
+ * Übergangsadapter für bestehende Viewport-Aufrufstellen. Der eigentliche
+ * Solver liegt ausschließlich im Apfelschneider-Modul und enthält keinen
+ * globalen Desktop- oder Android-Sonderzustand.
  */
 export function resetFormSurfaceSnapSessions(): void {
-  // Kein globaler Snap-Zustand mehr vorhanden.
+  // Kein globaler Snap-Zustand vorhanden.
 }
 
 export function findFormSurfaceSnap(
@@ -61,21 +34,9 @@ export function findFormSurfaceSnap(
   positionStep: number,
   additionalTargets: readonly SurfaceSnapTarget[] = []
 ): ObjectSurfaceSnapResult {
-  const previous = objects.find((object) => object.id === source.id);
-
-  if (previous && sameRotationAndScale(source, previous)) {
-    if (sameVector(source.position, previous.position)) return unchangedResult(source);
-    return findSweptObjectSurfaceSnap(
-      source,
-      objects,
-      positionStep,
-      additionalTargets
-    ) ?? unchangedResult(source);
-  }
-
-  return findNearbyObjectSurfaceSnap(
+  return findAppleCutterSurfaceSnap(
     source,
-    objects.filter((object) => object.id !== source.id),
+    objects,
     positionStep,
     additionalTargets
   );
@@ -88,7 +49,12 @@ export function findTouchFormSurfaceSnap(
   _transactionToken: unknown,
   additionalTargets: readonly SurfaceSnapTarget[] = []
 ): ObjectSurfaceSnapResult {
-  return findFormSurfaceSnap(source, objects, positionStep, additionalTargets);
+  return findAppleCutterSurfaceSnap(
+    source,
+    objects,
+    positionStep,
+    additionalTargets
+  );
 }
 
 export const findObjectSurfaceSnap = findFormSurfaceSnap;
@@ -99,12 +65,17 @@ export function snapFormToFormSurfaces(
   positionStep: number,
   additionalTargets: readonly SurfaceSnapTarget[] = []
 ): Vec3 {
-  return findFormSurfaceSnap(source, objects, positionStep, additionalTargets).position;
+  return findAppleCutterSurfaceSnap(
+    source,
+    objects,
+    positionStep,
+    additionalTargets
+  ).position;
 }
 
 export const snapObjectToObjectSurfaces = snapFormToFormSurfaces;
 
-/** Oberflächen-Snap gilt für alle registrierten Formen. */
+/** Oberflächen-Snap gilt für alle registrierten Editorformen. */
 export const isFormType = (type: PrimitiveType): boolean => {
   void type;
   return true;
