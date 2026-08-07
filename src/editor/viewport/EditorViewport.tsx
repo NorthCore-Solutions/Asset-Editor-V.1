@@ -4,6 +4,12 @@ import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { createGeometry } from '../../geometry/factory';
 import { findFormSurfaceSnap, isFormType } from '../snapping/primitiveSurfaceSnap';
+import {
+  createTranslationSurfaceSnapSession,
+  resolveCompositeTranslationSurfaceSnap,
+  resolveTranslationSurfaceSnap,
+  type TranslationSurfaceSnapSession
+} from '../snapping/translationSurfaceSnap';
 import { useEditorStore } from '../../store/editorStore';
 import type { SceneObjectData, SnapSettings, TransformMode } from '../../types/editor';
 import { invertHexColor, useSurfacePaint, useSurfacePaintSettings } from '../paint/useSurfacePaint';
@@ -13,6 +19,11 @@ import { AndroidTouchZoomControls } from './AndroidTouchZoomControls';
 import { AndroidMarqueeButton } from './AndroidMarqueeButton';
 import { isAndroidMarqueePointer } from './androidMarqueeSelection';
 import { PrimitiveSnapPattern } from './PrimitiveSnapPattern';
+import { CompositeSnapPattern } from './CompositeSnapPattern';
+import {
+  surfaceSnapTargetFromSceneObject,
+  surfaceSnapTargetFromSceneObjects
+} from '../snapping/objectSurfaceSnap';
 
 interface OrbitControlApi {
   target: THREE.Vector3;
@@ -68,13 +79,15 @@ interface CenterScaleDragState {
 type ScaleDragState = AxisScaleDragState | UniformScaleDragState | CenterScaleDragState;
 
 interface SingleTranslateDragState {
-  startProxyPosition: THREE.Vector3;
-  startMeshWorldPosition: THREE.Vector3;
+  lastRawProxyPosition: THREE.Vector3;
+  rawMeshWorldPosition: THREE.Vector3;
+  surfaceSnapSession: TranslationSurfaceSnapSession;
 }
 
 interface GroupDragState {
   proxyMatrix: THREE.Matrix4;
   objectMatrices: Map<string, THREE.Matrix4>;
+  surfaceSnapSession: TranslationSurfaceSnapSession;
 }
 
 interface SelectionRect {
@@ -739,7 +752,6 @@ function SingleTranslateControls({
 }) {
   const proxy = useMemo(() => new THREE.Object3D(), []);
   const dragRef = useRef<SingleTranslateDragState | null>(null);
-  const objects = useEditorStore((state) => state.objects);
   const updateObject = useEditorStore((state) => state.updateObject);
   const beginTransaction = useEditorStore((state) => state.beginTransaction);
   const endTransaction = useEditorStore((state) => state.endTransaction);
@@ -763,8 +775,9 @@ function SingleTranslateControls({
   const start = () => {
     resetProxy();
     dragRef.current = {
-      startProxyPosition: proxy.position.clone(),
-      startMeshWorldPosition: mesh.getWorldPosition(new THREE.Vector3())
+      lastRawProxyPosition: proxy.position.clone(),
+      rawMeshWorldPosition: mesh.getWorldPosition(new THREE.Vector3()),
+      surfaceSnapSession: createTranslationSurfaceSnapSession()
     };
     onSnapTargetChange(null);
     beginTransaction();
@@ -775,8 +788,22 @@ function SingleTranslateControls({
     const drag = dragRef.current;
     if (!drag) return;
 
-    const worldDelta = proxy.position.clone().sub(drag.startProxyPosition);
-    const nextWorldPosition = drag.startMeshWorldPosition.clone().add(worldDelta);
+    const rawProxyPosition = proxy.position.clone();
+    const rawDelta = rawProxyPosition.clone().sub(drag.lastRawProxyPosition);
+    drag.lastRawProxyPosition.copy(rawProxyPosition);
+    drag.rawMeshWorldPosition.add(rawDelta);
+
+    const rawLocalPosition = mesh.parent
+      ? mesh.parent.worldToLocal(drag.rawMeshWorldPosition.clone())
+      : drag.rawMeshWorldPosition.clone();
+    const nextWorldPosition = drag.rawMeshWorldPosition.clone();
+    if (snap.enabled && snap.position > 0) {
+      nextWorldPosition.set(
+        Math.round(nextWorldPosition.x / snap.position) * snap.position,
+        Math.round(nextWorldPosition.y / snap.position) * snap.position,
+        Math.round(nextWorldPosition.z / snap.position) * snap.position
+      );
+    }
     const nextLocalPosition = mesh.parent
       ? mesh.parent.worldToLocal(nextWorldPosition.clone())
       : nextWorldPosition;
@@ -800,24 +827,33 @@ function SingleTranslateControls({
     ];
 
     if (snap.surface && isFormType(object.type)) {
-      const result = findFormSurfaceSnap(
+      const liveObjects = useEditorStore.getState().objects;
+      const resolution = resolveTranslationSurfaceSnap(
         { ...object, position, rotation, scale },
-        objects,
-        snap.position
+        liveObjects,
+        snap.position,
+        [rawLocalPosition.x, rawLocalPosition.y, rawLocalPosition.z],
+        drag.surfaceSnapSession
       );
-      position = result.position;
+      drag.surfaceSnapSession = resolution.session;
+      position = resolution.result.position;
       mesh.position.set(position[0], position[1], position[2]);
       mesh.updateMatrixWorld(true);
-      onSnapTargetChange(result.targetId);
+      onSnapTargetChange(resolution.result.targetId);
     } else {
+      drag.surfaceSnapSession = createTranslationSurfaceSnapSession();
       onSnapTargetChange(null);
     }
 
     updateObject(object.id, { position, rotation, scale }, false);
+
+    // Gizmo und Objekt verwenden nach jedem Pointer-Schritt denselben Pivot.
+    mesh.updateMatrixWorld(true);
+    proxy.position.copy(mesh.localToWorld(localCenter.clone()));
+    proxy.updateMatrixWorld(true);
   };
 
   const stop = () => {
-    sync();
     dragRef.current = null;
     onSnapTargetChange(null);
     endTransaction();
@@ -841,7 +877,7 @@ function SingleTranslateControls({
         mode="translate"
         space="world"
         size={1.15}
-        translationSnap={snap.enabled ? snap.position : undefined}
+        translationSnap={undefined}
         onMouseDown={start}
         onObjectChange={sync}
         onMouseUp={stop}
@@ -850,11 +886,12 @@ function SingleTranslateControls({
   );
 }
 
-function GroupTransformControls({ selectedIds, registry, tool, snap, onTransformDraggingChange }: {
+function GroupTransformControls({ selectedIds, registry, tool, snap, onSnapTargetChange, onTransformDraggingChange }: {
   selectedIds: string[];
   registry: MeshRegistry;
   tool: TransformMode;
   snap: SnapSettings;
+  onSnapTargetChange: (targetId: string | null) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
 }) {
   const proxy = useMemo(() => new THREE.Object3D(), []);
@@ -886,7 +923,12 @@ function GroupTransformControls({ selectedIds, registry, tool, snap, onTransform
       objectMatrices.set(id, mesh.matrixWorld.clone());
     }
     proxy.updateMatrixWorld(true);
-    dragRef.current = { proxyMatrix: proxy.matrixWorld.clone(), objectMatrices };
+    dragRef.current = {
+      proxyMatrix: proxy.matrixWorld.clone(),
+      objectMatrices,
+      surfaceSnapSession: createTranslationSurfaceSnapSession()
+    };
+    onSnapTargetChange(null);
     beginTransaction();
     onTransformDraggingChange(true);
   };
@@ -895,25 +937,112 @@ function GroupTransformControls({ selectedIds, registry, tool, snap, onTransform
     const drag = dragRef.current;
     if (!drag) return;
     proxy.updateMatrixWorld(true);
-    const delta = proxy.matrixWorld.clone().multiply(drag.proxyMatrix.clone().invert());
+    const rawProxyPosition = proxy.position.clone();
+    const effectiveProxyPosition = rawProxyPosition.clone();
+    if (tool === 'translate' && snap.enabled && snap.position > 0) {
+      effectiveProxyPosition.set(
+        Math.round(effectiveProxyPosition.x / snap.position) * snap.position,
+        Math.round(effectiveProxyPosition.y / snap.position) * snap.position,
+        Math.round(effectiveProxyPosition.z / snap.position) * snap.position
+      );
+    }
+
+    const effectiveProxyMatrix = proxy.matrixWorld.clone();
+    if (tool === 'translate') {
+      effectiveProxyMatrix.setPosition(effectiveProxyPosition);
+    }
+    const delta = effectiveProxyMatrix.multiply(drag.proxyMatrix.clone().invert());
+    const liveObjects = useEditorStore.getState().objects;
+    const transformedObjects = new Map<string, SceneObjectData>();
+
     for (const [id, startMatrix] of drag.objectMatrices) {
       const mesh = registry.current.get(id);
-      if (!mesh) continue;
+      const storedObject = liveObjects.find((object) => object.id === id);
+      if (!mesh || !storedObject) continue;
       const worldMatrix = delta.clone().multiply(startMatrix);
-      const localMatrix = mesh.parent ? mesh.parent.matrixWorld.clone().invert().multiply(worldMatrix) : worldMatrix;
+      const localMatrix = mesh.parent
+        ? mesh.parent.matrixWorld.clone().invert().multiply(worldMatrix)
+        : worldMatrix;
       localMatrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
       mesh.updateMatrixWorld(true);
-      updateObject(id, {
+      transformedObjects.set(id, {
+        ...storedObject,
         position: [mesh.position.x, mesh.position.y, mesh.position.z],
         rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
         scale: [mesh.scale.x, mesh.scale.y, mesh.scale.z]
+      });
+    }
+
+    if (tool === 'translate' && snap.surface && transformedObjects.size > 1) {
+      const selectedObjects = selectedIds.flatMap((id) => {
+        const object = transformedObjects.get(id);
+        return object ? [object] : [];
+      });
+      const sourceTarget = surfaceSnapTargetFromSceneObjects(
+        selectedObjects,
+        'selected-composite'
+      );
+      const targetObjects = liveObjects.filter((object) => (
+        object.visible && !selectedIds.includes(object.id)
+      ));
+      const targets = targetObjects.flatMap((object) => {
+        const target = surfaceSnapTargetFromSceneObject(object);
+        return target ? [target] : [];
+      });
+
+      if (sourceTarget) {
+        const resolution = resolveCompositeTranslationSurfaceSnap(
+          sourceTarget,
+          targets,
+          [rawProxyPosition.x, rawProxyPosition.y, rawProxyPosition.z],
+          drag.surfaceSnapSession,
+          Math.min(0.12, Math.max(0.04, Math.abs(snap.position) * 0.4))
+        );
+        drag.surfaceSnapSession = resolution.session;
+        const sourceCenter = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
+        const correction = new THREE.Vector3(...resolution.result.position).sub(sourceCenter);
+        if (correction.lengthSq() > 0.0000000001) {
+          for (const [id, transformedObject] of transformedObjects) {
+            const mesh = registry.current.get(id);
+            if (!mesh) continue;
+            mesh.position.add(correction);
+            mesh.updateMatrixWorld(true);
+            transformedObjects.set(id, {
+              ...transformedObject,
+              position: [mesh.position.x, mesh.position.y, mesh.position.z]
+            });
+          }
+        }
+        proxy.position.copy(effectiveProxyPosition).add(correction);
+        proxy.updateMatrixWorld(true);
+        onSnapTargetChange(resolution.result.targetId);
+      } else {
+        drag.surfaceSnapSession = createTranslationSurfaceSnapSession();
+        proxy.position.copy(effectiveProxyPosition);
+        proxy.updateMatrixWorld(true);
+        onSnapTargetChange(null);
+      }
+    } else {
+      drag.surfaceSnapSession = createTranslationSurfaceSnapSession();
+      if (tool === 'translate') {
+        proxy.position.copy(effectiveProxyPosition);
+        proxy.updateMatrixWorld(true);
+      }
+      onSnapTargetChange(null);
+    }
+
+    for (const [id, transformedObject] of transformedObjects) {
+      updateObject(id, {
+        position: transformedObject.position,
+        rotation: transformedObject.rotation,
+        scale: transformedObject.scale
       }, false);
     }
   };
 
   const stop = () => {
-    sync();
     dragRef.current = null;
+    onSnapTargetChange(null);
     endTransaction();
     onTransformDraggingChange(false);
     resetProxy();
@@ -927,7 +1056,7 @@ function GroupTransformControls({ selectedIds, registry, tool, snap, onTransform
         mode={tool}
         space="world"
         size={tool === 'rotate' ? 1.4 : 1.15}
-        translationSnap={snap.enabled ? snap.position : undefined}
+        translationSnap={tool === 'translate' ? undefined : (snap.enabled ? snap.position : undefined)}
         rotationSnap={snap.enabled ? THREE.MathUtils.degToRad(snap.rotation) : undefined}
         scaleSnap={snap.enabled ? snap.scale : undefined}
         onMouseDown={start}
@@ -959,7 +1088,12 @@ function SceneMesh({ object, registry, snapTargetId, onSnapTargetChange, onTrans
   const singleSelection = selected && selectedIds.length === 1;
   const paint = useSurfacePaint(object, singleSelection, paintSettings, geometry);
   const snapToolActive = tool === 'translate' || tool === 'scale';
-  const showSnapPattern = !paintSettings.enabled && snap.surface && snapToolActive && isFormType(object.type) && !singleSelection && object.visible;
+  const showSnapPattern = !paintSettings.enabled
+    && snap.surface
+    && snapToolActive
+    && isFormType(object.type)
+    && !selected
+    && object.visible;
 
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => {
@@ -1142,7 +1276,22 @@ function EditorScene({ keyboardActive, selectionActive, registry, onSelectionApi
           paintSettings={paintSettings}
         />
       ))}
-      {groupMovable && <GroupTransformControls selectedIds={selectedIds} registry={registry} tool={tool} snap={snap} onTransformDraggingChange={setTransformDragging} />}
+      {groupMovable && snap.surface && (tool === 'translate' || tool === 'scale') && (
+        <CompositeSnapPattern
+          objects={selectedObjects}
+          highlighted={snapTargetId === 'selected-composite'}
+        />
+      )}
+      {groupMovable && (
+        <GroupTransformControls
+          selectedIds={selectedIds}
+          registry={registry}
+          tool={tool}
+          snap={snap}
+          onSnapTargetChange={setSnapTargetId}
+          onTransformDraggingChange={setTransformDragging}
+        />
+      )}
       <OrbitControls
         makeDefault
         enabled={!transformDragging && !selectionActive}

@@ -1,9 +1,7 @@
 import * as THREE from 'three';
-import type { SceneObjectData, Vec3 } from '../../types/editor';
-import {
-  surfaceSnapTargetFromSceneObject,
-  type ObjectSurfaceSnapResult,
-  type SurfaceSnapTarget
+import type {
+  ObjectSurfaceSnapResult,
+  SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import {
   minimumSurfaceProjection,
@@ -21,7 +19,7 @@ const MAX_TANGENTIAL_TOLERANCE = 0.16;
 const THIN_DIMENSION = 0.0001;
 
 interface SweepCandidate {
-  position: Vec3;
+  position: [number, number, number];
   targetId: string;
   distance: number;
   travel: number;
@@ -31,48 +29,13 @@ interface SweepCandidate {
   targetAnchorId: string | null;
 }
 
-export interface SweptObjectSurfaceSnapOptions {
+export interface SweptSurfaceTargetSnapOptions {
   ignoredTargetAnchorId?: string | null;
 }
 
 interface ContactNormals {
   source: THREE.Vector3;
   target: THREE.Vector3;
-}
-
-function matrixForSceneObject(object: SceneObjectData): THREE.Matrix4 {
-  return new THREE.Matrix4().compose(
-    new THREE.Vector3(...object.position),
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(...object.rotation)),
-    new THREE.Vector3(...object.scale)
-  );
-}
-
-function unchangedRotationAndScale(
-  source: SceneObjectData,
-  previous: SceneObjectData
-): boolean {
-  return source.rotation.every((value, index) => (
-    Math.abs(value - (previous.rotation[index] ?? value)) <= EPSILON
-  )) && source.scale.every((value, index) => (
-    Math.abs(value - (previous.scale[index] ?? value)) <= EPSILON
-  ));
-}
-
-export function previousTranslatedSource(
-  source: SceneObjectData,
-  objects: readonly SceneObjectData[]
-): SceneObjectData | null {
-  const previous = objects.find((object) => object.id === source.id);
-  if (
-    !previous
-    || previous.type !== source.type
-    || !unchangedRotationAndScale(source, previous)
-  ) return null;
-
-  const movement = new THREE.Vector3(...source.position)
-    .sub(new THREE.Vector3(...previous.position));
-  return movement.lengthSq() > EPSILON * EPSILON ? previous : null;
 }
 
 function hashCoordinate(value: number, cellSize: number): number {
@@ -142,22 +105,6 @@ function isThinTarget(target: SurfaceSnapTarget): boolean {
   return Math.min(Math.abs(size.x), Math.abs(size.y), Math.abs(size.z)) <= THIN_DIMENSION;
 }
 
-function targetsForSweep(
-  source: SceneObjectData,
-  objects: readonly SceneObjectData[],
-  positionStep: number,
-  additionalTargets: readonly SurfaceSnapTarget[]
-): SurfaceSnapTarget[] {
-  return [
-    ...objects.flatMap((object) => {
-      if (object.id === source.id) return [];
-      const target = surfaceSnapTargetFromSceneObject(object, positionStep);
-      return target ? [target] : [];
-    }),
-    ...additionalTargets
-  ];
-}
-
 function betterCandidate(
   candidate: SweepCandidate,
   current: SweepCandidate | null
@@ -187,51 +134,45 @@ function opposingAndApproaching(
   normals: ContactNormals,
   direction: THREE.Vector3
 ): boolean {
-  const normalAlignment = normals.source.dot(normals.target);
-  if (normalAlignment > -0.12) return false;
-
-  const sourceApproach = direction.dot(normals.source);
-  const targetApproach = direction.dot(normals.target);
-  return sourceApproach >= MIN_APPROACH_ALIGNMENT
-    && targetApproach <= -MIN_APPROACH_ALIGNMENT;
+  if (normals.source.dot(normals.target) > -0.12) return false;
+  return direction.dot(normals.source) >= MIN_APPROACH_ALIGNMENT
+    && direction.dot(normals.target) <= -MIN_APPROACH_ALIGNMENT;
 }
 
-export function findSweptObjectSurfaceSnap(
-  source: SceneObjectData,
-  objects: readonly SceneObjectData[],
+export function findSweptSurfaceTargetSnap(
+  previousSource: SurfaceSnapTarget,
+  currentSource: SurfaceSnapTarget,
+  targets: readonly SurfaceSnapTarget[],
   positionStep: number,
-  additionalTargets: readonly SurfaceSnapTarget[] = [],
-  options: SweptObjectSurfaceSnapOptions = {}
+  options: SweptSurfaceTargetSnapOptions = {}
 ): ObjectSurfaceSnapResult | null {
-  const previous = previousTranslatedSource(source, objects);
-  if (!previous) return null;
+  if (
+    previousSource.id !== currentSource.id
+    || previousSource.anchors.length === 0
+    || previousSource.anchors.length !== currentSource.anchors.length
+  ) return null;
 
-  const sourceTarget = surfaceSnapTargetFromSceneObject(source, positionStep);
-  if (!sourceTarget) return null;
-
-  const previousAnchors = transformSurfaceSnapAnchors(
-    sourceTarget.anchors,
-    matrixForSceneObject(previous)
-  );
-  const currentAnchors = transformSurfaceSnapAnchors(
-    sourceTarget.anchors,
-    sourceTarget.matrixWorld
-  );
-  if (previousAnchors.length !== currentAnchors.length) return null;
-
-  const sourcePosition = new THREE.Vector3(...source.position);
-  const previousPosition = new THREE.Vector3(...previous.position);
-  const movement = sourcePosition.clone().sub(previousPosition);
+  const previousCenter = new THREE.Vector3().setFromMatrixPosition(previousSource.matrixWorld);
+  const currentCenter = new THREE.Vector3().setFromMatrixPosition(currentSource.matrixWorld);
+  const movement = currentCenter.clone().sub(previousCenter);
   const movementLength = movement.length();
   if (movementLength <= EPSILON) return null;
-
   const direction = movement.clone().divideScalar(movementLength);
-  const supportSource = sourceTarget.supportPoints?.length
-    ? sourceTarget.supportPoints
-    : sourceTarget.anchors.map((anchor) => anchor.position);
+
+  const previousAnchors = transformSurfaceSnapAnchors(
+    previousSource.anchors,
+    previousSource.matrixWorld
+  );
+  const currentAnchors = transformSurfaceSnapAnchors(
+    currentSource.anchors,
+    currentSource.matrixWorld
+  );
+  const supportSource = currentSource.supportPoints?.length
+    ? currentSource.supportPoints
+    : currentSource.anchors.map((anchor) => anchor.position);
   const currentSupportPoints = transformSurfaceSupportPoints(
     supportSource,
-    sourceTarget.matrixWorld
+    currentSource.matrixWorld
   );
   const supportProjectionCache = new Map<string, number>();
   const captureDistance = Math.min(
@@ -244,12 +185,15 @@ export function findSweptObjectSurfaceSnap(
   );
   const hashCellSize = Math.max(0.08, tangentialTolerance);
   const broadPhasePadding = tangentialTolerance + captureDistance;
-  const sourceIsThin = isThinTarget(sourceTarget);
-  const targets = targetsForSweep(source, objects, positionStep, additionalTargets);
+  const sourceIsThin = isThinTarget(currentSource);
   let best: SweepCandidate | null = null;
 
   for (const target of targets) {
-    if (!target.visible || target.anchors.length === 0) continue;
+    if (
+      !target.visible
+      || target.id === currentSource.id
+      || target.anchors.length === 0
+    ) continue;
 
     const targetIsThin = isThinTarget(target);
     const targetAnchors = transformSurfaceSnapAnchors(target.anchors, target.matrixWorld);
@@ -316,10 +260,10 @@ export function findSweptObjectSurfaceSnap(
           ? previousSeparation / denominator
           : 1;
         const travel = THREE.MathUtils.clamp(rawTravel, 0, 1);
-        const correctedPosition = sourcePosition.clone()
+        const correctedCenter = currentCenter.clone()
           .addScaledVector(direction, correctionAlongMovement);
         const candidate: SweepCandidate = {
-          position: [correctedPosition.x, correctedPosition.y, correctedPosition.z],
+          position: [correctedCenter.x, correctedCenter.y, correctedCenter.z],
           targetId: target.id,
           distance: Math.abs(correctionAlongMovement),
           travel,
