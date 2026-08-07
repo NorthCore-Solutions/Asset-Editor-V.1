@@ -84,7 +84,7 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
     expect(resolution.session.active).not.toBeNull();
   });
 
-  it('gibt den Kontakt nach Verlassen des Fangbereichs ohne Blockade frei', () => {
+  it('gibt den Kontakt erst oberhalb des 0,25-Fangbereichs frei', () => {
     const session: TranslationSurfaceSnapSession = {
       active: {
         targetId: 'target-box',
@@ -97,12 +97,12 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
       previousCompositeTarget: null
     };
     const source = createSceneObject('box');
-    source.position = [1.25, 2, 3];
+    source.position = [1.26, 2, 3];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [1.25, 2, 3],
+      [1.26, 2, 3],
       session
     );
 
