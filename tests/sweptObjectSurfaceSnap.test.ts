@@ -42,7 +42,6 @@ function expectOuterContact(
 }
 
 function expectInternalSnap(
-  source: SceneObjectData,
   target: SceneObjectData,
   result: ReturnType<typeof findAppleCutterSurfaceSnap>,
   expectedX: number
@@ -75,7 +74,7 @@ describe.each(['Desktop', 'Android'])('kombinierter Formen-Snap auf %s', () => {
 
     const result = findAppleCutterSurfaceSnap(source, [target], STEP);
 
-    expectInternalSnap(source, target, result, -0.75);
+    expectInternalSnap(target, result, -0.75);
   });
 
   it('behält auch den nächsten inneren 0,25-Schnitt bei', () => {
@@ -84,7 +83,7 @@ describe.each(['Desktop', 'Android'])('kombinierter Formen-Snap auf %s', () => {
 
     const result = findAppleCutterSurfaceSnap(source, [target], STEP);
 
-    expectInternalSnap(source, target, result, -0.5);
+    expectInternalSnap(target, result, -0.5);
   });
 
   it('lässt sich vom äußeren Kontakt wieder wegziehen', () => {
