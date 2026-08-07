@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as THREE from 'three';
+import type * as THREE from 'three';
 import { createSceneObject } from '../src/geometry/factory';
 import { findAppleCutterSurfaceSnap } from '../src/editor/appleCutter/appleCutterSnap';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
