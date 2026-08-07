@@ -9,6 +9,7 @@ import { findInternalCutterTargetSnap } from './internalCutterSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
 import { findSweptSurfaceTargetSnap } from './sweptSurfaceTargetSnap';
 
+const EPSILON = 0.000001;
 const MAX_WORLD_THRESHOLD = 0.12;
 
 export interface TranslationSurfaceSnapContact {
@@ -17,6 +18,7 @@ export interface TranslationSurfaceSnapContact {
   sourceAnchorId: string | null;
   captureRawPosition: Vec3;
   acceptedPosition: Vec3;
+  lockDirection: Vec3;
 }
 
 export interface TranslationSurfaceSnapSuppression {
@@ -53,16 +55,15 @@ function distance(left: Vec3, right: Vec3): number {
 }
 
 /**
- * Formen-Snap übernimmt die Stärke des normalen Positions-Snappings:
- * Ein akzeptierter Punkt hält über einen vollständigen Positionsschritt.
- * Beim Standardraster sind das 0,25 Welteinheiten.
+ * Wie beim normalen 0,25-Positionsraster liegt die Umschaltgrenze in der
+ * Mitte zwischen zwei benachbarten Punkten. Standard: 0,125 Welteinheiten.
  */
 function snapHoldDistance(positionStep: number): number {
-  return Math.max(0.04, Math.abs(positionStep));
+  return Math.max(0.02, Math.abs(positionStep) * 0.5);
 }
 
 function snapRearmDistance(positionStep: number): number {
-  return snapHoldDistance(positionStep) * 1.5;
+  return Math.max(snapHoldDistance(positionStep), Math.abs(positionStep));
 }
 
 function unchanged(position: Vec3): ObjectSurfaceSnapResult {
@@ -84,6 +85,45 @@ function nearerResult(
   return first.distance <= second.distance ? first : second;
 }
 
+function normalizedCorrectionDirection(
+  snappedPosition: Vec3,
+  unchangedPosition: Vec3
+): Vec3 {
+  const correction = new THREE.Vector3(
+    snappedPosition[0] - unchangedPosition[0],
+    snappedPosition[1] - unchangedPosition[1],
+    snappedPosition[2] - unchangedPosition[2]
+  );
+  if (correction.lengthSq() <= EPSILON * EPSILON) return [0, 0, 0];
+  correction.normalize();
+  return [correction.x, correction.y, correction.z];
+}
+
+function heldPosition(
+  active: TranslationSurfaceSnapContact,
+  rawPosition: Vec3,
+  positionStep: number
+): Vec3 | null {
+  const direction = new THREE.Vector3(...active.lockDirection);
+  if (direction.lengthSq() <= EPSILON * EPSILON) return null;
+  direction.normalize();
+
+  const rawDelta = new THREE.Vector3(
+    rawPosition[0] - active.captureRawPosition[0],
+    rawPosition[1] - active.captureRawPosition[1],
+    rawPosition[2] - active.captureRawPosition[2]
+  );
+  const movementAlongSnap = rawDelta.dot(direction);
+  if (Math.abs(movementAlongSnap) > snapHoldDistance(positionStep)) return null;
+
+  const tangentialDelta = rawDelta.addScaledVector(direction, -movementAlongSnap);
+  return [
+    active.acceptedPosition[0] + tangentialDelta.x,
+    active.acceptedPosition[1] + tangentialDelta.y,
+    active.acceptedPosition[2] + tangentialDelta.z
+  ];
+}
+
 function holdOrReleaseContact(
   rawPosition: Vec3,
   currentSession: TranslationSurfaceSnapSession,
@@ -97,11 +137,12 @@ function holdOrReleaseContact(
   let suppressed = currentSession.suppressed;
 
   if (active) {
-    if (distance(rawPosition, active.captureRawPosition) <= snapHoldDistance(positionStep)) {
+    const position = heldPosition(active, rawPosition, positionStep);
+    if (position) {
       return {
         held: {
           result: {
-            position: [...active.acceptedPosition] as Vec3,
+            position,
             targetId: active.targetId,
             distance: 0,
             sourceAnchorId: active.sourceAnchorId,
@@ -157,7 +198,8 @@ function capturedResolution(
     targetAnchorId: snapped.targetAnchorId ?? null,
     sourceAnchorId: snapped.sourceAnchorId ?? null,
     captureRawPosition: [...rawPosition] as Vec3,
-    acceptedPosition: [...snapped.position] as Vec3
+    acceptedPosition: [...snapped.position] as Vec3,
+    lockDirection: normalizedCorrectionDirection(snapped.position, unchangedPosition)
   };
   return {
     result: snapped,
