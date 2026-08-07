@@ -1,9 +1,11 @@
+import * as THREE from 'three';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
 import {
-  findObjectSurfaceSnap,
+  surfaceSnapTargetFromSceneObject,
   type ObjectSurfaceSnapResult,
   type SurfaceSnapTarget
 } from '../snapping/objectSurfaceSnap';
+import { findInternalCutterTargetSnap } from '../snapping/internalCutterSnap';
 import { findSweptObjectSurfaceSnap } from '../snapping/sweptObjectSurfaceSnap';
 
 const EPSILON = 0.000001;
@@ -32,10 +34,24 @@ function unchangedResult(source: SceneObjectData): ObjectSurfaceSnapResult {
   };
 }
 
+function internalTargets(
+  source: SceneObjectData,
+  objects: readonly SceneObjectData[],
+  additionalTargets: readonly SurfaceSnapTarget[]
+): SurfaceSnapTarget[] {
+  return [
+    ...objects.flatMap((object) => {
+      if (object.id === source.id) return [];
+      const target = surfaceSnapTargetFromSceneObject(object);
+      return target ? [target] : [];
+    }),
+    ...additionalTargets
+  ];
+}
+
 /**
- * Zustandsloser Apfelschneider-Solver für Skalierung und direkte
- * Geometrieprüfungen. Pointer-Drags verwenden den gemeinsamen
- * Translation-Controller mit eigener Hysterese.
+ * Formen-Snap verwendet ausschließlich die inneren Apfelschneider-Schnitte.
+ * Außenflächen bleiben sichtbar, sind aber keine Fangziele.
  */
 export function findAppleCutterSurfaceSnap(
   source: SceneObjectData,
@@ -55,11 +71,14 @@ export function findAppleCutterSurfaceSnap(
     ) ?? unchangedResult(source);
   }
 
-  return findObjectSurfaceSnap(
-    source,
-    objects.filter((object) => object.id !== source.id),
-    positionStep,
-    additionalTargets
+  const sourceTarget = surfaceSnapTargetFromSceneObject(source);
+  if (!sourceTarget) return unchangedResult(source);
+  const threshold = Math.min(0.12, Math.max(0.04, Math.abs(positionStep) * 0.4));
+  return findInternalCutterTargetSnap(
+    sourceTarget,
+    internalTargets(source, objects, additionalTargets),
+    new THREE.Vector3(...source.position),
+    threshold
   );
 }
 
