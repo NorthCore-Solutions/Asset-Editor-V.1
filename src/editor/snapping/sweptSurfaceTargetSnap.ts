@@ -6,6 +6,7 @@ import { findSweptInternalCutterTargetSnap } from './internalCutterSnap';
 
 export interface SweptSurfaceTargetSnapOptions {
   ignoredTargetAnchorId?: string | null;
+  ignoredSourceAnchorId?: string | null;
 }
 
 /** Gemeinsamer Sweep für Gruppen/Importe auf den inneren Cutter-Ebenen. */
