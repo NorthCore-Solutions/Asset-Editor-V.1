@@ -342,12 +342,17 @@ export function findSweptObjectSurfaceSnap(
           ? previousSeparation / denominator
           : 1;
         const travel = THREE.MathUtils.clamp(rawTravel, 0, 1);
-        const correctedPosition = sourcePosition.clone()
-          .addScaledVector(direction, correctionAlongMovement);
+
+        // Ein äußerer Snap ist ein echter Cutter-Punkt-Snap: Die ausgewählte
+        // Quellkreuzung muss exakt auf der ausgewählten gelben Zielkreuzung
+        // landen. Nur an der Außenhaut zu stoppen erzeugt sonst versetzte
+        // scheinbare Snappoints zwischen den Cutter-Linien.
+        const anchorCorrection = targetAnchor.position.clone().sub(currentAnchor.position);
+        const correctedPosition = sourcePosition.clone().add(anchorCorrection);
         const candidate: SweepCandidate = {
           position: [correctedPosition.x, correctedPosition.y, correctedPosition.z],
           targetId: target.id,
-          distance: Math.abs(correctionAlongMovement),
+          distance: anchorCorrection.length(),
           travel,
           lateralDistance,
           normalAlignment: normals.source.dot(normals.target),
