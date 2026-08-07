@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
-import {
-  findSurfaceTargetSnap,
-  type ObjectSurfaceSnapResult,
-  type SurfaceSnapTarget
+import type {
+  ObjectSurfaceSnapResult,
+  SurfaceSnapTarget
 } from './objectSurfaceSnap';
+import { findInternalCutterTargetSnap } from './internalCutterSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
 import { findSweptSurfaceTargetSnap } from './sweptSurfaceTargetSnap';
 
@@ -22,6 +22,7 @@ export interface TranslationSurfaceSnapContact {
 
 export interface TranslationSurfaceSnapSuppression {
   targetAnchorId: string;
+  sourceAnchorId: string | null;
   rawOrigin: Vec3;
 }
 
@@ -96,7 +97,11 @@ function holdOrReleaseContact(
     }
 
     suppressed = active.targetAnchorId
-      ? { targetAnchorId: active.targetAnchorId, rawOrigin: [...rawPosition] as Vec3 }
+      ? {
+        targetAnchorId: active.targetAnchorId,
+        sourceAnchorId: active.sourceAnchorId,
+        rawOrigin: [...rawPosition] as Vec3
+      }
       : null;
     active = null;
   }
@@ -175,7 +180,7 @@ function compositeDistances(value: number): {
   };
 }
 
-/** Gemeinsame magnetische Freigabelogik für einzelne Formen auf Maus und Touch. */
+/** Gemeinsame Freigabelogik für innere Formen-Snaps auf Maus und Touch. */
 export function resolveTranslationSurfaceSnap(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
@@ -192,7 +197,10 @@ export function resolveTranslationSurfaceSnap(
     objects,
     positionStep,
     additionalTargets,
-    { ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null }
+    {
+      ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null,
+      ignoredSourceAnchorId: contact.suppressed?.sourceAnchorId ?? null
+    }
   );
   return capturedResolution(
     snapped,
@@ -204,12 +212,8 @@ export function resolveTranslationSurfaceSnap(
 }
 
 /**
- * Dieselbe Hysterese für das äußere Raster einer Gruppe oder eines Imports.
- * Der zuletzt akzeptierte Composite-Zustand liegt direkt in der Drag-Sitzung;
- * dadurch hängt der Sweep nicht von React-Renderständen ab.
- *
- * Der fünfte Parameter akzeptiert aus Kompatibilitätsgründen sowohl den
- * bisherigen Fangabstand als auch direkt den Bewegungsraster-Schritt.
+ * Dieselbe Hysterese für Gruppen und Importe. Auch hier zählen ausschließlich
+ * innere Cutter-Schnitte; die Außenhaut ist kein Fangziel.
  */
 export function resolveCompositeTranslationSurfaceSnap(
   sourceTarget: SurfaceSnapTarget,
@@ -221,30 +225,27 @@ export function resolveCompositeTranslationSurfaceSnap(
   const contact = holdOrReleaseContact(rawPosition, currentSession);
   if (contact.held) return contact.held;
 
-  const filteredTargets = contact.suppressed
-    ? targets.map((target) => ({
-      ...target,
-      anchors: target.anchors.filter((anchor) => (
-        anchor.id !== contact.suppressed?.targetAnchorId
-      ))
-    }))
-    : targets;
   const sourcePosition = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
   const distances = compositeDistances(thresholdOrPositionStep);
+  const options = {
+    ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null,
+    ignoredSourceAnchorId: contact.suppressed?.sourceAnchorId ?? null
+  };
   const swept = currentSession.previousCompositeTarget
     ? findSweptSurfaceTargetSnap(
       currentSession.previousCompositeTarget,
       sourceTarget,
-      filteredTargets,
+      targets,
       distances.positionStep,
-      { ignoredTargetAnchorId: contact.suppressed?.targetAnchorId ?? null }
+      options
     )
     : null;
-  const nearby = swept ?? findSurfaceTargetSnap(
+  const nearby = swept ?? findInternalCutterTargetSnap(
     sourceTarget,
-    filteredTargets,
+    targets,
     sourcePosition,
-    distances.worldThreshold
+    distances.worldThreshold,
+    options
   );
   const snapped = nearby.targetId ? nearby : null;
   const acceptedPosition = snapped?.position
