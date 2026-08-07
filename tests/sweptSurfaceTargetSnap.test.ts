@@ -10,20 +10,21 @@ import {
   createTranslationSurfaceSnapSession,
   resolveCompositeTranslationSurfaceSnap
 } from '../src/editor/snapping/translationSurfaceSnap';
+import { transformSurfaceSnapAnchors } from '../src/editor/snapping/surfaceSnapTopology';
 import { findSweptSurfaceTargetSnap } from '../src/editor/snapping/sweptSurfaceTargetSnap';
 import type { SceneObjectData } from '../src/types/editor';
 
 const STEP = 0.25;
 
-function boxAt(id: string, x: number): SceneObjectData {
+function boxAt(id: string, x: number, yOffset: number = 0): SceneObjectData {
   const object = createSceneObject('box');
   object.id = id;
-  object.position = [x, object.position[1], object.position[2]];
+  object.position = [x, object.position[1] + yOffset, object.position[2]];
   return object;
 }
 
-function compositeAt(id: string, x: number): SurfaceSnapTarget {
-  const target = surfaceSnapTargetFromSceneObjects([boxAt(`${id}-part`, x)], id);
+function compositeAt(id: string, x: number, yOffset: number = 0): SurfaceSnapTarget {
+  const target = surfaceSnapTargetFromSceneObjects([boxAt(`${id}-part`, x, yOffset)], id);
   if (!target) throw new Error(`Keine Composite-Topologie für ${id}.`);
   return target;
 }
@@ -40,6 +41,34 @@ function center(target: SurfaceSnapTarget): [number, number, number] {
   return [value.x, value.y, value.z];
 }
 
+function targetAtPosition(
+  target: SurfaceSnapTarget,
+  position: [number, number, number]
+): SurfaceSnapTarget {
+  const matrixWorld = target.matrixWorld.clone();
+  matrixWorld.setPosition(position[0], position[1], position[2]);
+  return { ...target, matrixWorld };
+}
+
+function expectSelectedAnchorsCoincide(
+  source: SurfaceSnapTarget,
+  target: SurfaceSnapTarget,
+  result: NonNullable<ReturnType<typeof findSweptSurfaceTargetSnap>>
+): void {
+  const snappedSource = targetAtPosition(source, result.position);
+  const sourceAnchor = transformSurfaceSnapAnchors(
+    snappedSource.anchors,
+    snappedSource.matrixWorld
+  ).find((anchor) => anchor.id === result.sourceAnchorId);
+  const targetAnchor = transformSurfaceSnapAnchors(
+    target.anchors,
+    target.matrixWorld
+  ).find((anchor) => anchor.id === result.targetAnchorId);
+  if (!sourceAnchor || !targetAnchor) throw new Error('Gewählter Composite-Cutter-Anker fehlt.');
+
+  expect(sourceAnchor.position.distanceTo(targetAnchor.position)).toBeLessThan(0.000001);
+}
+
 describe('kombinierter Composite-Snap', () => {
   it('fängt den äußeren Kontakt wieder ein', () => {
     const previous = compositeAt('moving-composite', -1.1);
@@ -52,6 +81,21 @@ describe('kombinierter Composite-Snap', () => {
     expect(result?.targetAnchorId).toBeTruthy();
     expect(result?.targetAnchorId).not.toMatch(/^internal:/);
     expect(result?.position[0]).toBeCloseTo(-1, 6);
+    if (!result) throw new Error('Außen-Snap fehlt.');
+    expectSelectedAnchorsCoincide(crossed, target, result);
+  });
+
+  it('richtet einen seitlich versetzten äußeren Composite-Punkt exakt an der Cutter-Kreuzung aus', () => {
+    const previous = compositeAt('moving-composite', -1.1, 0.1);
+    const crossed = compositeAt('moving-composite', -0.9, 0.1);
+    const { target } = fixedBox();
+
+    const result = findSweptSurfaceTargetSnap(previous, crossed, [target], STEP);
+
+    expect(result?.targetId).toBe('target-box');
+    expect(result?.targetAnchorId).not.toMatch(/^internal:/);
+    if (!result) throw new Error('Seitlicher Außen-Snap fehlt.');
+    expectSelectedAnchorsCoincide(crossed, target, result);
   });
 
   it('behält den inneren Cutter-Snap zusätzlich bei', () => {
