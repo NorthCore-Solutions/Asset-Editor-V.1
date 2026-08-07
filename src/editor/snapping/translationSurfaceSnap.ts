@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
-import type {
-  ObjectSurfaceSnapResult,
-  SurfaceSnapTarget
+import {
+  findSurfaceTargetSnap,
+  type ObjectSurfaceSnapResult,
+  type SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import { findInternalCutterTargetSnap } from './internalCutterSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
@@ -61,6 +62,15 @@ function unchanged(position: Vec3): ObjectSurfaceSnapResult {
     sourceAnchorId: null,
     targetAnchorId: null
   };
+}
+
+function nearerResult(
+  first: ObjectSurfaceSnapResult,
+  second: ObjectSurfaceSnapResult
+): ObjectSurfaceSnapResult {
+  if (!first.targetId) return second;
+  if (!second.targetId) return first;
+  return first.distance <= second.distance ? first : second;
 }
 
 function holdOrReleaseContact(
@@ -180,7 +190,7 @@ function compositeDistances(value: number): {
   };
 }
 
-/** Gemeinsame Freigabelogik für innere Formen-Snaps auf Maus und Touch. */
+/** Gemeinsame Freigabelogik für äußere und innere Formen-Snaps auf Maus und Touch. */
 export function resolveTranslationSurfaceSnap(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
@@ -211,10 +221,7 @@ export function resolveTranslationSurfaceSnap(
   );
 }
 
-/**
- * Dieselbe Hysterese für Gruppen und Importe. Auch hier zählen ausschließlich
- * innere Cutter-Schnitte; die Außenhaut ist kein Fangziel.
- */
+/** Dieselbe kombinierte Außen-/Innensnap-Logik für Gruppen und Importe. */
 export function resolveCompositeTranslationSurfaceSnap(
   sourceTarget: SurfaceSnapTarget,
   targets: readonly SurfaceSnapTarget[],
@@ -240,20 +247,35 @@ export function resolveCompositeTranslationSurfaceSnap(
       options
     )
     : null;
-  const nearby = swept ?? findInternalCutterTargetSnap(
+  const internalNearby = findInternalCutterTargetSnap(
     sourceTarget,
     targets,
     sourcePosition,
     distances.worldThreshold,
     options
   );
-  const snapped = nearby.targetId ? nearby : null;
-  const acceptedPosition = snapped?.position
+  const filteredTargets = contact.suppressed
+    ? targets.map((target) => ({
+      ...target,
+      anchors: target.anchors.filter((anchor) => (
+        anchor.id !== contact.suppressed?.targetAnchorId
+      ))
+    }))
+    : targets;
+  const outerNearby = findSurfaceTargetSnap(
+    sourceTarget,
+    filteredTargets,
+    sourcePosition,
+    distances.worldThreshold
+  );
+  const nearby = nearerResult(outerNearby, internalNearby);
+  const candidate = swept ?? (nearby.targetId ? nearby : null);
+  const acceptedPosition = candidate?.position
     ?? [sourcePosition.x, sourcePosition.y, sourcePosition.z] as Vec3;
   const acceptedTarget = compositeTargetAtPosition(sourceTarget, acceptedPosition);
 
   return capturedResolution(
-    snapped,
+    candidate,
     rawPosition,
     acceptedPosition,
     contact.suppressed,
