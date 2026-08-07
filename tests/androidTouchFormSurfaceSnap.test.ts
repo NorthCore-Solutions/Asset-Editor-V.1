@@ -5,13 +5,9 @@ import {
   resolveTranslationSurfaceSnap,
   type TranslationSurfaceSnapSession
 } from '../src/editor/snapping/translationSurfaceSnap';
-import type { SceneObjectData, Vec3 } from '../src/types/editor';
+import type { SceneObjectData } from '../src/types/editor';
 
 const STEP = 0.25;
-
-function withPosition(object: SceneObjectData, position: Vec3): SceneObjectData {
-  return { ...object, position };
-}
 
 function boxAt(id: string, x: number): SceneObjectData {
   const object = createSceneObject('box');
