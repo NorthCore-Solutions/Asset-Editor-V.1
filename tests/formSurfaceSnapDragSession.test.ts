@@ -71,7 +71,7 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
     expect(resolution.session.active).toBeNull();
   });
 
-  it('unterdrückt nach Freigabe nur den konkreten Zielpunkt', () => {
+  it('unterdrückt nach Freigabe nur das konkrete Cutter-Paar', () => {
     const source = createSceneObject('box');
     source.position = [2.2, 3, 4];
     const resolution = resolveTranslationSurfaceSnap(
@@ -84,6 +84,7 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
 
     expect(resolution.session.suppressed).toEqual({
       targetAnchorId: 'target:anchor:1',
+      sourceAnchorId: 'source:anchor:1',
       rawOrigin: [0.2, 0, 0]
     });
   });
