@@ -9,8 +9,6 @@ import { findInternalCutterTargetSnap } from './internalCutterSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
 import { findSweptSurfaceTargetSnap } from './sweptSurfaceTargetSnap';
 
-const RELEASE_DISTANCE = 0.14;
-const REARM_DISTANCE = 0.35;
 const MAX_WORLD_THRESHOLD = 0.12;
 
 export interface TranslationSurfaceSnapContact {
@@ -54,6 +52,19 @@ function distance(left: Vec3, right: Vec3): number {
   );
 }
 
+/**
+ * Formen-Snap übernimmt die Stärke des normalen Positions-Snappings:
+ * Ein akzeptierter Punkt hält über einen vollständigen Positionsschritt.
+ * Beim Standardraster sind das 0,25 Welteinheiten.
+ */
+function snapHoldDistance(positionStep: number): number {
+  return Math.max(0.04, Math.abs(positionStep));
+}
+
+function snapRearmDistance(positionStep: number): number {
+  return snapHoldDistance(positionStep) * 1.5;
+}
+
 function unchanged(position: Vec3): ObjectSurfaceSnapResult {
   return {
     position: [...position] as Vec3,
@@ -75,7 +86,8 @@ function nearerResult(
 
 function holdOrReleaseContact(
   rawPosition: Vec3,
-  currentSession: TranslationSurfaceSnapSession
+  currentSession: TranslationSurfaceSnapSession,
+  positionStep: number
 ): {
   held: TranslationSurfaceSnapResolution | null;
   active: TranslationSurfaceSnapContact | null;
@@ -85,7 +97,7 @@ function holdOrReleaseContact(
   let suppressed = currentSession.suppressed;
 
   if (active) {
-    if (distance(rawPosition, active.captureRawPosition) <= RELEASE_DISTANCE) {
+    if (distance(rawPosition, active.captureRawPosition) <= snapHoldDistance(positionStep)) {
       return {
         held: {
           result: {
@@ -116,7 +128,7 @@ function holdOrReleaseContact(
     active = null;
   }
 
-  if (suppressed && distance(rawPosition, suppressed.rawOrigin) >= REARM_DISTANCE) {
+  if (suppressed && distance(rawPosition, suppressed.rawOrigin) >= snapRearmDistance(positionStep)) {
     suppressed = null;
   }
   return { held: null, active, suppressed };
@@ -199,7 +211,7 @@ export function resolveTranslationSurfaceSnap(
   currentSession: TranslationSurfaceSnapSession,
   additionalTargets: readonly SurfaceSnapTarget[] = []
 ): TranslationSurfaceSnapResolution {
-  const contact = holdOrReleaseContact(rawPosition, currentSession);
+  const contact = holdOrReleaseContact(rawPosition, currentSession, positionStep);
   if (contact.held) return contact.held;
 
   const snapped = findSweptObjectSurfaceSnap(
@@ -229,7 +241,11 @@ export function resolveCompositeTranslationSurfaceSnap(
   currentSession: TranslationSurfaceSnapSession,
   thresholdOrPositionStep: number = MAX_WORLD_THRESHOLD
 ): TranslationSurfaceSnapResolution {
-  const contact = holdOrReleaseContact(rawPosition, currentSession);
+  const contact = holdOrReleaseContact(
+    rawPosition,
+    currentSession,
+    thresholdOrPositionStep
+  );
   if (contact.held) return contact.held;
 
   const sourcePosition = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
