@@ -40,29 +40,30 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
     });
   });
 
-  it('liefert beim Halten exakt dieselbe akzeptierte Position ohne Nachspringen', () => {
+  it('hält wie das normale 0,25-Snapping bis knapp vor den nächsten Schritt', () => {
     const source = createSceneObject('box');
     source.position = [20, 20, 20];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [0.1, 0, 0],
+      [0.24, 0, 0],
       activeSession()
     );
 
     expect(resolution.result.position).toEqual([2, 3, 4]);
     expect(resolution.result.targetId).toBe('target');
+    expect(resolution.session.active).not.toBeNull();
   });
 
-  it('gibt seitliches Ziehen nach derselben Freigabestrecke frei', () => {
+  it('gibt den Punkt erst oberhalb eines vollständigen 0,25-Schritts frei', () => {
     const source = createSceneObject('box');
-    source.position = [2, 3.2, 4];
+    source.position = [2, 3.26, 4];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [0, 0.2, 0],
+      [0, 0.26, 0],
       activeSession()
     );
 
@@ -73,19 +74,19 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
 
   it('unterdrückt nach Freigabe nur das konkrete Cutter-Paar', () => {
     const source = createSceneObject('box');
-    source.position = [2.2, 3, 4];
+    source.position = [2.26, 3, 4];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [0.2, 0, 0],
+      [0.26, 0, 0],
       activeSession()
     );
 
     expect(resolution.session.suppressed).toEqual({
       targetAnchorId: 'target:anchor:1',
       sourceAnchorId: 'source:anchor:1',
-      rawOrigin: [0.2, 0, 0]
+      rawOrigin: [0.26, 0, 0]
     });
   });
 });
