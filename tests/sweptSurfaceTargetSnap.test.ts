@@ -40,35 +40,41 @@ function center(target: SurfaceSnapTarget): [number, number, number] {
   return [value.x, value.y, value.z];
 }
 
-describe('kontinuierlicher innerer Composite-Snap', () => {
-  it('ignoriert beim Durchziehen den reinen Außenkontakt', () => {
+describe('kombinierter Composite-Snap', () => {
+  it('fängt den äußeren Kontakt wieder ein', () => {
     const previous = compositeAt('moving-composite', -1.1);
-    const outerContact = compositeAt('moving-composite', -1);
-    const { target } = fixedBox();
-
-    expect(findSweptSurfaceTargetSnap(
-      previous,
-      outerContact,
-      [target],
-      STEP
-    )).toBeNull();
-  });
-
-  it('stoppt eine Gruppe am ersten inneren Cutter-Schnitt', () => {
-    const previous = compositeAt('moving-composite', -1.1);
-    const current = compositeAt('moving-composite', -0.6);
+    const crossed = compositeAt('moving-composite', -0.9);
     const { object, target } = fixedBox();
-    const result = findSweptSurfaceTargetSnap(previous, current, [target], STEP);
+
+    const result = findSweptSurfaceTargetSnap(previous, crossed, [target], STEP);
 
     expect(result?.targetId).toBe(object.id);
-    expect(result?.targetAnchorId).toMatch(/^internal:/);
-    expect(result?.sourceAnchorId).toMatch(/^internal:/);
-    expect(result?.position[0]).toBeCloseTo(-0.75, 6);
+    expect(result?.targetAnchorId).toBeTruthy();
+    expect(result?.targetAnchorId).not.toMatch(/^internal:/);
+    expect(result?.position[0]).toBeCloseTo(-1, 6);
   });
 
-  it('führt denselben inneren Sweep über die gemeinsame Drag-Sitzung aus', () => {
+  it('behält den inneren Cutter-Snap zusätzlich bei', () => {
+    const source = compositeAt('moving-composite', -0.75);
+    const { object, target } = fixedBox();
+
+    const result = resolveCompositeTranslationSurfaceSnap(
+      source,
+      [target],
+      center(source),
+      createTranslationSurfaceSnapSession(),
+      STEP
+    );
+
+    expect(result.result.targetId).toBe(object.id);
+    expect(result.result.targetAnchorId).toMatch(/^internal:/);
+    expect(result.result.sourceAnchorId).toMatch(/^internal:/);
+    expect(result.result.position[0]).toBeCloseTo(-0.75, 6);
+  });
+
+  it('führt den äußeren Sweep über dieselbe Drag-Sitzung aus', () => {
     const previous = compositeAt('moving-composite', -1.1);
-    const current = compositeAt('moving-composite', -0.6);
+    const current = compositeAt('moving-composite', -0.9);
     const { object, target } = fixedBox();
 
     const initial = resolveCompositeTranslationSurfaceSnap(
@@ -89,13 +95,13 @@ describe('kontinuierlicher innerer Composite-Snap', () => {
     );
 
     expect(crossed.result.targetId).toBe(object.id);
-    expect(crossed.result.position[0]).toBeCloseTo(-0.75, 6);
+    expect(crossed.result.position[0]).toBeCloseTo(-1, 6);
     expect(crossed.session.previousCompositeTarget).not.toBeNull();
   });
 
-  it('lässt eine Gruppe aus einem inneren Schnitt wieder herausziehen', () => {
-    const previous = compositeAt('moving-composite', -0.75);
-    const away = compositeAt('moving-composite', -1.1);
+  it('lässt eine Gruppe vom äußeren Punkt wieder wegziehen', () => {
+    const previous = compositeAt('moving-composite', -1);
+    const away = compositeAt('moving-composite', -1.35);
     const { target } = fixedBox();
 
     expect(findSweptSurfaceTargetSnap(
