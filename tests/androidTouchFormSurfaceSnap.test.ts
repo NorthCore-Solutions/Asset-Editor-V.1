@@ -16,6 +16,21 @@ function boxAt(id: string, x: number): SceneObjectData {
   return object;
 }
 
+function activeInternalSession(): TranslationSurfaceSnapSession {
+  return {
+    active: {
+      targetId: 'target-box',
+      targetAnchorId: 'internal:target-box:x:0',
+      sourceAnchorId: 'internal:source-box:x:3',
+      captureRawPosition: [1, 2, 3],
+      acceptedPosition: [0.75, 2, 3],
+      lockDirection: [1, 0, 0]
+    },
+    suppressed: null,
+    previousCompositeTarget: null
+  };
+}
+
 describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
   it('fängt den äußeren Oberflächenpunkt mit demselben Solver', () => {
     const target = boxAt('target-box', 0);
@@ -53,26 +68,15 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
     expect(resolution.result.position[0]).toBeCloseTo(-0.5, 6);
   });
 
-  it('hält einen Kontakt bei kleinen kontinuierlichen Rohbewegungen', () => {
-    const session: TranslationSurfaceSnapSession = {
-      active: {
-        targetId: 'target-box',
-        targetAnchorId: 'internal:target-box:x:0',
-        sourceAnchorId: 'internal:source-box:x:3',
-        captureRawPosition: [1, 2, 3],
-        acceptedPosition: [0.75, 2, 3]
-      },
-      suppressed: null,
-      previousCompositeTarget: null
-    };
+  it('hält einen Kontakt bis knapp vor 0,125 entlang der Snap-Richtung', () => {
     const source = createSceneObject('box');
     source.position = [0.8, 2, 3];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [1.08, 2, 3],
-      session
+      [1.124, 2, 3],
+      activeInternalSession()
     );
 
     expect(resolution.result.targetId).toBe('target-box');
@@ -80,26 +84,31 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
     expect(resolution.session.active).not.toBeNull();
   });
 
-  it('gibt den Kontakt erst oberhalb des 0,25-Fangbereichs frei', () => {
-    const session: TranslationSurfaceSnapSession = {
-      active: {
-        targetId: 'target-box',
-        targetAnchorId: 'internal:target-box:x:0',
-        sourceAnchorId: 'internal:source-box:x:3',
-        captureRawPosition: [1, 2, 3],
-        acceptedPosition: [0.75, 2, 3]
-      },
-      suppressed: null,
-      previousCompositeTarget: null
-    };
+  it('lässt seitliche Bewegung im gehaltenen Kontakt frei', () => {
     const source = createSceneObject('box');
-    source.position = [1.26, 2, 3];
+    source.position = [0.75, 2.2, 3];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [1.26, 2, 3],
-      session
+      [1, 2.2, 3],
+      activeInternalSession()
+    );
+
+    expect(resolution.result.targetId).toBe('target-box');
+    expect(resolution.result.position).toEqual([0.75, 2.2, 3]);
+    expect(resolution.session.active).not.toBeNull();
+  });
+
+  it('gibt den Kontakt oberhalb von 0,125 entlang der Snap-Richtung frei', () => {
+    const source = createSceneObject('box');
+    source.position = [1.126, 2, 3];
+    const resolution = resolveTranslationSurfaceSnap(
+      source,
+      [],
+      STEP,
+      [1.126, 2, 3],
+      activeInternalSession()
     );
 
     expect(resolution.result.targetId).toBeNull();

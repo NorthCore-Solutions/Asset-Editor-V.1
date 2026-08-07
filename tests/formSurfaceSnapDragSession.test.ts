@@ -15,7 +15,8 @@ function activeSession(): TranslationSurfaceSnapSession {
       targetAnchorId: 'target:anchor:1',
       sourceAnchorId: 'source:anchor:1',
       captureRawPosition: [0, 0, 0],
-      acceptedPosition: [2, 3, 4]
+      acceptedPosition: [2, 3, 4],
+      lockDirection: [1, 0, 0]
     },
     suppressed: null,
     previousCompositeTarget: null
@@ -40,14 +41,14 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
     });
   });
 
-  it('hält wie das normale 0,25-Snapping bis knapp vor den nächsten Schritt', () => {
+  it('hält wie das normale 0,25-Raster bis knapp vor dem halben Schritt', () => {
     const source = createSceneObject('box');
     source.position = [20, 20, 20];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [0.24, 0, 0],
+      [0.124, 0, 0],
       activeSession()
     );
 
@@ -56,14 +57,30 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
     expect(resolution.session.active).not.toBeNull();
   });
 
-  it('gibt den Punkt erst oberhalb eines vollständigen 0,25-Schritts frei', () => {
+  it('lässt tangentiale Bewegung während des gehaltenen Snaps frei', () => {
     const source = createSceneObject('box');
-    source.position = [2, 3.26, 4];
+    source.position = [2, 3.2, 4];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [0, 0.26, 0],
+      [0, 0.2, 0],
+      activeSession()
+    );
+
+    expect(resolution.result.targetId).toBe('target');
+    expect(resolution.result.position).toEqual([2, 3.2, 4]);
+    expect(resolution.session.active).not.toBeNull();
+  });
+
+  it('gibt den Punkt oberhalb des halben 0,25-Schritts frei', () => {
+    const source = createSceneObject('box');
+    source.position = [2.126, 3, 4];
+    const resolution = resolveTranslationSurfaceSnap(
+      source,
+      [],
+      STEP,
+      [0.126, 0, 0],
       activeSession()
     );
 
@@ -74,19 +91,19 @@ describe('lokale Formen-Snap-Sitzung des Viewports', () => {
 
   it('unterdrückt nach Freigabe nur das konkrete Cutter-Paar', () => {
     const source = createSceneObject('box');
-    source.position = [2.26, 3, 4];
+    source.position = [2.126, 3, 4];
     const resolution = resolveTranslationSurfaceSnap(
       source,
       [],
       STEP,
-      [0.26, 0, 0],
+      [0.126, 0, 0],
       activeSession()
     );
 
     expect(resolution.session.suppressed).toEqual({
       targetAnchorId: 'target:anchor:1',
       sourceAnchorId: 'source:anchor:1',
-      rawOrigin: [0.26, 0, 0]
+      rawOrigin: [0.126, 0, 0]
     });
   });
 });
