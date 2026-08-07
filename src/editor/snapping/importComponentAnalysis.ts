@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 
 const POSITION_PRECISION = 0.00001;
 const MIN_CLUSTER_PADDING = 0.0001;
@@ -232,7 +232,9 @@ function componentSignature(root: THREE.Object3D): string {
       node: mesh.uuid,
       geometry: mesh.geometry.uuid,
       positionCount: position?.count ?? 0,
-      positionVersion: position instanceof THREE.BufferAttribute ? position.version : position?.data.version ?? 0,
+      positionVersion: position instanceof THREE.BufferAttribute
+        ? position.version
+        : position?.data.version ?? 0,
       indexCount: index?.count ?? 0,
       indexVersion: index?.version ?? 0,
       matrix: relativeMatrix.elements.map((value) => Number(value.toFixed(6)))
@@ -259,10 +261,10 @@ function disposeComponentRoots(roots: readonly THREE.Object3D[]): void {
 }
 
 /**
- * BestmÃ¶gliche Komponentenheuristik fÃ¼r Fremdimporte:
+ * Bestmögliche Komponentenheuristik für Fremdimporte:
  * - explizite direkte Gruppen bleiben eigene Komponenten,
- * - berÃ¼hrende direkte Mesh-Aufteilungen werden zusammengefasst,
- * - rÃ¤umlich getrennte Meshes bleiben getrennt,
+ * - berührende direkte Mesh-Aufteilungen werden zusammengefasst,
+ * - räumlich getrennte Meshes bleiben getrennt,
  * - getrennte Dreiecksinseln eines Meshes bleiben getrennt.
  */
 export function buildImportedComponentRoots(root: THREE.Object3D): THREE.Object3D[] {
@@ -329,4 +331,3 @@ export function buildImportedComponentRoots(root: THREE.Object3D): THREE.Object3
   componentRootCache.set(root, { signature, roots });
   return roots;
 }
-

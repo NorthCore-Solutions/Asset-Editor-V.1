@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createGeometry } from '../../geometry/factory';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
@@ -717,4 +717,3 @@ export function snapObjectToObjectSurfaces(
 ): Vec3 {
   return findObjectSurfaceSnap(source, objects, positionStep, additionalTargets).position;
 }
-
