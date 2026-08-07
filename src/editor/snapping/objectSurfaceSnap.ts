@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createGeometry } from '../../geometry/factory';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
@@ -439,7 +439,7 @@ export function analyzeImportedObject3DSnapTargets(
   }
 
   const components = componentRoots.flatMap((componentRoot, index) => {
-    const stableKey = componentRoot.userData.appleCutterComponentKey;
+    const stableKey: unknown = componentRoot.userData.appleCutterComponentKey;
     const componentKey = typeof stableKey === 'string' ? stableKey : String(index);
     const componentId = `${id}:component:${componentKey}`;
     const target = surfaceSnapTargetFromObject3D(componentRoot, componentId);
@@ -717,3 +717,4 @@ export function snapObjectToObjectSurfaces(
 ): Vec3 {
   return findObjectSurfaceSnap(source, objects, positionStep, additionalTargets).position;
 }
+
