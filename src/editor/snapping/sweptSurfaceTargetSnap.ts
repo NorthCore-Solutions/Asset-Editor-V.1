@@ -281,12 +281,17 @@ export function findSweptSurfaceTargetSnap(
           ? previousSeparation / denominator
           : 1;
         const travel = THREE.MathUtils.clamp(rawTravel, 0, 1);
-        const correctedCenter = currentCenter.clone()
-          .addScaledVector(direction, correctionAlongMovement);
+
+        // Auch bei Gruppen und Importen muss der äußere Snap exakt die
+        // ausgewählten Cutter-Kreuzungen übereinanderlegen. Nur an der
+        // Außenhülle zu stoppen würde wieder Snappositionen zwischen den
+        // gelben Linien erzeugen.
+        const anchorCorrection = targetAnchor.position.clone().sub(currentAnchor.position);
+        const correctedCenter = currentCenter.clone().add(anchorCorrection);
         const candidate: SweepCandidate = {
           position: [correctedCenter.x, correctedCenter.y, correctedCenter.z],
           targetId: target.id,
-          distance: Math.abs(correctionAlongMovement),
+          distance: anchorCorrection.length(),
           travel,
           lateralDistance,
           normalAlignment: normals.source.dot(normals.target),
