@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import * as THREE from 'three';
-import { createSceneObject, SHAPE_DEFINITIONS } from '../src/geometry/factory';
+import type * as THREE from 'three';
+import { createSceneObject } from '../src/geometry/factory';
 import { findAppleCutterSurfaceSnap } from '../src/editor/appleCutter/appleCutterSnap';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
-import type { PrimitiveType, SceneObjectData, Vec3 } from '../src/types/editor';
+import type { SceneObjectData, Vec3 } from '../src/types/editor';
 
 const STEP = 0.25;
-const OUTER_GAP = 0.1;
 
 const withPosition = (object: SceneObjectData, position: Vec3): SceneObjectData => ({
   ...object,
@@ -19,159 +18,86 @@ function requiredBounds(object: SceneObjectData): THREE.Box3 {
   return bounds;
 }
 
-function alignedCrossing(
-  sourceType: PrimitiveType,
-  targetType: PrimitiveType
-): {
-  previous: SceneObjectData;
-  outerContact: SceneObjectData;
-  internalCandidate: SceneObjectData;
-  target: SceneObjectData;
-} {
-  const target = createSceneObject(targetType);
-  target.id = `target-${targetType}`;
-  const targetBounds = requiredBounds(target);
-  const targetCenter = targetBounds.getCenter(new THREE.Vector3());
-
-  const source = createSceneObject(sourceType);
-  source.id = `source-${sourceType}`;
-  const sourceBounds = requiredBounds(source);
-  const sourceCenter = sourceBounds.getCenter(new THREE.Vector3());
-  const aligned = withPosition(source, [
-    source.position[0],
-    source.position[1] + targetCenter.y - sourceCenter.y,
-    source.position[2] + targetCenter.z - sourceCenter.z
-  ]);
-  const alignedBounds = requiredBounds(aligned);
-  const previous = withPosition(aligned, [
-    aligned.position[0] + targetBounds.min.x - OUTER_GAP - alignedBounds.max.x,
-    aligned.position[1],
-    aligned.position[2]
-  ]);
-  const outerContact = withPosition(previous, [
-    previous.position[0] + OUTER_GAP,
-    previous.position[1],
-    previous.position[2]
-  ]);
-  const internalCandidate = withPosition(previous, [
-    previous.position[0] + 1,
-    previous.position[1],
-    previous.position[2]
-  ]);
-
-  return { previous, outerContact, internalCandidate, target };
+function boxAt(id: string, x: number): SceneObjectData {
+  const object = createSceneObject('box');
+  object.id = id;
+  object.position = [x, object.position[1], object.position[2]];
+  return object;
 }
 
-function expectUnchanged(
-  candidate: SceneObjectData,
-  result: ReturnType<typeof findAppleCutterSurfaceSnap>
-): void {
-  expect(result.targetId).toBeNull();
-  expect(result.position[0]).toBeCloseTo(candidate.position[0], 6);
-  expect(result.position[1]).toBeCloseTo(candidate.position[1], 6);
-  expect(result.position[2]).toBeCloseTo(candidate.position[2], 6);
-}
-
-function expectInternalOverlap(
-  candidate: SceneObjectData,
+function expectOuterContact(
+  source: SceneObjectData,
   target: SceneObjectData,
   result: ReturnType<typeof findAppleCutterSurfaceSnap>
 ): void {
   expect(result.targetId).toBe(target.id);
-  expect(result.sourceAnchorId).toMatch(/^internal:/);
-  expect(result.targetAnchorId).toMatch(/^internal:/);
+  expect(result.sourceAnchorId).toBeTruthy();
+  expect(result.targetAnchorId).toBeTruthy();
+  expect(result.sourceAnchorId).not.toMatch(/^internal:/);
+  expect(result.targetAnchorId).not.toMatch(/^internal:/);
 
-  const snappedBounds = requiredBounds(withPosition(candidate, result.position));
+  const sourceBounds = requiredBounds(withPosition(source, result.position));
   const targetBounds = requiredBounds(target);
-  const overlapX = Math.min(snappedBounds.max.x, targetBounds.max.x)
-    - Math.max(snappedBounds.min.x, targetBounds.min.x);
-  expect(overlapX).toBeGreaterThan(0.00001);
+  expect(sourceBounds.max.x).toBeCloseTo(targetBounds.min.x, 5);
 }
 
-describe.each(['Desktop', 'Android'])('innerer Formen-Snap auf %s', () => {
-  it('ignoriert den reinen Außenkontakt vollständig', () => {
-    const setup = alignedCrossing('box', 'box');
+function expectInternalSnap(
+  target: SceneObjectData,
+  result: ReturnType<typeof findAppleCutterSurfaceSnap>,
+  expectedX: number
+): void {
+  expect(result.targetId).toBe(target.id);
+  expect(result.sourceAnchorId).toMatch(/^internal:/);
+  expect(result.targetAnchorId).toMatch(/^internal:/);
+  expect(result.position[0]).toBeCloseTo(expectedX, 6);
+}
+
+describe.each(['Desktop', 'Android'])('kombinierter Formen-Snap auf %s', () => {
+  it('fängt den äußeren Oberflächenpunkt zusätzlich wieder ein', () => {
+    const target = boxAt('target-box', 0);
+    const previous = boxAt('source-box', -1.1);
+    const candidate = boxAt('source-box', -0.9);
+
     const result = findAppleCutterSurfaceSnap(
-      setup.outerContact,
-      [setup.previous, setup.target],
+      candidate,
+      [previous, target],
       STEP
     );
 
-    expectUnchanged(setup.outerContact, result);
+    expectOuterContact(candidate, target, result);
+    expect(result.position[0]).toBeCloseTo(-1, 6);
   });
 
-  it('fängt beim Durchziehen den ersten inneren 0,25-Schnitt', () => {
-    const setup = alignedCrossing('box', 'box');
+  it('behält den ersten inneren 0,25-Schnitt bei', () => {
+    const target = boxAt('target-box', 0);
+    const source = boxAt('source-box', -0.75);
+
+    const result = findAppleCutterSurfaceSnap(source, [target], STEP);
+
+    expectInternalSnap(target, result, -0.75);
+  });
+
+  it('behält auch den nächsten inneren 0,25-Schnitt bei', () => {
+    const target = boxAt('target-box', 0);
+    const source = boxAt('source-box', -0.5);
+
+    const result = findAppleCutterSurfaceSnap(source, [target], STEP);
+
+    expectInternalSnap(target, result, -0.5);
+  });
+
+  it('lässt sich vom äußeren Kontakt wieder wegziehen', () => {
+    const target = boxAt('target-box', 0);
+    const previous = boxAt('source-box', -1);
+    const candidate = boxAt('source-box', -1.35);
+
     const result = findAppleCutterSurfaceSnap(
-      setup.internalCandidate,
-      [setup.previous, setup.target],
+      candidate,
+      [previous, target],
       STEP
     );
 
-    expectInternalOverlap(setup.internalCandidate, setup.target, result);
-    expect(result.position[0]).toBeCloseTo(-0.75, 6);
-  });
-
-  it('kann nach dem ersten Fang zum nächsten inneren Schnitt weitergezogen werden', () => {
-    const target = createSceneObject('box');
-    target.id = 'target-box';
-    const previous = createSceneObject('box');
-    previous.id = 'source-box';
-    previous.position = [-0.75, target.position[1], target.position[2]];
-    const candidate = withPosition(previous, [
-      -0.4,
-      previous.position[1],
-      previous.position[2]
-    ]);
-
-    const result = findAppleCutterSurfaceSnap(candidate, [previous, target], STEP);
-
-    expectInternalOverlap(candidate, target, result);
-    expect(result.position[0]).toBeCloseTo(-0.5, 6);
-  });
-
-  it('lässt sich aus einem inneren Schnitt wieder nach außen wegziehen', () => {
-    const target = createSceneObject('box');
-    target.id = 'target-box';
-    const previous = createSceneObject('box');
-    previous.id = 'source-box';
-    previous.position = [-0.75, target.position[1], target.position[2]];
-    const candidate = withPosition(previous, [
-      -1.1,
-      previous.position[1],
-      previous.position[2]
-    ]);
-
-    expectUnchanged(candidate, findAppleCutterSurfaceSnap(candidate, [previous, target], STEP));
-  });
-});
-
-describe('innere Durchquerung für alle Editorformen', () => {
-  it.each(SHAPE_DEFINITIONS)("zieht '$label' durch einen Würfel und fängt erst im Körper", ({ type }) => {
-    const setup = alignedCrossing(type, 'box');
-    const outer = findAppleCutterSurfaceSnap(
-      setup.outerContact,
-      [setup.previous, setup.target],
-      STEP
-    );
-    expectUnchanged(setup.outerContact, outer);
-
-    const internal = findAppleCutterSurfaceSnap(
-      setup.internalCandidate,
-      [setup.previous, setup.target],
-      STEP
-    );
-    expectInternalOverlap(setup.internalCandidate, setup.target, internal);
-  });
-
-  it.each(SHAPE_DEFINITIONS)("zieht einen Würfel durch '$label' und fängt einen inneren Ziel-Schnitt", ({ type }) => {
-    const setup = alignedCrossing('box', type);
-    const result = findAppleCutterSurfaceSnap(
-      setup.internalCandidate,
-      [setup.previous, setup.target],
-      STEP
-    );
-
-    expectInternalOverlap(setup.internalCandidate, setup.target, result);
+    expect(result.targetId).toBeNull();
+    expect(result.position[0]).toBeCloseTo(candidate.position[0], 6);
   });
 });

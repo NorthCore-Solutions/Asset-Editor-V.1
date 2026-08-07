@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
 import {
+  findSurfaceTargetSnap,
   surfaceSnapTargetFromSceneObject,
   type ObjectSurfaceSnapResult,
   type SurfaceSnapTarget
@@ -34,7 +35,7 @@ function unchangedResult(source: SceneObjectData): ObjectSurfaceSnapResult {
   };
 }
 
-function internalTargets(
+function snapTargets(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
   additionalTargets: readonly SurfaceSnapTarget[]
@@ -49,9 +50,18 @@ function internalTargets(
   ];
 }
 
+function nearerResult(
+  first: ObjectSurfaceSnapResult,
+  second: ObjectSurfaceSnapResult
+): ObjectSurfaceSnapResult {
+  if (!first.targetId) return second;
+  if (!second.targetId) return first;
+  return first.distance <= second.distance + EPSILON ? first : second;
+}
+
 /**
- * Formen-Snap verwendet ausschließlich die inneren Apfelschneider-Schnitte.
- * Außenflächen bleiben sichtbar, sind aber keine Fangziele.
+ * Formen-Snap kombiniert die äußeren Oberflächen-Snappoints mit den inneren
+ * zentrierten Apfelschneider-Schnitten. Beide Ebenen bleiben gleichzeitig aktiv.
  */
 export function findAppleCutterSurfaceSnap(
   source: SceneObjectData,
@@ -73,13 +83,22 @@ export function findAppleCutterSurfaceSnap(
 
   const sourceTarget = surfaceSnapTargetFromSceneObject(source);
   if (!sourceTarget) return unchangedResult(source);
+  const targets = snapTargets(source, objects, additionalTargets);
   const threshold = Math.min(0.12, Math.max(0.04, Math.abs(positionStep) * 0.4));
-  return findInternalCutterTargetSnap(
+  const sourcePosition = new THREE.Vector3(...source.position);
+  const internal = findInternalCutterTargetSnap(
     sourceTarget,
-    internalTargets(source, objects, additionalTargets),
-    new THREE.Vector3(...source.position),
+    targets,
+    sourcePosition,
     threshold
   );
+  const outer = findSurfaceTargetSnap(
+    sourceTarget,
+    targets,
+    sourcePosition,
+    threshold
+  );
+  return nearerResult(outer, internal);
 }
 
 export function snapAppleCutterSurfaces(

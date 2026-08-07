@@ -1,15 +1,14 @@
 import * as THREE from 'three';
 import type { SceneObjectData, Vec3 } from '../../types/editor';
-import type {
-  ObjectSurfaceSnapResult,
-  SurfaceSnapTarget
+import {
+  findSurfaceTargetSnap,
+  type ObjectSurfaceSnapResult,
+  type SurfaceSnapTarget
 } from './objectSurfaceSnap';
 import { findInternalCutterTargetSnap } from './internalCutterSnap';
 import { findSweptObjectSurfaceSnap } from './sweptObjectSurfaceSnap';
 import { findSweptSurfaceTargetSnap } from './sweptSurfaceTargetSnap';
 
-const RELEASE_DISTANCE = 0.14;
-const REARM_DISTANCE = 0.35;
 const MAX_WORLD_THRESHOLD = 0.12;
 
 export interface TranslationSurfaceSnapContact {
@@ -53,6 +52,19 @@ function distance(left: Vec3, right: Vec3): number {
   );
 }
 
+/**
+ * Formen-Snap übernimmt die Stärke des normalen Positions-Snappings:
+ * Ein akzeptierter Punkt hält über einen vollständigen Positionsschritt.
+ * Beim Standardraster sind das 0,25 Welteinheiten.
+ */
+function snapHoldDistance(positionStep: number): number {
+  return Math.max(0.04, Math.abs(positionStep));
+}
+
+function snapRearmDistance(positionStep: number): number {
+  return snapHoldDistance(positionStep) * 1.5;
+}
+
 function unchanged(position: Vec3): ObjectSurfaceSnapResult {
   return {
     position: [...position] as Vec3,
@@ -63,9 +75,19 @@ function unchanged(position: Vec3): ObjectSurfaceSnapResult {
   };
 }
 
+function nearerResult(
+  first: ObjectSurfaceSnapResult,
+  second: ObjectSurfaceSnapResult
+): ObjectSurfaceSnapResult {
+  if (!first.targetId) return second;
+  if (!second.targetId) return first;
+  return first.distance <= second.distance ? first : second;
+}
+
 function holdOrReleaseContact(
   rawPosition: Vec3,
-  currentSession: TranslationSurfaceSnapSession
+  currentSession: TranslationSurfaceSnapSession,
+  positionStep: number
 ): {
   held: TranslationSurfaceSnapResolution | null;
   active: TranslationSurfaceSnapContact | null;
@@ -75,7 +97,7 @@ function holdOrReleaseContact(
   let suppressed = currentSession.suppressed;
 
   if (active) {
-    if (distance(rawPosition, active.captureRawPosition) <= RELEASE_DISTANCE) {
+    if (distance(rawPosition, active.captureRawPosition) <= snapHoldDistance(positionStep)) {
       return {
         held: {
           result: {
@@ -106,7 +128,7 @@ function holdOrReleaseContact(
     active = null;
   }
 
-  if (suppressed && distance(rawPosition, suppressed.rawOrigin) >= REARM_DISTANCE) {
+  if (suppressed && distance(rawPosition, suppressed.rawOrigin) >= snapRearmDistance(positionStep)) {
     suppressed = null;
   }
   return { held: null, active, suppressed };
@@ -180,7 +202,7 @@ function compositeDistances(value: number): {
   };
 }
 
-/** Gemeinsame Freigabelogik für innere Formen-Snaps auf Maus und Touch. */
+/** Gemeinsame Freigabelogik für äußere und innere Formen-Snaps auf Maus und Touch. */
 export function resolveTranslationSurfaceSnap(
   source: SceneObjectData,
   objects: readonly SceneObjectData[],
@@ -189,7 +211,7 @@ export function resolveTranslationSurfaceSnap(
   currentSession: TranslationSurfaceSnapSession,
   additionalTargets: readonly SurfaceSnapTarget[] = []
 ): TranslationSurfaceSnapResolution {
-  const contact = holdOrReleaseContact(rawPosition, currentSession);
+  const contact = holdOrReleaseContact(rawPosition, currentSession, positionStep);
   if (contact.held) return contact.held;
 
   const snapped = findSweptObjectSurfaceSnap(
@@ -211,10 +233,7 @@ export function resolveTranslationSurfaceSnap(
   );
 }
 
-/**
- * Dieselbe Hysterese für Gruppen und Importe. Auch hier zählen ausschließlich
- * innere Cutter-Schnitte; die Außenhaut ist kein Fangziel.
- */
+/** Dieselbe kombinierte Außen-/Innensnap-Logik für Gruppen und Importe. */
 export function resolveCompositeTranslationSurfaceSnap(
   sourceTarget: SurfaceSnapTarget,
   targets: readonly SurfaceSnapTarget[],
@@ -222,7 +241,11 @@ export function resolveCompositeTranslationSurfaceSnap(
   currentSession: TranslationSurfaceSnapSession,
   thresholdOrPositionStep: number = MAX_WORLD_THRESHOLD
 ): TranslationSurfaceSnapResolution {
-  const contact = holdOrReleaseContact(rawPosition, currentSession);
+  const contact = holdOrReleaseContact(
+    rawPosition,
+    currentSession,
+    thresholdOrPositionStep
+  );
   if (contact.held) return contact.held;
 
   const sourcePosition = new THREE.Vector3().setFromMatrixPosition(sourceTarget.matrixWorld);
@@ -240,20 +263,35 @@ export function resolveCompositeTranslationSurfaceSnap(
       options
     )
     : null;
-  const nearby = swept ?? findInternalCutterTargetSnap(
+  const internalNearby = findInternalCutterTargetSnap(
     sourceTarget,
     targets,
     sourcePosition,
     distances.worldThreshold,
     options
   );
-  const snapped = nearby.targetId ? nearby : null;
-  const acceptedPosition = snapped?.position
+  const filteredTargets = contact.suppressed
+    ? targets.map((target) => ({
+      ...target,
+      anchors: target.anchors.filter((anchor) => (
+        anchor.id !== contact.suppressed?.targetAnchorId
+      ))
+    }))
+    : targets;
+  const outerNearby = findSurfaceTargetSnap(
+    sourceTarget,
+    filteredTargets,
+    sourcePosition,
+    distances.worldThreshold
+  );
+  const nearby = nearerResult(outerNearby, internalNearby);
+  const candidate = swept ?? (nearby.targetId ? nearby : null);
+  const acceptedPosition = candidate?.position
     ?? [sourcePosition.x, sourcePosition.y, sourcePosition.z] as Vec3;
   const acceptedTarget = compositeTargetAtPosition(sourceTarget, acceptedPosition);
 
   return capturedResolution(
-    snapped,
+    candidate,
     rawPosition,
     acceptedPosition,
     contact.suppressed,
