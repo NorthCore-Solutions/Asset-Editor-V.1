@@ -13,23 +13,36 @@ function withPosition(object: SceneObjectData, position: Vec3): SceneObjectData 
   return { ...object, position };
 }
 
-function internalBoxCrossing(): {
-  source: SceneObjectData;
-  candidate: SceneObjectData;
-  target: SceneObjectData;
-} {
-  const target = createSceneObject('box');
-  target.id = 'target-box';
-  const source = createSceneObject('box');
-  source.id = 'source-box';
-  source.position = [-1.1, target.position[1], target.position[2]];
-  const candidate = withPosition(source, [-0.6, source.position[1], source.position[2]]);
-  return { source, candidate, target };
+function boxAt(id: string, x: number): SceneObjectData {
+  const object = createSceneObject('box');
+  object.id = id;
+  object.position = [x, object.position[1], object.position[2]];
+  return object;
 }
 
 describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
-  it('ignoriert die Außenhaut und fängt erst einen inneren Cutter-Schnitt', () => {
-    const { source, candidate, target } = internalBoxCrossing();
+  it('fängt den äußeren Oberflächenpunkt mit demselben Solver', () => {
+    const target = boxAt('target-box', 0);
+    const source = boxAt('source-box', -1.1);
+    const candidate = boxAt('source-box', -0.9);
+    const resolution = resolveTranslationSurfaceSnap(
+      candidate,
+      [source, target],
+      STEP,
+      candidate.position,
+      createTranslationSurfaceSnapSession()
+    );
+
+    expect(resolution.result.targetId).toBe(target.id);
+    expect(resolution.result.targetAnchorId).toBeTruthy();
+    expect(resolution.result.targetAnchorId).not.toMatch(/^internal:/);
+    expect(resolution.result.position[0]).toBeCloseTo(-1, 6);
+  });
+
+  it('fängt weiterhin den nächsten inneren Cutter-Schnitt', () => {
+    const target = boxAt('target-box', 0);
+    const source = boxAt('source-box', -0.75);
+    const candidate = boxAt('source-box', -0.4);
     const resolution = resolveTranslationSurfaceSnap(
       candidate,
       [source, target],
@@ -41,11 +54,10 @@ describe.each(['Maus', 'Touch'])('gemeinsamer Formen-Snap für %s', () => {
     expect(resolution.result.targetId).toBe(target.id);
     expect(resolution.result.targetAnchorId).toMatch(/^internal:/);
     expect(resolution.result.sourceAnchorId).toMatch(/^internal:/);
-    expect(resolution.result.position[0]).toBeCloseTo(-0.75, 6);
-    expect(resolution.result.position[0]).toBeGreaterThan(-1);
+    expect(resolution.result.position[0]).toBeCloseTo(-0.5, 6);
   });
 
-  it('hält einen inneren Kontakt bei kleinen kontinuierlichen Rohbewegungen', () => {
+  it('hält einen Kontakt bei kleinen kontinuierlichen Rohbewegungen', () => {
     const session: TranslationSurfaceSnapSession = {
       active: {
         targetId: 'target-box',
