@@ -11,6 +11,7 @@ const EPSILON = 0.000001;
 
 export interface SweptObjectSurfaceSnapOptions {
   ignoredTargetAnchorId?: string | null;
+  ignoredSourceAnchorId?: string | null;
 }
 
 function unchangedRotationAndScale(
