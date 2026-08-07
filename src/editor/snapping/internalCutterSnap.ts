@@ -23,6 +23,7 @@ export interface InternalCutterSnapResult {
 
 export interface InternalCutterSnapOptions {
   ignoredTargetAnchorId?: string | null;
+  ignoredSourceAnchorId?: string | null;
 }
 
 interface InternalCutterPlane {
@@ -131,6 +132,15 @@ function planeSeparation(
   return source.point.clone().sub(target.point).dot(target.normal);
 }
 
+function ignoredPair(
+  source: InternalCutterPlane,
+  target: InternalCutterPlane,
+  options: InternalCutterSnapOptions
+): boolean {
+  if (options.ignoredTargetAnchorId !== target.id) return false;
+  return !options.ignoredSourceAnchorId || options.ignoredSourceAnchorId === source.id;
+}
+
 function unchanged(position: THREE.Vector3): InternalCutterSnapResult {
   return {
     position: [position.x, position.y, position.z],
@@ -164,7 +174,7 @@ export function findInternalCutterTargetSnap(
     for (const sourcePlane of sourcePlanes) {
       for (const targetPlane of targetPlanes) {
         if (
-          options.ignoredTargetAnchorId === targetPlane.id
+          ignoredPair(sourcePlane, targetPlane, options)
           || !parallelPlanes(sourcePlane, targetPlane)
         ) continue;
 
@@ -229,7 +239,7 @@ export function findSweptInternalCutterTargetSnap(
 
       for (const targetPlane of targetPlanes) {
         if (
-          options.ignoredTargetAnchorId === targetPlane.id
+          ignoredPair(currentPlane, targetPlane, options)
           || !parallelPlanes(currentPlane, targetPlane)
         ) continue;
 
