@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type * as THREE from 'three';
 import { createSceneObject } from '../src/geometry/factory';
 import { findAppleCutterSurfaceSnap } from '../src/editor/appleCutter/appleCutterSnap';
+import {
+  surfaceSnapTargetFromSceneObject
+} from '../src/editor/snapping/objectSurfaceSnap';
+import { transformSurfaceSnapAnchors } from '../src/editor/snapping/surfaceSnapTopology';
 import { worldBoundsFromSceneObject } from '../src/editor/spatial/worldBounds';
 import type { SceneObjectData, Vec3 } from '../src/types/editor';
 
@@ -41,6 +45,28 @@ function expectOuterContact(
   expect(sourceBounds.max.x).toBeCloseTo(targetBounds.min.x, 5);
 }
 
+function expectSelectedAnchorsCoincide(
+  source: SceneObjectData,
+  target: SceneObjectData,
+  result: ReturnType<typeof findAppleCutterSurfaceSnap>
+): void {
+  const snappedSource = surfaceSnapTargetFromSceneObject(withPosition(source, result.position));
+  const targetTopology = surfaceSnapTargetFromSceneObject(target);
+  if (!snappedSource || !targetTopology) throw new Error('Snap-Topologie fehlt.');
+
+  const sourceAnchor = transformSurfaceSnapAnchors(
+    snappedSource.anchors,
+    snappedSource.matrixWorld
+  ).find((anchor) => anchor.id === result.sourceAnchorId);
+  const targetAnchor = transformSurfaceSnapAnchors(
+    targetTopology.anchors,
+    targetTopology.matrixWorld
+  ).find((anchor) => anchor.id === result.targetAnchorId);
+  if (!sourceAnchor || !targetAnchor) throw new Error('Gewählter Cutter-Anker fehlt.');
+
+  expect(sourceAnchor.position.distanceTo(targetAnchor.position)).toBeLessThan(0.000001);
+}
+
 function expectInternalSnap(
   target: SceneObjectData,
   result: ReturnType<typeof findAppleCutterSurfaceSnap>,
@@ -65,7 +91,25 @@ describe.each(['Desktop', 'Android'])('kombinierter Formen-Snap auf %s', () => {
     );
 
     expectOuterContact(candidate, target, result);
+    expectSelectedAnchorsCoincide(candidate, target, result);
     expect(result.position[0]).toBeCloseTo(-1, 6);
+  });
+
+  it('richtet auch bei seitlichem Versatz den Außenpunkt exakt an der gelben Cutter-Kreuzung aus', () => {
+    const target = boxAt('target-box', 0);
+    const previous = boxAt('source-box', -1.1);
+    previous.position = [previous.position[0], previous.position[1] + 0.1, previous.position[2]];
+    const candidate = boxAt('source-box', -0.9);
+    candidate.position = [candidate.position[0], candidate.position[1] + 0.1, candidate.position[2]];
+
+    const result = findAppleCutterSurfaceSnap(
+      candidate,
+      [previous, target],
+      STEP
+    );
+
+    expectOuterContact(candidate, target, result);
+    expectSelectedAnchorsCoincide(candidate, target, result);
   });
 
   it('behält den ersten inneren 0,25-Schnitt bei', () => {
