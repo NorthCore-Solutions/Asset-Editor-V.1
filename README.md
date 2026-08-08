@@ -1,169 +1,111 @@
-# NorthCore Asset Editor (Beta)
+# 🧱 NorthCore Asset Editor
 
-Lokaler, browserbasierter 3D-Editor für einfache Low-Poly-Game-Assets. Objekte werden aus geometrischen Grundformen zusammengesetzt, lokal als versionierte JSON-Projekte gespeichert und als GLB für Godot oder Blender exportiert.
+## 📚 Overview
 
-## Funktionsumfang 0.1
+A local 3D asset editor for creating, modifying, painting, and arranging modular assets — built for the NorthCore development workflow.
 
-- Desktop-Oberfläche mit Formenbibliothek, 3D-Viewport, Eigenschaften und Objektliste
-- Grundformen: Würfel, Quader, Kugel, Halbkugel, Zylinder, Kegel, Pyramide, Torus, Ebene, Keil und Prisma
-- Gebäudeteile: Wand, Bodenplatte, Flachdach, Satteldach, Pultdach, Tür, Fenster, Säule, Schornstein und Treppe
-- Auswahl per Mausklick und sichtbare Hervorhebung
-- Verschieben, Drehen und Skalieren mit TransformControls oder Zahlenfeldern
-- Perspektiv- und orthogonale Blickrichtungen sowie Fokus auf Auswahl
-- Raster, Achsen, Beleuchtung und Schatten
-- Sichtbarkeit, Sperren, Umbenennen, Duplizieren und Löschen
-- Farbe, HEX-Wert, Rauheit, Metallwert, Transparenz sowie Flat/Smooth Shading
-- NorthCore-, Low-Poly- und Materialvorlagen
-- Positions-, Winkel- und Skalierungs-Snapping
-- Undo/Redo mit zusammengefassten Transformationsaktionen
-- Download und Upload des Projektformats `.ncae.json`
-- verzögertes Browser-Autosave mit Wiederherstellungsdialog
-- GLB-Export der sichtbaren Szene oder der aktuellen Auswahl
-- Exportprüfung für leere Szenen, Polygonzahl, Bodenunterschreitung und vollständige Transparenz
-- Screenshot des Viewports als PNG
-- Statusleiste für Objektzahl, Auswahl, Dreiecke, Werkzeug, Snapping und Speicherstatus
+The editor provides a lightweight browser-based workspace for building reusable objects without requiring an external backend or cloud service.
 
-## Voraussetzungen
+Assets and editor data are handled locally and can be stored using JSON.
 
-- Node.js 22.12 oder neuer
-- npm 10 oder neuer
-- moderner Browser mit WebGL 2
+---
 
-## Installation
+## ✨ Features
+
+- 🧊 Create and edit common 3D primitives such as cubes, cylinders, spheres, prisms, stairs, and building elements.
+- ↔️ Move, rotate, and scale objects directly inside the 3D viewport.
+- 🎨 Paint individual object surfaces using a dedicated face-based painting system.
+- 🟨 Use the integrated **Apple Cutter** grid system for consistent modular subdivisions and snapping.
+- 🧲 Snap objects using the world grid and dedicated form-based snap points.
+- 🗂️ Organise objects using the object list and grouping tools.
+- 📋 Edit object properties, dimensions, materials, colours, roughness, metallic values, and transparency.
+- 🖱️ Multi-select objects using keyboard controls or the selection area.
+- 📱 Dedicated touch controls for Android, with the mobile version primarily designed and optimized for tablets.
+- 💾 Store project and editor information locally using JSON.
+- 🔄 Desktop and Android versions share the same editor and snapping logic.
+
+---
+
+## 📦 Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/NorthCore-Solutions/Asset-Editor-V.1.git
+```
+
+Open the project directory and install the dependencies:
 
 ```bash
 npm install
 ```
 
-## Entwicklung starten
+Start the local development server:
 
 ```bash
 npm run dev
 ```
 
-Danach im Browser öffnen:
+The editor can then be opened through the local address shown in the terminal.
+
+---
+
+## 🛠️ Development
+
+The Asset Editor is built using:
+
+- React
+- TypeScript
+- Vite
+- Three.js
+- React Three Fiber
+- Drei
+- Zustand
+- Vitest
+- Capacitor
+
+The application is designed around a shared codebase for desktop and Android.
+
+---
+
+## 🔒 Privacy & Security
+
+NorthCore Asset Editor is designed as a **local-first application**.
+
+The editor does not require an account and does not depend on a remote backend for normal editing.
+
+Project information and editor data remain on the user's device unless they are explicitly exported, transferred, or published by the user.
+
+No analytics or tracking services are required for the core editor functionality.
+
+---
+
+## 🧩 Apple Cutter System
+
+The integrated Apple Cutter model provides a consistent modular grid for object surfaces.
+
+A base length of `1.0` is divided using a maximum cell size of:
 
 ```text
-http://127.0.0.1:5173
+0.25
 ```
 
-## Tests
+Internal cells remain at `0.25`, while only the symmetrical outer remainder cells may become smaller when an object is scaled.
 
-```bash
-npm run test
-```
+This system forms the basis for surface subdivisions and form-to-form snapping.
 
-## Lint
+---
 
-```bash
-npm run lint
-```
+## 👤 Author
 
-## Produktions-Build
+**NorthCore Solutions**
 
-```bash
-npm run build
-```
+Developed as part of the NorthCore development environment for creating and preparing reusable 3D assets.
 
-Die Build-Ausgabe liegt anschließend unter `dist/`.
+---
 
-## Bedienung
+## 🚧 Project Status
 
-1. Links eine Grundform oder ein Gebäudeteil anklicken.
-2. Das Objekt im Viewport oder in der Objektliste auswählen.
-3. Werkzeug in der oberen Leiste wählen oder Tastenkürzel verwenden.
-4. Transformation und Material im rechten Panel präzisieren.
-5. Mehrere Objekte zu einem Asset zusammensetzen.
-6. Projekt über **Speichern** als `.ncae.json` sichern.
-7. Über **GLB-Export** die sichtbare Szene oder nur die Auswahl exportieren.
+The Asset Editor is under active development.
 
-## Tastenkürzel
-
-| Aktion | Kürzel |
-|---|---|
-| Kamera vorwärts/rückwärts | `W` / `S` bei fokussiertem Viewport |
-| Kamera links/rechts | `A` / `D` bei fokussiertem Viewport |
-| Kamera links/rechts drehen | `Q` / `E` bei fokussiertem Viewport |
-| Werkzeug Verschieben | `W` oder `G` außerhalb des fokussierten Viewports |
-| Werkzeug Drehen | `E` oder `R` außerhalb des fokussierten Viewports |
-| Werkzeug Skalieren | `S` außerhalb des fokussierten Viewports |
-| Löschen | `Entf` |
-| Duplizieren | `Strg + D` |
-| Rückgängig | `Strg + Z` |
-| Wiederholen | `Strg + Y` oder `Strg + Umschalt + Z` |
-| Auswahl fokussieren | `F` |
-| Auswahl aufheben | `Escape` |
-
-Die Kameratasten greifen, sobald der Viewport angeklickt wurde. Tastenkürzel werden in Eingabefeldern nicht ausgelöst.
-
-### Maussteuerung
-
-- Linke Maustaste: Kamera verschieben
-- Rechte Maustaste: Kamera drehen
-- Mittlere Maustaste: Kamera verschieben
-- Mausrad: zoomen
-
-## Projektformat
-
-Das Format ist reines JSON und führt keinen Code aus.
-
-```json
-{
-  "format": "northcore-asset-editor",
-  "version": 1,
-  "project": {
-    "name": "Testhaus",
-    "createdAt": "2026-08-02T00:00:00.000Z",
-    "updatedAt": "2026-08-02T00:00:00.000Z"
-  },
-  "scene": {
-    "background": "#11161A",
-    "gridVisible": true,
-    "axesVisible": true,
-    "gridSize": 1
-  },
-  "objects": []
-}
-```
-
-Unbekannte optionale Felder werden ignoriert. Pflichtfelder, Formatkennung, Version, Transformationen, Materialien und eindeutige Objekt-IDs werden validiert.
-
-## GLB-Export
-
-Der Export basiert auf `THREE.GLTFExporter`. Exportiert werden ausschließlich sichtbare Meshes inklusive Transformationen und Standardmaterialeigenschaften. Raster, Achsen, Kamera, Licht, TransformControls und interne Editor-Helfer werden nicht in die Datei aufgenommen.
-
-Die erzeugte Binärdatei kann in Blender über **Datei → Importieren → glTF 2.0** und in Godot direkt als `.glb` importiert werden.
-
-## Aktuelle Einschränkungen
-
-- keine Gruppenbearbeitung oder Parent-Child-Hierarchie in der Oberfläche
-- keine Texturen oder UV-Bearbeitung
-- keine booleschen Operationen
-- keine Vertex-, Edge- oder Face-Bearbeitung
-- keine Animation, Rigging oder Sculpting
-- keine direkte Godot-, Blender- oder TripoSR-Anbindung
-- Autosave ist browser- und profilgebunden
-- Screenshot-Export verwendet den aktuellen Hintergrund; transparenter PNG-Hintergrund ist noch nicht umgesetzt
-
-## Geplante Erweiterungen
-
-- Gruppen und Parent-Child-Hierarchien
-- weitere Architekturteile und parametrische Formen
-- Objekt-Pivot und präzisere lokale/globalen Transformationsmodi
-- optionaler transparenter Screenshot
-- Asset-Bibliothek und wiederverwendbare lokale Vorlagen
-- spätere, getrennte Godot-/Blender-Pipeline
-
-## Open-Source-Bibliotheken
-
-- React – MIT
-- Vite – MIT
-- TypeScript – Apache-2.0
-- Three.js – MIT
-- React Three Fiber – MIT
-- Drei – MIT
-- Zustand – MIT
-- Vitest – MIT
-- ESLint – MIT
-
-Es werden keine externen Backends, Cloud-Dienste, Konten, Cookies, Telemetrie oder kostenpflichtigen APIs verwendet.
+Core modelling, painting, object management, Android support, and the Apple Cutter system are implemented, while additional editor and export functionality will continue to be expanded.
