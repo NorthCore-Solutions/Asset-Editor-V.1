@@ -1,4 +1,4 @@
-# 🧱 NorthCore Asset Editor
+# 3D Asset Editor
 
 ## 📚 Overview
 
