@@ -1,4 +1,4 @@
-# 3D Asset Editor
+# 3D Asset Editor (Beta)
 
 ## 📚 Overview
 
@@ -31,7 +31,7 @@ Assets and editor data are handled locally and can be stored using JSON.
 Clone the repository:
 
 ```bash
-git clone https://github.com/NorthCore-Solutions/Asset-Editor-V.1.git
+git clone https://github.com/NorthCore-Solutions/NorthCore-3D-Asset-Editor.git
 ```
 
 Open the project directory and install the dependencies:
